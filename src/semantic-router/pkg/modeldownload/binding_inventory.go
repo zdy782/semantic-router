@@ -283,6 +283,7 @@ func (i *modelInventory) add(next ModelSpec) error {
 	if next.Revision == "" {
 		next.Revision = modelRevision(next.LocalPath, repo)
 	}
+	next.ExcludePatterns = modelDownloadExcludePatterns(next.LocalPath, repo, next.ExcludePatterns)
 	next.RequiredFiles = uniqueStrings(next.RequiredFiles)
 	i.specs[next.LocalPath] = next
 	return nil
@@ -315,4 +316,16 @@ func modelRevision(path, repoID string) string {
 		return model.Revision
 	}
 	return "main"
+}
+
+func modelDownloadExcludePatterns(path, repoID string, runtimePatterns []string) []string {
+	patterns := slices.Clone(runtimePatterns)
+	if model := config.GetModelByPath(path); model != nil && model.RepoID == repoID {
+		for _, pattern := range model.DownloadExcludePatterns {
+			if !slices.Contains(patterns, pattern) {
+				patterns = append(patterns, pattern)
+			}
+		}
+	}
+	return patterns
 }
