@@ -67,7 +67,7 @@ func NewFeedbackDetector(cfg *config.FeedbackDetectorConfig, models ...*classifi
 	if cfg.UseMmBERT32K {
 		adapter = "mmbert32k"
 	}
-	spec := runtime.localSpec("feedback_detector", cfg.ModelID, adapter, config.RemoteClassifierContractLabelDistribution, cfg.UseCPU)
+	spec := runtime.localSpec("feedback_detector", cfg.ModelID, adapter, config.RemoteClassifierContractLabelDistribution, cfg.UseCPU, cfg.MaxSequenceLength)
 	detector := &FeedbackDetector{
 		backend: &ownedSequenceBackend{runtime: runtime.runtime, spec: spec},
 		config:  cfg,
@@ -181,12 +181,8 @@ func (d *FeedbackDetector) Classify(ctx context.Context, text string) (*Feedback
 		return nil, fmt.Errorf("feedback detector not initialized")
 	}
 
-	if text == "" {
-		return &FeedbackResult{
-			FeedbackType:  FeedbackLabelSatisfied,
-			PolicyDefault: "empty_text",
-			Class:         0,
-		}, nil
+	if strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("feedback classification requires non-empty input")
 	}
 
 	result, err := admitModelInference(ctx, d.gate, admissionDeploymentFeedbackDetector, func() (tasks.ClassResultWithProbs, error) {

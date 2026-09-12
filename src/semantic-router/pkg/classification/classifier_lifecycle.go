@@ -244,6 +244,14 @@ func (c *Classifier) closeResources() error {
 	for _, name := range genericNames {
 		closeResource("generic classifier "+name, c.genericClassifiers[name])
 	}
+	safetyNames := make([]string, 0, len(c.safetyClassifiers))
+	for name := range c.safetyClassifiers {
+		safetyNames = append(safetyNames, name)
+	}
+	sort.Strings(safetyNames)
+	for _, name := range safetyNames {
+		closeResource("safety classifier "+name, c.safetyClassifiers[name])
+	}
 	return errors.Join(closeErrors...)
 }
 
@@ -265,6 +273,7 @@ func (c *Classifier) runtimeTasks() []modelruntime.Task {
 	appendTask("classifier.category", false, c.usesRoutingSignalType(config.SignalTypeDomain) && (c.IsCategoryEnabled() || c.IsMCPCategoryEnabled()), c.initializeConfiguredCategoryRuntime)
 	appendTask("classifier.jailbreak", false, c.usesJailbreakClassifier() && c.IsJailbreakEnabled(), c.initializeJailbreakClassifier)
 	appendTask("classifier.pii", false, c.usesRoutingSignalType(config.SignalTypePII) && c.IsPIIEnabled(), c.initializePIIClassifier)
+	appendTask("classifier.safety", false, c.usesRoutingSignalType(config.SignalTypeSafety), c.initializeSafetyClassifiers)
 	appendTask("classifier.keyword_embedding", false, c.IsKeywordEmbeddingClassifierEnabled(), c.initializeKeywordEmbeddingClassifier)
 	appendTask("classifier.fact_check", false, c.needsFactCheckModelForRuntime(), c.initializeFactCheckClassifier)
 	appendTask("classifier.hallucination", false, c.needsHallucinationDetectorForRuntime(), c.initializeHallucinationDetector)

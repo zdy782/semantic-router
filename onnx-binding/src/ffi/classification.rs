@@ -149,6 +149,17 @@ pub unsafe extern "C" fn init_sequence_classifier(
     model_path: *const c_char,
     use_gpu: bool,
 ) -> bool {
+    init_sequence_classifier_with_context(name, model_path, use_gpu, 0)
+}
+
+/// Initialize a classifier with an explicit input budget; 0 retains the default.
+#[no_mangle]
+pub extern "C" fn init_sequence_classifier_with_context(
+    name: *const c_char,
+    model_path: *const c_char,
+    use_gpu: bool,
+    max_sequence_length: usize,
+) -> bool {
     if name.is_null() || model_path.is_null() {
         eprintln!("Error: null pointer in init_sequence_classifier");
         return false;
@@ -174,7 +185,16 @@ pub unsafe extern "C" fn init_sequence_classifier(
         ClassifierExecutionProvider::Cpu
     };
 
-    match MmBertSequenceClassifier::load(&path_str, provider) {
+    let loaded = if max_sequence_length == 0 {
+        MmBertSequenceClassifier::load(&path_str, provider)
+    } else {
+        MmBertSequenceClassifier::load_with_max_sequence_length(
+            &path_str,
+            provider,
+            max_sequence_length,
+        )
+    };
+    match loaded {
         Ok(model) => {
             println!(
                 "INFO: Loaded sequence classifier '{}' from {}",
@@ -214,6 +234,17 @@ pub unsafe extern "C" fn init_token_classifier(
     model_path: *const c_char,
     use_gpu: bool,
 ) -> bool {
+    init_token_classifier_with_context(name, model_path, use_gpu, 0)
+}
+
+/// Initialize a classifier with an explicit input budget; 0 retains the default.
+#[no_mangle]
+pub extern "C" fn init_token_classifier_with_context(
+    name: *const c_char,
+    model_path: *const c_char,
+    use_gpu: bool,
+    max_sequence_length: usize,
+) -> bool {
     if name.is_null() || model_path.is_null() {
         eprintln!("Error: null pointer in init_token_classifier");
         return false;
@@ -239,7 +270,16 @@ pub unsafe extern "C" fn init_token_classifier(
         ClassifierExecutionProvider::Cpu
     };
 
-    match MmBertTokenClassifier::load(&path_str, provider) {
+    let loaded = if max_sequence_length == 0 {
+        MmBertTokenClassifier::load(&path_str, provider)
+    } else {
+        MmBertTokenClassifier::load_with_max_sequence_length(
+            &path_str,
+            provider,
+            max_sequence_length,
+        )
+    };
+    match loaded {
         Ok(model) => {
             println!(
                 "INFO: Loaded token classifier '{}' from {}",

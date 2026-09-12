@@ -280,6 +280,9 @@ func (i *modelInventory) add(next ModelSpec) error {
 		next.CheckONNX = previous.CheckONNX || next.CheckONNX
 		next.Strict = previous.Strict || next.Strict
 	}
+	if next.Revision == "" {
+		next.Revision = modelRevision(next.LocalPath, repo)
+	}
 	next.RequiredFiles = uniqueStrings(next.RequiredFiles)
 	i.specs[next.LocalPath] = next
 	return nil
@@ -303,4 +306,13 @@ func intersectStrings(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// Explicit bindings retain their selected revision. Implicit built-in modules
+// use the registry pin only when the local path still names that repository.
+func modelRevision(path, repoID string) string {
+	if model := config.GetModelByPath(path); model != nil && model.RepoID == repoID && model.Revision != "" {
+		return model.Revision
+	}
+	return "main"
 }

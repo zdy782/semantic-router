@@ -85,11 +85,14 @@ func isModelPathField(fieldName string) bool {
 
 // isModelDirectory checks if a path looks like a model directory (not a file)
 func isModelDirectory(path string) bool {
-	// If the basename has a file extension, treat it as a file rather than a model directory.
-	if filepath.Ext(filepath.Base(path)) != "" {
-		return false
-	}
-	return true
+	// Versioned model directories can contain dots (for example Vela-1.0).
+	// Only known artifact extensions identify a file; the model registry owns
+	// whether a directory is actually provisionable.
+	ext := strings.ToLower(filepath.Ext(filepath.Base(path)))
+	return !slices.Contains([]string{
+		".json", ".yaml", ".yml", ".txt", ".bin", ".pt", ".pth",
+		".safetensors", ".onnx", ".data", ".xml", ".model", ".gguf",
+	}, ext)
 }
 
 // embeddingModelWeightFiles are the files the candle embedding runtime loads to bring a

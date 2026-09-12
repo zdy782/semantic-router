@@ -289,6 +289,7 @@ func replaySignalState(ctx *RequestContext) routerreplay.Signal {
 		Modality:      ctx.VSRMatchedModality,
 		Authz:         ctx.VSRMatchedAuthz,
 		Jailbreak:     ctx.VSRMatchedJailbreak,
+		Safety:        ctx.VSRMatchedSafety,
 		PII:           ctx.VSRMatchedPII,
 		KB:            ctx.VSRMatchedKB,
 		Conversation:  ctx.VSRMatchedConversation,

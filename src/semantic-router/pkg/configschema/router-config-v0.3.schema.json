@@ -432,6 +432,9 @@
     },
     "CanonicalCategoryModule": {
       "properties": {
+        "max_sequence_length": {
+          "type": "integer"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -588,6 +591,9 @@
     },
     "CanonicalFactCheckModule": {
       "properties": {
+        "max_sequence_length": {
+          "type": "integer"
+        },
         "model_id": {
           "type": "string"
         },
@@ -609,6 +615,9 @@
     },
     "CanonicalFeedbackDetectorModule": {
       "properties": {
+        "max_sequence_length": {
+          "type": "integer"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -771,6 +780,9 @@
     },
     "CanonicalModelModules": {
       "properties": {
+        "safety": {
+          "$ref": "#/$defs/SafetyModelsConfig"
+        },
         "prompt_compression": {
           "$ref": "#/$defs/PromptCompressionConfig"
         },
@@ -798,6 +810,9 @@
     },
     "CanonicalPIIModule": {
       "properties": {
+        "max_sequence_length": {
+          "type": "integer"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -857,6 +872,9 @@
       "properties": {
         "backend": {
           "$ref": "#/$defs/RemoteClassifierBackend"
+        },
+        "max_sequence_length": {
+          "type": "integer"
         },
         "enabled": {
           "type": "boolean"
@@ -1249,6 +1267,12 @@
           },
           "type": "array"
         },
+        "safety": {
+          "items": {
+            "$ref": "#/$defs/SafetyRule"
+          },
+          "type": "array"
+        },
         "hallucination": {
           "items": {
             "$ref": "#/$defs/HallucinationRule"
@@ -1333,6 +1357,12 @@
     },
     "CanonicalSystemModels": {
       "properties": {
+        "safety": {
+          "type": "string"
+        },
+        "hazard": {
+          "type": "string"
+        },
         "prompt_guard": {
           "type": "string"
         },
@@ -2579,6 +2609,9 @@
     },
     "HNSWConfig": {
       "properties": {
+        "full_context": {
+          "type": "boolean"
+        },
         "backend": {
           "type": "string"
         },
@@ -3775,6 +3808,9 @@
     },
     "ModalityClassifierConfig": {
       "properties": {
+        "max_sequence_length": {
+          "type": "integer"
+        },
         "model_path": {
           "type": "string"
         },
@@ -4485,6 +4521,7 @@
             "modality",
             "authz",
             "jailbreak",
+            "safety",
             "pii",
             "kb",
             "conversation",
@@ -5826,6 +5863,7 @@
             "pii",
             "preference",
             "reask",
+            "safety",
             "structure",
             "user_feedback",
             "projection"
@@ -5859,6 +5897,93 @@
             "$ref": "#/$defs/RuleNode"
           },
           "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SafetyHazardRule": {
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "categories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SafetyModelsConfig": {
+      "properties": {
+        "safety": {
+          "$ref": "#/$defs/SequenceHeadModelConfig"
+        },
+        "hazard": {
+          "$ref": "#/$defs/SequenceHeadModelConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SafetyRule": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unsafe_labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "threshold": {
+          "type": "number"
+        },
+        "hazard": {
+          "$ref": "#/$defs/SafetyHazardRule"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SequenceHeadModelConfig": {
+      "properties": {
+        "model_id": {
+          "type": "string"
+        },
+        "model_ref": {
+          "type": "string"
+        },
+        "use_cpu": {
+          "type": "boolean"
+        },
+        "max_sequence_length": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
@@ -6823,6 +6948,14 @@
         "schema_ref": "#/$defs/JailbreakRule"
       },
       {
+        "type": "safety",
+        "display_name": "Safety",
+        "collection": "safety",
+        "observation_key": "safety",
+        "decision_referenceable": true,
+        "schema_ref": "#/$defs/SafetyRule"
+      },
+      {
         "type": "hallucination",
         "display_name": "Hallucination",
         "collection": "hallucination",
@@ -7142,6 +7275,7 @@
       "modality",
       "authz",
       "jailbreak",
+      "safety",
       "pii",
       "kb",
       "conversation",
@@ -7319,6 +7453,16 @@
         "path": [
           "model_catalog",
           "kbs"
+        ]
+      },
+      {
+        "key": "safety",
+        "layer": "model_catalog",
+        "display_name": "Safety",
+        "path": [
+          "model_catalog",
+          "modules",
+          "safety"
         ]
       },
       {

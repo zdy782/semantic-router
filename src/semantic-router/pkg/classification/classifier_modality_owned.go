@@ -49,11 +49,11 @@ func (b *classifierOptionBuilder) buildModalityClassifierOption() (option, error
 	if !explicit && (md.Classifier == nil || md.Classifier.ModelPath == "") {
 		return nil, nil
 	}
-	path, useCPU := "", true
+	path, useCPU, limit := "", true, 0
 	if md.Classifier != nil {
-		path, useCPU = md.Classifier.ModelPath, md.Classifier.UseCPU
+		path, useCPU, limit = md.Classifier.ModelPath, md.Classifier.UseCPU, md.Classifier.MaxSequenceLength
 	}
-	spec := models.localSpec("modality_detector", path, "mmbert32k", config.RemoteClassifierContractLabelDistribution, useCPU)
+	spec := models.localSpec("modality_detector", path, "mmbert32k", config.RemoteClassifierContractLabelDistribution, useCPU, limit)
 	handle, err := models.runtime.Sequence(context.Background(), spec)
 	if err != nil {
 		if md.GetMethod() == config.ModalityDetectionHybrid && !explicit {
