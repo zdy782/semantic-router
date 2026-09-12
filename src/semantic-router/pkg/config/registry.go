@@ -80,7 +80,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M",
-		Revision:                "eae5babaff055c3eb49f3dea473a4f38dbf4d624",
+		Revision:                "225bb8021e0e7839e6045b253caadcb19e96bb25",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M"},
 		Purpose:                 PurposeEncoder,
@@ -93,7 +93,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-FactCheck",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck",
-		Revision:                "dce96a81a17f6ce181e4ad57768a405b3eba8ce2",
+		Revision:                "e4869536922d693c9213f68ecf7b3c9ff610f3e2",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-FactCheck"},
 		Purpose:                 PurposeHallucinationSentinel,
@@ -106,7 +106,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Domain",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Domain",
-		Revision:                "7d25677dacae356aa9149b06905fd2b93c06021d",
+		Revision:                "938773f3f7b67392c3aba6f2a344b251de881ecf",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Domain"},
 		Purpose:                 PurposeDomainClassification,
@@ -119,7 +119,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-PII",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-PII",
-		Revision:                "162c444990d6ec880d785e783f485a9c89836e04",
+		Revision:                "fe0d5700d4498110fd2a6de71243d95dee4ca657",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-PII"},
 		Purpose:                 PurposePIIDetection,
@@ -132,7 +132,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Modality",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Modality",
-		Revision:                "49c41d4b068bd4f574c29dd5388a72ec1fa7388d",
+		Revision:                "994b999048f349bfb62fc92578db86ca4e853205",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Modality"},
 		Purpose:                 PurposeModalityDetection,
@@ -145,7 +145,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Feedback",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback",
-		Revision:                "491d57960997e787e9977fb5166fc371b36b5e5c",
+		Revision:                "e7a4f126b4b19810a4dd90ad2019f86acd32e920",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Feedback"},
 		Purpose:                 PurposeFeedbackDetection,
@@ -154,6 +154,19 @@ var DefaultModelRegistry = []ModelSpec{
 		NumClasses:              5,
 		MaxContextLength:        32768,
 		Tags:                    []string{"vela", "feedback", "classification", "merged", "multilingual", "long-context"},
+	},
+	{
+		LocalPath:               "models/Vela-1.0-Encoder-307M-Embedding",
+		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding",
+		Revision:                "5e639f1a709168f6f1cf69cd519f3aa9221bfbef",
+		DownloadExcludePatterns: velaTrainingArtifactPatterns,
+		Aliases:                 []string{"Vela-1.0-Encoder-307M-Embedding"},
+		Purpose:                 PurposeEmbedding,
+		Description:             "Find relevant multilingual context with flexible embedding dimensions and encoder depths. Supports up to 32K input; retrieval quality varies with representation size.",
+		ParameterSize:           "307M encoder",
+		EmbeddingDim:            768,
+		MaxContextLength:        32768,
+		Tags:                    []string{"vela", "embedding", "multilingual", "long-context", "2d-matryoshka", "early-exit"},
 	},
 	// Domain/Intent Classification
 	{

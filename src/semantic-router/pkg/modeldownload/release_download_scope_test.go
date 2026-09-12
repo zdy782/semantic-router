@@ -90,3 +90,41 @@ func TestReleaseExclusionsComposeWithRuntimeAndDoNotLaunderMissingWeights(t *tes
 		t.Fatal(err)
 	}
 }
+
+func TestVelaEmbeddingReleasePreservesCompiledRuntimeArtifacts(t *testing.T) {
+	const path = "models/Vela-1.0-Encoder-307M-Embedding"
+	cfg := newEmbeddingOnlyConfig()
+	cfg.MoMRegistry = config.ToLegacyRegistry()
+	cfg.MmBertModelPath = path
+	cfg.EmbeddingModels.EmbeddingConfig.TargetLayer = 6
+	specs, err := BuildModelSpecs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := findSpecByPath(specs, path)
+	if !ok {
+		t.Fatal("missing Vela embedding download")
+	}
+	for _, name := range []string{"reproduction/intermediates/model.safetensors", "reproduction/exports/layer-22/model.onnx"} {
+		if !revisionArtifactExcluded(name, spec.ExcludePatterns) {
+			t.Fatalf("optional training artifact would be downloaded: %s", name)
+		}
+	}
+	want := []string{"config.json", "tokenizer.json"}
+	if compiledEmbeddingRuntime == "onnx" {
+		want = append(want, "onnx/layer-22/model.onnx", "onnx/layer-22/model.onnx.data", "onnx/layer-6/model.onnx", "onnx/layer-6/model.onnx.data")
+		if revisionArtifactExcluded("onnx/layer-6/model_fa_fp16.onnx", spec.ExcludePatterns) {
+			t.Fatal("AMD optimized graph was excluded")
+		}
+	} else {
+		want = append(want, "model.safetensors")
+		if !revisionArtifactExcluded("onnx/layer-6/model.onnx", spec.ExcludePatterns) {
+			t.Fatal("Candle-only download retained unused ONNX exports")
+		}
+	}
+	for _, name := range want {
+		if !slices.Contains(spec.RequiredFiles, name) || revisionArtifactExcluded(name, spec.ExcludePatterns) {
+			t.Fatalf("compiled runtime artifact is missing or excluded: %s", name)
+		}
+	}
+}
