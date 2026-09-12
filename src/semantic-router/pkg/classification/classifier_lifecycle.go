@@ -281,6 +281,7 @@ func (c *Classifier) runtimeTasks() []modelruntime.Task {
 	// startup rather than silently serve unverified cache hits.
 	appendTask("classifier.semantic_cache_nli", false, c.needsSemanticCacheNLIForRuntime(), c.initializeSemanticCacheNLI)
 	appendTask("classifier.feedback", false, c.needsFeedbackModelForRuntime(), c.initializeFeedbackDetector)
+
 	appendTask("classifier.preference", true, c.IsPreferenceClassifierEnabled(), c.initializePreferenceClassifier)
 	appendTask("classifier.language", true, len(c.Config.LanguageRules) > 0, c.initializeLanguageClassifier)
 
