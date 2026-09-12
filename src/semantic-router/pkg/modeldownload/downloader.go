@@ -140,17 +140,8 @@ func DownloadModelWithProgressContext(ctx context.Context, spec ModelSpec, confi
 		if !complete {
 			return fmt.Errorf("downloaded artifact %s is missing required provider files", spec.LocalPath)
 		}
-		if immutableRevision(spec.Revision) {
-			matched, err := cachedRevisionMatches(spec)
-			if err != nil {
-				return err
-			}
-			if !matched {
-				return fmt.Errorf("downloaded artifact %q does not have a consistent HF snapshot at %q; use a separate empty directory", spec.LocalPath, spec.Revision)
-			}
-		}
 	}
-	if err := recordModelRevision(spec); err != nil {
+	if err := recordDownloadedModelRevision(spec); err != nil {
 		return fmt.Errorf("record downloaded model revision: %w", err)
 	}
 	logging.Infof("Successfully downloaded model: %s", spec.LocalPath)
