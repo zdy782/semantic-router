@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	candle_binding "github.com/vllm-project/semantic-router/candle-binding"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/tasks"
 )
 
 type contextCapturingCategory struct {
@@ -14,7 +14,7 @@ type contextCapturingCategory struct {
 	texts []string
 }
 
-func (m *contextCapturingCategory) ClassifyWithProbabilities(ctx context.Context, text string) (candle_binding.ClassResultWithProbs, error) {
+func (m *contextCapturingCategory) ClassifyWithProbabilities(ctx context.Context, text string) (tasks.ClassResultWithProbs, error) {
 	m.texts = append(m.texts, text)
 	return m.MockCategoryInference.ClassifyWithProbabilities(ctx, text)
 }
@@ -77,6 +77,17 @@ func TestNativeLongContextPIIUsesOnePassWithOriginalByteOffsets(t *testing.T) {
 	for _, span := range got {
 		if text[span.Start:span.End] != email {
 			t.Fatalf("entity offsets do not index the original UTF-8 text: %+v", span)
+		}
+	}
+}
+
+func TestOpenVINORejectsBudgetsItCannotEnforce(t *testing.T) {
+	t.Setenv("EMBEDDING_BACKEND_OVERRIDE", "openvino")
+	for _, limit := range []int{1, 128, 256, 513, 32768} {
+		initializer := &MmBERT32KCategoryInitializerImpl{maxSequenceLength: limit}
+		err := initializer.Init("unused-model-path", true, 2)
+		if err == nil || !strings.Contains(err.Error(), "only the default 512-token budget") {
+			t.Fatalf("limit=%d did not fail before model loading: %v", limit, err)
 		}
 	}
 }
