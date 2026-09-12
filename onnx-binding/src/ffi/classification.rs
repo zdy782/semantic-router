@@ -142,19 +142,24 @@ fn get_tok_classifiers() -> &'static Mutex<HashMap<String, MmBertTokenClassifier
 /// true on success, false on error
 ///
 /// # Safety
-/// `name` and `model_path` must be null or point to live NUL-terminated strings for the call.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn init_sequence_classifier(
     name: *const c_char,
     model_path: *const c_char,
     use_gpu: bool,
 ) -> bool {
-    init_sequence_classifier_with_context(name, model_path, use_gpu, 0)
+    unsafe { init_sequence_classifier_with_context(name, model_path, use_gpu, 0) }
 }
 
 /// Initialize a classifier with an explicit input budget; 0 retains the default.
-#[no_mangle]
-pub extern "C" fn init_sequence_classifier_with_context(
+///
+/// # Safety
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call.
+#[cfg_attr(feature = "legacy-ffi", no_mangle)]
+pub unsafe extern "C" fn init_sequence_classifier_with_context(
     name: *const c_char,
     model_path: *const c_char,
     use_gpu: bool,
@@ -227,19 +232,24 @@ pub extern "C" fn init_sequence_classifier_with_context(
 /// true on success, false on error
 ///
 /// # Safety
-/// `name` and `model_path` must be null or point to live NUL-terminated strings for the call.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn init_token_classifier(
     name: *const c_char,
     model_path: *const c_char,
     use_gpu: bool,
 ) -> bool {
-    init_token_classifier_with_context(name, model_path, use_gpu, 0)
+    unsafe { init_token_classifier_with_context(name, model_path, use_gpu, 0) }
 }
 
 /// Initialize a classifier with an explicit input budget; 0 retains the default.
-#[no_mangle]
-pub extern "C" fn init_token_classifier_with_context(
+///
+/// # Safety
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call.
+#[cfg_attr(feature = "legacy-ffi", no_mangle)]
+pub unsafe extern "C" fn init_token_classifier_with_context(
     name: *const c_char,
     model_path: *const c_char,
     use_gpu: bool,
@@ -304,7 +314,8 @@ pub extern "C" fn init_token_classifier_with_context(
 /// Check if a classifier is loaded
 ///
 /// # Safety
-/// `name` must be null or point to a live NUL-terminated string for the call.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn is_classifier_loaded(name: *const c_char) -> bool {
     if name.is_null() {
@@ -339,8 +350,9 @@ pub unsafe extern "C" fn is_classifier_loaded(name: *const c_char) -> bool {
 /// 0 on success, -1 on error
 ///
 /// # Safety
-/// Input pointers must be null or live NUL-terminated strings. A non-null `result` must point to
-/// writable storage for one result, with any prior owned contents already freed.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call. Non-null `result` must be aligned, writable,
+/// exclusively accessible, and contain no unfreed result allocations.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn classify_text(
     classifier_name: *const c_char,
@@ -428,8 +440,9 @@ pub unsafe extern "C" fn classify_text(
 /// 0 on success, -1 on error
 ///
 /// # Safety
-/// Input pointers must be null or live NUL-terminated strings. A non-null `result` must point to
-/// writable storage for one result, with any prior owned contents already freed.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call. Non-null `result` must be aligned, writable,
+/// exclusively accessible, and contain no unfreed result allocations.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn detect_pii(
     classifier_name: *const c_char,
@@ -536,8 +549,9 @@ pub unsafe extern "C" fn detect_pii(
 /// Free classification result
 ///
 /// # Safety
-/// `result` must be null or uniquely reference a result returned by this library. Its nested
-/// allocations must remain unmodified and must not have been freed separately.
+/// A non-null `result` must be aligned and exclusively accessible. It must be a
+/// zero-initialized value or a result returned by this library, with its owned
+/// pointers and lengths unchanged and no outstanding aliases to those allocations.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn free_classification_result(result: *mut ClassificationResultFFI) {
     if result.is_null() {
@@ -565,8 +579,9 @@ pub unsafe extern "C" fn free_classification_result(result: *mut ClassificationR
 /// Free PII result
 ///
 /// # Safety
-/// `result` must be null or uniquely reference a result returned by this library. Its nested
-/// allocations must remain unmodified and must not have been freed separately.
+/// A non-null `result` must be aligned and exclusively accessible. It must be a
+/// zero-initialized value or a result returned by this library, with its owned
+/// pointers and lengths unchanged and no outstanding aliases to those allocations.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn free_pii_result(result: *mut PIIResultFFI) {
     if result.is_null() {
@@ -615,9 +630,11 @@ pub unsafe extern "C" fn free_pii_result(result: *mut PIIResultFFI) {
 /// 0 on success, -1 on error
 ///
 /// # Safety
-/// Non-null input strings must remain NUL-terminated and live for the call. For positive
-/// `num_texts`, `texts` must contain that many readable pointers and `results` that many writable
-/// result slots with any prior owned contents freed.
+/// All non-null string arguments must point to readable, NUL-terminated C strings
+/// for the duration of this call. Non-null `texts` and `results` must point
+/// to arrays of at least `num_texts` elements. Input strings must remain readable;
+/// output elements must be aligned, exclusively writable, and contain no unfreed
+/// result allocations.
 #[cfg_attr(feature = "legacy-ffi", no_mangle)]
 pub unsafe extern "C" fn classify_batch(
     classifier_name: *const c_char,
