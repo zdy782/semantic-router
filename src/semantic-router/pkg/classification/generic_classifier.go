@@ -20,6 +20,9 @@ const (
 type labelClassification struct {
 	Scores    map[string]float64
 	Rationale string
+	// ScoreWindows is used by explicit native window scans. Each entry is a
+	// complete distribution; consumers must not merge class-wise maxima.
+	ScoreWindows []map[string]float64
 }
 
 type labelClassifier interface {

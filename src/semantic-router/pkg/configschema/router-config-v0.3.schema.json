@@ -5984,6 +5984,21 @@
         },
         "max_sequence_length": {
           "type": "integer"
+        },
+        "window": {
+          "$ref": "#/$defs/SequenceHeadWindowConfig"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "SequenceHeadWindowConfig": {
+      "properties": {
+        "size": {
+          "type": "integer"
+        },
+        "overlap": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
