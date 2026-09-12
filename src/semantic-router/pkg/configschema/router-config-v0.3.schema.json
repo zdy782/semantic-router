@@ -876,6 +876,9 @@
         "max_sequence_length": {
           "type": "integer"
         },
+        "window": {
+          "$ref": "#/$defs/SequenceHeadWindowConfig"
+        },
         "enabled": {
           "type": "boolean"
         },

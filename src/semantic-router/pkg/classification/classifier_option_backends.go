@@ -111,6 +111,14 @@ func (b *classifierOptionBuilder) addMCPCategoryClassifier() {
 }
 
 func buildJailbreakDependencies(cfg *config.RouterConfig, jailbreakMapping *JailbreakMapping, models ...*classifierModelRuntime) (JailbreakInitializer, SequenceClassifierBackend, error) {
+	if cfg.PromptGuard.Window != nil {
+		if jailbreakMapping == nil {
+			// No reachable model consumer loaded a mapping for this recipe.
+			return nil, nil, nil
+		}
+		backend, err := newWindowedJailbreakBackend(cfg.PromptGuard, jailbreakMapping)
+		return backend, backend, err
+	}
 	if len(models) > 0 && cfg.PromptGuard.Protocol == "" && cfg.PromptGuard.Backend == nil {
 		adapter := cfg.PromptGuard.Variant
 		if adapter == "" || adapter == config.PromptGuardVariantCandle {

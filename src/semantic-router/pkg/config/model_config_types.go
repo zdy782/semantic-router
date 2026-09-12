@@ -171,14 +171,15 @@ func (pc PromptCompressionConfig) SkipSignalsSet() map[string]bool {
 
 type PromptGuardConfig struct {
 	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
-	MaxSequenceLength    int                      `yaml:"max_sequence_length,omitempty"`
-	Backend              *RemoteClassifierBackend `yaml:"backend,omitempty"`
-	Enabled              bool                     `yaml:"enabled"`
-	ModelID              string                   `yaml:"model_id"`
-	Threshold            float32                  `yaml:"threshold"`
-	UseCPU               bool                     `yaml:"use_cpu"`
-	JailbreakMappingPath string                   `yaml:"jailbreak_mapping_path"`
-	PositiveLabels       []string                 `yaml:"positive_labels,omitempty"`
+	MaxSequenceLength    int                       `yaml:"max_sequence_length,omitempty"`
+	Backend              *RemoteClassifierBackend  `yaml:"backend,omitempty"`
+	Window               *SequenceHeadWindowConfig `yaml:"window,omitempty"`
+	Enabled              bool                      `yaml:"enabled"`
+	ModelID              string                    `yaml:"model_id"`
+	Threshold            float32                   `yaml:"threshold"`
+	UseCPU               bool                      `yaml:"use_cpu"`
+	JailbreakMappingPath string                    `yaml:"jailbreak_mapping_path"`
+	PositiveLabels       []string                  `yaml:"positive_labels,omitempty"`
 
 	// Variant selects a local Candle-backed model variant. Mutually
 	// exclusive with Protocol. Defaults to PromptGuardVariantMmBERT32K when

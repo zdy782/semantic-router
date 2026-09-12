@@ -117,7 +117,7 @@ func isJailbreakRiskAboveThreshold(mapping *JailbreakMapping, positiveLabels []s
 // result.
 func (c *Classifier) scanJailbreakChunks(ctx context.Context, text string) (result SequenceClassificationResult, scanned bool, lastErr error) {
 	bestRisk := float32(-1)
-	for _, chunk := range c.jailbreakInputs(text) {
+	for _, chunk := range c.jailbreakModelInputs(text) {
 		chunkResult, err := c.jailbreakInference.Classify(ctx, chunk)
 		if err == nil {
 			err = validateJailbreakDistribution(c.JailbreakMapping, c.Config.PromptGuard.PositiveLabels, chunkResult)
