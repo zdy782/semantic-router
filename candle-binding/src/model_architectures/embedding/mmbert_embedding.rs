@@ -30,7 +30,7 @@
 
 use crate::core::{config_errors, from_candle_error, UnifiedError, UnifiedResult};
 use crate::model_architectures::attention::chunked_sdpa::{
-    chunked_sdpa, prepare_padding_mask, ChunkedSdpaConfig, ATTN_QUERY_BLOCK,
+    chunked_sdpa_cpu_softmax, prepare_padding_mask, ChunkedSdpaConfig, ATTN_QUERY_BLOCK,
 };
 use crate::model_architectures::embedding::pooling::mean_pool;
 use crate::model_architectures::embedding::representation_contract::IntermediateNormalization;
@@ -319,7 +319,7 @@ impl MmBertAttention {
             scale: (self.attention_head_size as f64).powf(-0.5),
             q_offset: 0,
         };
-        let xs = chunked_sdpa(&q, &k, &v, Some(pad_mask), &cfg)?; // (b, heads, seq, hd)
+        let xs = chunked_sdpa_cpu_softmax(&q, &k, &v, Some(pad_mask), &cfg)?; // (b, heads, seq, hd)
 
         let xs = xs.transpose(1, 2)?.reshape((b, seq_len, d))?;
         xs.apply(&self.proj)
