@@ -262,6 +262,7 @@ SIGNAL complexity evidence_synthesis {
 
 SIGNAL pii pii_strict {
   threshold: 0.85
+  pii_types_allowed: ["GPE"]
 }
 
 PROJECTION score security_risk_score {

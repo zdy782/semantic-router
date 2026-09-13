@@ -830,6 +830,7 @@ RECIPE privacy-first (description = "Keep every request local, using recipe-scop
 
   SIGNAL pii unified_privacy_pii_strict {
     threshold: 0.7
+    pii_types_allowed: ["GPE"]
     description: "Detect personally identifiable information that must remain local."
   }
 

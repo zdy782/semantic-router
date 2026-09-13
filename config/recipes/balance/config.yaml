@@ -185,6 +185,7 @@ routing:
       description: Understand image-bearing requests with the dedicated visual-language model.
       modelRefs:
         - model: local/omni
+          use_reasoning: false
       name: omni
       priority: 300
       rules:
@@ -271,8 +272,6 @@ routing:
                     type: keyword
                   - name: reference_heavy_markers
                     type: keyword
-                  - name: needs_fact_check
-                    type: fact_check
                   - name: architecture_markers
                     type: keyword
                   - name: agentic_request_markers
@@ -316,8 +315,16 @@ routing:
                   - conditions:
                       - name: balance_reasoning
                         type: projection
-                      - name: math_task:medium
-                        type: complexity
+                      - conditions:
+                          - name: math_task:medium
+                            type: complexity
+                          - conditions:
+                              - name: balance_medium
+                                type: projection
+                              - name: balance_complex
+                                type: projection
+                            operator: OR
+                        operator: AND
                     operator: OR
                 operator: AND
               - conditions:
@@ -373,8 +380,6 @@ routing:
                     type: keyword
                   - name: reference_heavy_markers
                     type: keyword
-                  - name: needs_fact_check
-                    type: fact_check
                   - name: architecture_markers
                     type: keyword
                   - name: agentic_request_markers
@@ -600,8 +605,6 @@ routing:
                 type: projection
               - name: verification_markers
                 type: keyword
-              - name: needs_fact_check
-                type: fact_check
               - name: reference_heavy_markers
                 type: keyword
               - name: evidence_synthesis:hard
@@ -665,6 +668,8 @@ routing:
                 type: embedding
               - name: history_topic_markers
                 type: keyword
+              - name: research_synthesis
+                type: embedding
             operator: OR
           - conditions:
               - name: verification_required
@@ -673,8 +678,6 @@ routing:
                 type: keyword
               - name: reference_heavy_markers
                 type: keyword
-              - name: needs_fact_check
-                type: fact_check
             operator: OR
           - conditions:
               - conditions:
@@ -728,8 +731,6 @@ routing:
                     type: keyword
                   - name: reference_heavy_markers
                     type: keyword
-                  - name: needs_fact_check
-                    type: fact_check
                   - name: code_request_markers
                     type: keyword
                 operator: OR
@@ -786,8 +787,18 @@ routing:
                         type: context
                       - name: history_topic_markers
                         type: keyword
-                      - name: evidence_synthesis:medium
-                        type: complexity
+                      - conditions:
+                          - name: evidence_synthesis:medium
+                            type: complexity
+                          - conditions:
+                              - name: business_analysis
+                                type: embedding
+                              - name: history_explainer
+                                type: embedding
+                              - name: psychology_support
+                                type: embedding
+                            operator: OR
+                        operator: AND
                     operator: OR
                 operator: AND
             operator: OR
@@ -795,8 +806,6 @@ routing:
               - conditions:
                   - name: verification_required
                     type: projection
-                  - name: needs_fact_check
-                    type: fact_check
                   - name: verification_markers
                     type: keyword
                   - name: reference_heavy_markers
@@ -869,8 +878,6 @@ routing:
                     type: embedding
                   - name: verification_required
                     type: projection
-                  - name: needs_fact_check
-                    type: fact_check
                   - name: verification_markers
                     type: keyword
                   - name: reference_heavy_markers
@@ -969,8 +976,6 @@ routing:
                       - conditions:
                           - name: verification_required
                             type: projection
-                          - name: needs_fact_check
-                            type: fact_check
                           - name: verification_markers
                             type: keyword
                           - name: reference_heavy_markers
@@ -1110,15 +1115,6 @@ routing:
       tier: 15
   modelCards:
     - capabilities:
-        - chat
-        - image_understanding
-        - multimodal
-        - omni
-        - text
-        - vision
-      modality: omni
-      name: local/omni
-    - capabilities:
         - legal_analysis
         - policy_review
         - high_risk_review
@@ -1155,6 +1151,15 @@ routing:
         - tier:complex
         - cost:upper_mid
         - specialty:complex_generalist
+    - capabilities:
+        - chat
+        - image_understanding
+        - multimodal
+        - omni
+        - text
+        - vision
+      modality: omni
+      name: local/omni
     - capabilities:
         - reasoning
         - proofs
@@ -1585,13 +1590,6 @@ routing:
         method: weighted_sum
         name: urgency_pressure
   signals:
-    conversation:
-      - description: Request contains at least one image content part.
-        feature:
-          source:
-            type: image_content
-          type: exists
-        name: balance_has_images
     complexity:
       - description: General difficulty boundary for simple answers versus synthesis-heavy reasoning.
         easy:
@@ -1746,6 +1744,13 @@ routing:
       - max_tokens: 256K
         min_tokens: 8K
         name: long_context
+    conversation:
+      - description: Request contains at least one image content part.
+        feature:
+          source:
+            type: image_content
+          type: exists
+        name: balance_has_images
     domains:
       - description: Programming, software systems, debugging, APIs, and infrastructure.
         name: computer science
@@ -1924,7 +1929,7 @@ routing:
         name: premium_legal_analysis
         threshold: 0.8
     fact_check:
-      - description: Narrow factual-verification route for requests that explicitly ask for evidence or source checking.
+      - description: Requests that depend on external factual knowledge; verification routing combines this evidence with task and source requirements.
         name: needs_fact_check
     keywords:
       - case_sensitive: false
@@ -2056,6 +2061,12 @@ routing:
           - 简单解释
           - 用一句话
           - 直接回答
+          - 只写答案
+          - 只需答案
+          - 只要答案
+          - 仅给答案
+          - 只输出答案
+          - 仅输出答案
         name: simple_request_markers
         operator: OR
       - case_sensitive: false

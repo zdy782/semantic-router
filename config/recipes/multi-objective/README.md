@@ -70,6 +70,13 @@ not attempt to merge independent tool trajectories.
 
 ## Data handling and safety
 
+The PII rule allows GPE entities such as cities and countries, so ordinary
+geography does not trigger privacy containment. Other detected entity types,
+including email and street addresses, remain restricted at the configured
+threshold. This is a type-level allowance: a person's city is also allowed by
+this PII rule. It does not distinguish public geography from personal location
+disclosure; explicit private-context signals still apply.
+
 Each objective has isolated routing state, but providers and supporting stores
 are shared infrastructure. The privacy objective keeps model traffic local and
 disables inappropriate tool use; operators must still configure storage,

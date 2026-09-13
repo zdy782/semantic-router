@@ -51,9 +51,21 @@ must dominate every decision.
 | Short factual question or simple general request | Prefer the local or fast lane. |
 | Casual conversation | Use the lowest-priority local fallback. |
 
-Higher-risk and higher-effort routes run before general routes. Signal scores
-coordinate semantic and deterministic evidence so a single keyword does not
-normally decide the lane by itself.
+Higher-risk and higher-effort routes run before general routes. FactCheck
+estimates whether a request depends on external factual knowledge. The recipe
+combines that signal with task and source requirements through verification
+pressure; the classifier flag alone does not veto a suitable task lane or
+require a different backend. Evidence-sensitive research synthesis can use the
+verified explanation lane even when its topic falls outside the named domains.
+Explicit evidence requests retain their dedicated policy, including the
+low-cost path for short factual questions.
+
+A mathematical topic with medium similarity does not override an overall
+simple difficulty result. Simple everyday messages also need an explanation
+anchor before a medium evidence-synthesis signal can move them into the
+explanation lane. Domain labels describe the topic; they do not establish the
+requested task by themselves. Requests for an answer-only format retain the
+higher-priority proof, code, or creative task route when that task is present.
 
 ## Requirements
 

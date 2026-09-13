@@ -67,6 +67,13 @@ managed credential and database for production.
 
 ## Data handling and safety
 
+The PII rule allows GPE entities such as cities and countries, so ordinary
+geography does not trigger privacy containment. Other detected entity types,
+including email and street addresses, remain restricted at the configured
+threshold. This is a type-level allowance: a person's city is also allowed by
+this PII rule. It does not distinguish public geography from personal location
+disclosure; explicit private-context signals still apply.
+
 Replay is enabled and stored in Postgres for 30 days by the checked-in config.
 It captures request and response bodies for replay-enabled routes: up to 2 KiB
 per body on containment, privacy, and simple-math routes, and up to 4 KiB on
