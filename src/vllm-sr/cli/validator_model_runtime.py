@@ -1,5 +1,7 @@
 """Model-runtime checks that do not load local or remote model resources."""
 
+from pathlib import PurePosixPath
+
 from cli.models import UserConfig
 from cli.validation_error import ValidationError
 
@@ -259,6 +261,19 @@ def _deployment_error(name, deployment, external_names):
         or not (deployment.get("device") or "cpu").startswith("rocm:")
     ):
         return "custom_ops_profile requires ck_flash_attention on an ORT rocm:index deployment"
+    cache_dir = deployment.get("compilation_cache_dir")
+    if cache_dir is not None and cache_dir != "":
+        if provider != "ort" or not (deployment.get("device") or "cpu").startswith(
+            "migraphx:"
+        ):
+            return "compilation_cache_dir requires an ORT migraphx:index deployment"
+        if (
+            not isinstance(cache_dir, str)
+            or cache_dir.strip() != cache_dir
+            or "\x00" in cache_dir
+            or not PurePosixPath(cache_dir).is_absolute()
+        ):
+            return "compilation_cache_dir must be an absolute, trimmed path without null bytes"
     budget = deployment.get("input") or {}
     if budget.get("max_tokens", 0) < 0:
         return "input.max_tokens must not be negative"

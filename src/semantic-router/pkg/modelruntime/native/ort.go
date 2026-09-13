@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,7 +20,10 @@ import (
 
 func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 	d := spec.Deployment.WithDefaults()
-	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow, CustomOpsProfile: d.CustomOpsProfile}
+	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow, CustomOpsProfile: d.CustomOpsProfile, CompilationCacheDir: d.CompilationCacheDir}
+	if err := d.ValidateCompilationCache(); err != nil {
+		return options, fmt.Errorf("%w: %w", binding.ErrCapability, err)
+	}
 	switch {
 	case d.Device == "cpu":
 		options.Provider = "cpu"
@@ -54,7 +58,66 @@ func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 	if options.ModelFile != "" && filepath.Ext(options.ModelFile) != ".onnx" {
 		return options, fmt.Errorf("%w: ORT head must identify a complete ONNX graph", binding.ErrCapability)
 	}
+	if options.CompilationCacheDir != "" {
+		if err := validateORTCacheLocation(options); err != nil {
+			return options, fmt.Errorf("%w: %w", binding.ErrCapability, err)
+		}
+	}
 	return options, nil
+}
+
+// Resolve existing parents without creating a cache directory. This also
+// prevents a symlinked cache parent from adding mutable files to an artifact.
+func resolveCachePath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return "", err
+	}
+	resolved, err = resolveCachePath(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, filepath.Base(path)), nil
+}
+
+func validateORTCacheLocation(options ort.Options) error {
+	cache, err := resolveCachePath(filepath.Clean(options.CompilationCacheDir))
+	if err != nil {
+		return err
+	}
+	paths := []string{options.ModelPath}
+	if options.ModelFile != "" {
+		head := options.ModelFile
+		if !filepath.IsAbs(head) {
+			head = filepath.Join(options.ModelPath, head)
+		}
+		paths = append(paths, filepath.Dir(head))
+	}
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		artifact, err := resolveCachePath(absolute)
+		if err != nil {
+			return err
+		}
+		if info, statErr := os.Stat(artifact); statErr == nil && !info.IsDir() {
+			artifact = filepath.Dir(artifact)
+		}
+		relative, err := filepath.Rel(artifact, cache)
+		if err != nil || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))) {
+			return fmt.Errorf("compilation_cache_dir must be outside model and graph artifact directories")
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) ortResource(ctx context.Context, spec config.ResolvedModelBinding, task string, load func(ort.Options) (io.Closer, error)) (*binding.Resource, error) {

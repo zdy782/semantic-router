@@ -184,6 +184,20 @@ FP32 graphs do not require that profile. `native` means the graph's existing
 math, including any mixed precision; it does not mean every operation is FP32.
 GPU preparation rejects an unavailable provider or CPU fallback.
 
+For `provider: ort` with `device: migraphx:0`, optionally set
+`compilation_cache_dir: /var/cache/semantic-router/migraphx` on the deployment.
+Mount that absolute path as a persistent, writable directory outside the model
+and graph directories. The default leaves compiled caching disabled; CPU,
+Candle, HTTP, and plain ROCm deployments reject this option.
+
+The cache separates graph and external weight contents, precision, execution
+shape, runtime/compiler libraries, GPU identity, and compiler settings. A new
+process can reuse a verified compiled program when those identities match.
+Cold compilation still occurs for a new identity. This does not enable CPU
+fallback or change input limits and model accuracy requirements. The runtime
+rejects conflicting global cache environment settings instead of combining
+them with the deployment option.
+
 A larger budget does not improve accuracy by itself. It can substantially
 increase CPU latency and GPU memory use. Keep short routing samples or a
 validated [window policy](safety.md#native-classifier-context) unless the task

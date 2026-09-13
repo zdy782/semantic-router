@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,14 +12,15 @@ import (
 // inference service. Artifact aliases and module policy remain in the catalog;
 // recipe bindings select the adapter and head separately from execution.
 type ModelDeployment struct {
-	Artifact         string           `yaml:"artifact,omitempty" json:"artifact,omitempty"`
-	Revision         string           `yaml:"revision,omitempty" json:"revision,omitempty"`
-	ExternalModel    string           `yaml:"external_model,omitempty" json:"external_model,omitempty"`
-	Provider         string           `yaml:"provider" json:"provider"`
-	Device           string           `yaml:"device,omitempty" json:"device,omitempty"`
-	Precision        string           `yaml:"precision,omitempty" json:"precision,omitempty"`
-	CustomOpsProfile string           `yaml:"custom_ops_profile,omitempty" json:"custom_ops_profile,omitempty"`
-	Input            ModelInputBudget `yaml:"input,omitempty" json:"input,omitempty"`
+	Artifact            string           `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Revision            string           `yaml:"revision,omitempty" json:"revision,omitempty"`
+	ExternalModel       string           `yaml:"external_model,omitempty" json:"external_model,omitempty"`
+	Provider            string           `yaml:"provider" json:"provider"`
+	Device              string           `yaml:"device,omitempty" json:"device,omitempty"`
+	Precision           string           `yaml:"precision,omitempty" json:"precision,omitempty"`
+	CustomOpsProfile    string           `yaml:"custom_ops_profile,omitempty" json:"custom_ops_profile,omitempty"`
+	CompilationCacheDir string           `yaml:"compilation_cache_dir,omitempty" json:"compilation_cache_dir,omitempty"`
+	Input               ModelInputBudget `yaml:"input,omitempty" json:"input,omitempty"`
 }
 
 // ModelInputBudget is a deployment restriction, not an advertised model
@@ -122,6 +124,9 @@ func (d ModelDeployment) validate(cfg *RouterConfig) error {
 	if d.CustomOpsProfile != "" && (d.CustomOpsProfile != "ck_flash_attention" || d.Provider != "ort" || !strings.HasPrefix(d.Device, "rocm:")) {
 		return fmt.Errorf("custom_ops_profile requires ck_flash_attention on an ORT rocm:index deployment")
 	}
+	if err := d.ValidateCompilationCache(); err != nil {
+		return err
+	}
 	if d.Input.MaxTokens < 0 {
 		return fmt.Errorf("input.max_tokens must not be negative")
 	}
@@ -129,6 +134,21 @@ func (d ModelDeployment) validate(cfg *RouterConfig) error {
 	case "reject", "truncate", "window":
 	default:
 		return fmt.Errorf("unsupported input.overflow %q", d.Input.Overflow)
+	}
+	return nil
+}
+
+// ValidateCompilationCache checks an explicitly selected provider cache. An
+// empty directory disables caching; runtime preparation checks artifact paths.
+func (d ModelDeployment) ValidateCompilationCache() error {
+	if d.CompilationCacheDir == "" {
+		return nil
+	}
+	if d.Provider != "ort" || !strings.HasPrefix(d.Device, "migraphx:") {
+		return fmt.Errorf("compilation_cache_dir requires an ORT migraphx:index deployment")
+	}
+	if strings.TrimSpace(d.CompilationCacheDir) != d.CompilationCacheDir || strings.ContainsRune(d.CompilationCacheDir, '\x00') || !filepath.IsAbs(d.CompilationCacheDir) {
+		return fmt.Errorf("compilation_cache_dir must be an absolute, trimmed path without null bytes")
 	}
 	return nil
 }

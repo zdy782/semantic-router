@@ -100,6 +100,9 @@ func TestCompileModelBindingsRejectsInvalidPreparation(t *testing.T) {
 
 func TestNamedDeploymentAdmissionAndCanonicalRoundTrip(t *testing.T) {
 	cfg := testDeploymentConfig()
+	deployment := cfg.ModelDeployments["other-encoder"]
+	deployment.CompilationCacheDir = "/var/cache/semantic-router/migraphx"
+	cfg.ModelDeployments["other-encoder"] = deployment
 	if err := validateModelAdmissionContracts(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +127,38 @@ func TestNamedDeploymentAdmissionAndCanonicalRoundTrip(t *testing.T) {
 	scoped := cfg.ConfigForRecipe(&cfg.Recipes[0])
 	if scoped.ModelBindings["domain_classifier"].Deployment != "shared-encoder" {
 		t.Fatal("recipe view lost bindings")
+	}
+}
+
+func TestCompilationCacheRequiresExplicitMIGraphXPlacement(t *testing.T) {
+	for _, test := range []struct {
+		name, provider, device, directory string
+		valid                             bool
+	}{
+		{"default off", "ort", "cpu", "", true},
+		{"MIGraphX", "ort", "migraphx:2", "/var/cache/semantic-router/migraphx", true},
+		{"CPU", "ort", "cpu", "/cache", false},
+		{"ROCm", "ort", "rocm:0", "/cache", false},
+		{"Candle", "candle", "cpu", "/cache", false},
+		{"HTTP", "http", "", "/cache", false},
+		{"relative", "ort", "migraphx:0", "cache", false},
+		{"spaces", "ort", "migraphx:0", " /cache", false},
+		{"null", "ort", "migraphx:0", "/cache\x00", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := testDeploymentConfig()
+			d := cfg.ModelDeployments["other-encoder"]
+			d.Provider, d.Device, d.CompilationCacheDir = test.provider, test.device, test.directory
+			if err := d.ValidateCompilationCache(); (err == nil) != test.valid {
+				t.Fatalf("cache validation: %v", err)
+			}
+			if test.provider != "http" {
+				cfg.ModelDeployments["other-encoder"] = d
+				if _, err := CompileModelBindings(cfg); (err == nil) != test.valid {
+					t.Fatalf("compiled deployment: %v", err)
+				}
+			}
+		})
 	}
 }
 

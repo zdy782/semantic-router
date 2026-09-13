@@ -55,6 +55,39 @@ def generic_document(provider="http", rule_type="local", named=False):
     return document
 
 
+@pytest.mark.parametrize(
+    "provider,device,directory,valid",
+    [
+        ("ort", "migraphx:0", "/var/cache/semantic-router/migraphx", True),
+        ("ort", "cpu", "", True),
+        ("ort", "cpu", "/cache", False),
+        ("ort", "rocm:0", "/cache", False),
+        ("candle", "cpu", "/cache", False),
+        ("http", "", "/cache", False),
+        ("ort", "migraphx:0", "relative", False),
+        ("ort", "migraphx:0", " /cache", False),
+        ("ort", "migraphx:0", "/cache\x00", False),
+        ("ort", "migraphx:0", 0, False),
+    ],
+)
+def test_compilation_cache_is_an_explicit_typed_deployment(
+    provider, device, directory, valid
+):
+    document = generic_document(provider)
+    deployment = document["global"]["model_catalog"]["deployments"]["selected"]
+    deployment.update(device=device, compilation_cache_dir=directory)
+    config = UserConfig.model_validate(document)
+    assert (validate_model_runtime_references(config) == []) == valid
+    if valid:
+        assert validate_config_structure(document) == []
+        assert (
+            config.model_dump(by_alias=True)["global"]["model_catalog"]["deployments"][
+                "selected"
+            ]["compilation_cache_dir"]
+            == directory
+        )
+
+
 @pytest.mark.parametrize("provider", ["candle", "ort", "http"])
 @pytest.mark.parametrize("rule_type", ["local", "sequence_classifier"])
 @pytest.mark.parametrize("named", [False, True])
