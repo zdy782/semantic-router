@@ -25,6 +25,8 @@ from stable_pooling import stabilize_mean_pooling
 WHERE_INPUT_COUNT = 3
 MASKED_ATTENTION_MAX = -10000.0
 ROPE_FREQUENCY_RANK = 3  # [1, rotary_dimension / 2, 1]
+POSITION_INPUT_RANK = 2  # [1, sequence]
+BINARY_INPUT_COUNT = 2
 
 
 def build_maps(graph):
@@ -472,12 +474,64 @@ def create_1d_padding_bias_nodes(graph):
     return nodes, unsqueeze_out
 
 
+def declared_position_input(graph, name):
+    """Recognize the standard singleton-batch position input, not activations."""
+    if name != "position_ids" or any(value.name == name for value in graph.output):
+        return False
+    value = next((value for value in graph.input if value.name == name), None)
+    if value is None or value.type.tensor_type.elem_type != TensorProto.INT64:
+        return False
+    dims = value.type.tensor_type.shape.dim
+    return (
+        len(dims) == POSITION_INPUT_RANK
+        and dims[0].HasField("dim_value")
+        and dims[0].dim_value == 1
+        and (bool(dims[1].dim_param) or dims[1].dim_value > 0)
+    )
+
+
+def rotary_scale_constant(graph, trig, consumers, only_consumer, attr):
+    """Prove direct FP16 casts or one shared, exclusively used YaRN scale."""
+    casts = [only_consumer(node.output[0], "Cast") for node in trig]
+    if all(
+        node is not None and attr(node, "to") == TensorProto.FLOAT16 for node in casts
+    ):
+        return set()
+    multiplies = [only_consumer(node.output[0], "Mul") for node in trig]
+    scales = []
+    for node, multiply in zip(trig, multiplies, strict=True):
+        if multiply is None or len(multiply.input) != BINARY_INPUT_COUNT:
+            return None
+        other = [name for name in multiply.input if name != node.output[0]]
+        if len(other) != 1:
+            return None
+        scales.append(other[0])
+        cast = only_consumer(multiply.output[0], "Cast")
+        if cast is None or attr(cast, "to") != TensorProto.FLOAT16:
+            return None
+    if scales[0] != scales[1]:
+        return None
+    tensor = next((t for t in graph.initializer if t.name == scales[0]), None)
+    if (
+        tensor is None
+        or tensor.data_type != TensorProto.FLOAT
+        or math.prod(tensor.dims) != 1
+        or any(value.name == tensor.name for value in (*graph.input, *graph.output))
+        or len(consumers.get(tensor.name, [])) != len(multiplies)
+        or any(node not in consumers[tensor.name] for node in multiplies)
+    ):
+        return None
+    scale = float(numpy_helper.to_array(tensor).item())
+    return {tensor.name} if math.isfinite(scale) and scale > 0 else None
+
+
 def rotary_fp32_initializers(graph, out2node):
     """Identify FP32 RoPE frequencies used only with positions, then cast to FP16.
 
     Torch exports this intentional FP32 numerical island as an initializer.
     It is not an encoder/head weight, and must not be narrowed to satisfy the
-    weight-name guard. Require the complete observed position-to-sin/cos path.
+    weight-name guard. Require the complete observed position-to-sin/cos path,
+    including an optional shared positive YaRN attention scale before casting.
     """
     consumers = {}
     for node in graph.node:
@@ -512,14 +566,19 @@ def rotary_fp32_initializers(graph, out2node):
         position = out2node.get(multiply.input[1])
         if position is None or position.op_type != "Cast" or attr(position, "to") != 1:
             continue
-        position = out2node.get(position.input[0])
+        position_name = position.input[0]
+        position = out2node.get(position_name)
         while position is not None and position.op_type == "Unsqueeze":
-            position = out2node.get(position.input[0])
-        if (
-            position is None
-            or position.op_type != "Range"
-            or scalar_value(graph, out2node, position.input[0]) != 0
-            or scalar_value(graph, out2node, position.input[2]) != 1
+            position_name = position.input[0]
+            position = out2node.get(position_name)
+        is_range = (
+            position is not None
+            and position.op_type == "Range"
+            and scalar_value(graph, out2node, position.input[0]) == 0
+            and scalar_value(graph, out2node, position.input[2]) == 1
+        )
+        if not is_range and not (
+            position is None and declared_position_input(graph, position_name)
         ):
             continue
         transpose = only_consumer(multiply.output[0], "Transpose")
@@ -540,9 +599,10 @@ def rotary_fp32_initializers(graph, out2node):
             or {n.op_type for n in trig} != expected_trig
         ):
             continue
-        casts = [only_consumer(n.output[0], "Cast") for n in trig]
-        if all(n is not None and attr(n, "to") == TensorProto.FLOAT16 for n in casts):
+        scale = rotary_scale_constant(graph, trig, consumers, only_consumer, attr)
+        if scale is not None:
             exempt.add(tensor.name)
+            exempt.update(scale)
     return exempt
 
 
