@@ -66,7 +66,14 @@ def validate_record(record: dict, components: dict[str, dict], split: str) -> No
     if not _unique_strings(record.get("parent_groups"), "parent_groups"):
         raise ValueError("Every record needs a parent group")
     preferences = _contrastive_preferences(record)
-    if "pair_component_ids" in record:
+    if "component_id" in record:
+        if preferences or any(
+            key in record
+            for key in ("pair_component_ids", "query_component_id", "label")
+        ):
+            raise ValueError("Representation inputs cannot imply pair/relevance labels")
+        refs = {record["component_id"]}
+    elif "pair_component_ids" in record:
         if preferences:
             raise ValueError("Semantic pairs cannot declare retrieval preferences")
         refs = _unique_strings(record.get("pair_component_ids"), "pair components")

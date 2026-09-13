@@ -30,6 +30,57 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch and transformers")
 class NewBaseModelTest(unittest.TestCase):
+    def test_explicit_exit_matrix_preserves_old_serialization_and_full_weight(self):
+        original = ExitSpec()
+        self.assertNotIn("exit_weights", original.to_dict())
+        self.assertEqual(ExitSpec.from_dict(original.to_dict()), original)
+        weights = [[0.5 / 19] * 5 for _ in range(4)]
+        weights[-1][0] = 0.5
+        exits = ExitSpec(exit_weights=tuple(tuple(row) for row in weights))
+        exits.validate(22, 768)
+        self.assertEqual(dict(exits.weighted())[22, 768], 0.5)
+        self.assertEqual(ExitSpec.from_dict(exits.to_dict()), exits)
+        with self.assertRaisesRegex(ValueError, "complete exit matrix"):
+            ExitSpec(exit_weights=((1.0,),)).validate(22, 768)
+
+    def test_continued_task_keeps_all_tensors_outputs_and_explicit_lineage(self):
+        for task in ("embedding", "reranker"):
+            with self.subTest(task=task), tempfile.TemporaryDirectory() as directory:
+                model = self.model(task).eval()
+                checkpoint = Path(directory) / "checkpoint"
+                model.save(checkpoint)
+                (checkpoint / "tokenizer.json").write_text("{}")
+                files = {
+                    str(p.relative_to(checkpoint)): file_digest(p)
+                    for p in checkpoint.rglob("*")
+                    if p.is_file()
+                }
+                before = torch.get_rng_state().clone()
+                restored = NewBaseTask.from_task(
+                    checkpoint,
+                    task,
+                    model.exits,
+                    expected_files=files,
+                    provenance={
+                        "parent_task_revision": "a" * 40,
+                        "base_revision": "b" * 40,
+                    },
+                ).eval()
+                self.assertTrue(torch.equal(before, torch.get_rng_state()))
+                self.assertEqual(
+                    state_digest(model.state_dict()),
+                    state_digest(restored.state_dict()),
+                )
+                self.assertEqual(restored.lineage["initialization"], "continued_task")
+                with torch.no_grad():
+                    left, right = model(*self.inputs()), restored(*self.inputs())
+                for key in left:
+                    torch.testing.assert_close(left[key], right[key], atol=0, rtol=0)
+                with self.assertRaisesRegex(ValueError, "task checkpoint"):
+                    NewBaseTask.from_base(
+                        checkpoint, task, model.exits, expected_files=files
+                    )
+
     def test_compile_option_is_changed_only_when_the_config_defines_it(self):
         for existing in (False, True):
             config = SimpleNamespace(model_type="modernbert")

@@ -18,6 +18,7 @@ from .newbase_objectives import (
     paraphrase_loss,
     ranking_terms,
 )
+from .newbase_semantic import all_exit_anchor_loss, full_batch_relation_loss
 from .newbase_teacher import embedding_teacher_loss
 
 
@@ -36,10 +37,11 @@ class ObjectiveConfig:
     lambda_weight: float = 0.0
     lambda_k: int = 10
     maximum_candidates: int = 8
+    anchor_scale: float = 1.0
 
     def validate(self, task: str):
         allowed = (
-            {"retrieval", "cosent", "paraphrase"}
+            {"retrieval", "cosent", "paraphrase", "representation"}
             if task == "embedding"
             else {"ranking"}
         )
@@ -53,6 +55,7 @@ class ObjectiveConfig:
             "bce_weight",
             "preference_weight",
             "lambda_weight",
+            "anchor_scale",
         ):
             value = getattr(self, field)
             if isinstance(value, bool) or not math.isfinite(value) or value < 0:
@@ -192,13 +195,22 @@ def embedding_step(
     teacher_cache=None,
     teacher_weight: float = 0.0,
     teacher_temperature: float = 2.0,
+    anchor_cache=None,
+    anchor_weight: float = 0.0,
 ):
     objective.validate("embedding")
     source = records[0]["source"]
     if any(row["source"] != source for row in records):
         raise ValueError("A logical batch cannot mix source objective contracts")
     semantic = objective.kind in {"cosent", "paraphrase"}
-    if semantic:
+    representation = objective.kind == "representation"
+    if representation and not anchor_weight and not teacher_weight:
+        raise ValueError(
+            "Representation training requires explicit teacher supervision"
+        )
+    if representation:
+        component_ids = [row["component_id"] for row in records]
+    elif semantic:
         component_ids = [key for row in records for key in row["pair_component_ids"]]
     else:
         query_ids = [row["query_component_id"] for row in records]
@@ -214,7 +226,10 @@ def embedding_step(
     )
     values = forward_complete(model, batch, device, token_budget, amp=amp)
     losses, intervention = {}, None
-    if semantic:
+    if representation:
+        losses = {key: vectors.sum() * 0.0 for key, vectors in values.items()}
+        intervention = next(iter(losses.values()))
+    elif semantic:
         labels = torch.tensor(
             [row["label"] for row in records], dtype=torch.float32, device=device
         )
@@ -276,15 +291,29 @@ def embedding_step(
         reference = teacher_cache.lookup(
             [(key,) for key in component_ids], components, batch, device
         )
-        extra = embedding_teacher_loss(
-            values[model.exits.layers[-1], model.exits.dimensions[0]],
-            reference,
-            component_ids,
-            components,
-            query_count=None if semantic else len(records),
+        full = values[model.exits.layers[-1], model.exits.dimensions[0]]
+        extra = (
+            full_batch_relation_loss(full, reference, component_ids, components)
+            if representation
+            else embedding_teacher_loss(
+                full,
+                reference,
+                component_ids,
+                components,
+                query_count=None if semantic else len(records),
+            )
         )
         total = total + teacher_weight * extra
         metrics["external_teacher_loss"] = extra.detach().item()
+    if anchor_weight:
+        if anchor_cache is None:
+            raise ValueError("Nonzero anchor weight requires a complete cache")
+        reference = anchor_cache.lookup(
+            [(key,) for key in component_ids], components, batch, device
+        )
+        anchor = all_exit_anchor_loss(values, reference, model.exits)
+        total = total + anchor_weight * objective.anchor_scale * anchor
+        metrics["pointwise_anchor_loss"] = anchor.detach().item()
     return total, metrics
 
 

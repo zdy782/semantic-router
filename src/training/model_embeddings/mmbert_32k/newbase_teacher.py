@@ -45,6 +45,8 @@ def token_digest(tokens, pad_id: int) -> str:
 def record_inputs(record, task: str) -> list[tuple[str, ...]]:
     """Enumerate the actual frozen candidates; never mine or relabel them."""
     if task == "embedding":
+        if "component_id" in record:
+            return [(record["component_id"],)]
         if "pair_component_ids" in record:
             return [(key,) for key in record["pair_component_ids"]]
         return [(record["query_component_id"],)] + [
@@ -58,8 +60,12 @@ def record_inputs(record, task: str) -> list[tuple[str, ...]]:
     raise ValueError("Teacher cache task must be embedding or reranker")
 
 
-def validate_teacher_config(config: dict, task: str) -> None:
+def validate_teacher_config(config: dict, task: str, *, anchor: bool = False) -> None:
     expected = "relational_cosine" if task == "embedding" else "query_order"
+    if anchor:
+        if task != "embedding":
+            raise ValueError("Pointwise anchors apply to embedding coordinates")
+        expected = "pointwise_cosine"
     if config.get("objective") != expected:
         raise ValueError("External teacher objective differs from the student task")
     weight, temperature = config.get("weight"), config.get("temperature", 2.0)

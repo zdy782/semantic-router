@@ -245,6 +245,15 @@ def validate_config(config: dict) -> None:
     ExitSpec.from_dict(config["exits"])
     if config.get("teacher") is not None:
         validate_teacher_config(config["teacher"], config["task"])
+    if config.get("anchor") is not None:
+        validate_teacher_config(config["anchor"], config["task"], anchor=True)
+    if config.get("initialization", "fresh_base") not in {
+        "fresh_base",
+        "continued_task",
+    }:
+        raise ValueError(
+            "Initialization must distinguish fresh Base from continued task"
+        )
 
 
 def run(
@@ -288,6 +297,19 @@ def run(
         if teacher.get("weight", 0)
         else None
     )
+    anchor = plan.get("anchor") or {}
+    anchor_cache = (
+        TeacherCache.load(
+            Path(anchor["directory"]),
+            anchor["manifest_sha256"],
+            task=task,
+            corpus=corpus,
+            draws=draws,
+            draws_sha256=stream["draws_sha256"],
+        )
+        if anchor.get("weight", 0)
+        else None
+    )
     baseline = (
         _read_locked(Path(plan["baseline_path"]), plan["baseline_sha256"])
         if plan.get("selection")
@@ -301,10 +323,15 @@ def run(
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     base = Path(plan["base_directory"])
+    initialize = (
+        NewBaseTask.from_task
+        if plan.get("initialization") == "continued_task"
+        else NewBaseTask.from_base
+    )
     model = (
         NewBaseTask.resume(resume)
         if resume
-        else NewBaseTask.from_base(
+        else initialize(
             base,
             task,
             ExitSpec.from_dict(plan["exits"]),
@@ -333,6 +360,10 @@ def run(
         teacher_cache.validate_tokens(
             tokenizer, corpus.components, max(plan["source_maximum_tokens"].values())
         )
+    if anchor_cache is not None:
+        anchor_cache.validate_tokens(
+            tokenizer, corpus.components, max(plan["source_maximum_tokens"].values())
+        )
     model.to(device)
     frozen_buffers = state_digest(dict(model.encoder.named_buffers()))
     optimizer, scheduler, parameters = make_optimizer(
@@ -351,6 +382,8 @@ def run(
     }
     if teacher_cache is not None:
         identity["teacher_manifest_sha256"] = teacher_cache.manifest_sha256
+    if anchor_cache is not None:
+        identity["anchor_manifest_sha256"] = anchor_cache.manifest_sha256
     completed, elapsed_before = 0, 0.0
     evaluations = []
     if resume:
@@ -437,6 +470,14 @@ def run(
                 optimizer.zero_grad(set_to_none=True)
                 selected = [by_id[key] for key in draw["record_ids"]]
                 function = embedding_step if task == "embedding" else reranker_step
+                anchor_options = (
+                    {
+                        "anchor_cache": anchor_cache,
+                        "anchor_weight": anchor.get("weight", 0.0),
+                    }
+                    if task == "embedding"
+                    else {}
+                )
                 loss, metrics = function(
                     model,
                     tokenizer,
@@ -450,6 +491,7 @@ def run(
                     teacher_cache=teacher_cache,
                     teacher_weight=teacher.get("weight", 0.0),
                     teacher_temperature=teacher.get("temperature", 2.0),
+                    **anchor_options,
                 )
                 if not torch.isfinite(loss):
                     raise ValueError("Nonfinite logical objective")

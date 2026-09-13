@@ -325,6 +325,34 @@ class NewBaseTrainingTest(unittest.TestCase):
                 state_digest(NewBaseTask.resume(output / "step-2").state_dict()),
                 state_digest(NewBaseTask.resume(treated / "step-2").state_dict()),
             )
+            # A new optimizer run can continue the complete task checkpoint;
+            # this is distinct from both fresh-Base initialization and resume.
+            initial = treated / "step-2"
+            config.update(
+                initialization="continued_task",
+                base_directory=str(initial),
+                base_files={
+                    str(p.relative_to(initial)): file_digest(p)
+                    for p in initial.rglob("*")
+                    if p.is_file()
+                },
+                provenance={
+                    "parent_task_state": state_digest(
+                        NewBaseTask.resume(initial).state_dict()
+                    )
+                },
+            )
+            path.write_text(json.dumps(config))
+            continued = root / "continued-run"
+            run(config, file_digest(path), continued, device=torch.device("cpu"))
+            self.assertEqual(
+                state_digest(NewBaseTask.resume(continued / "step-0").state_dict()),
+                state_digest(NewBaseTask.resume(initial).state_dict()),
+            )
+            self.assertEqual(
+                NewBaseTask.resume(continued / "step-2").lineage["initialization"],
+                "continued_task",
+            )
 
 
 if __name__ == "__main__":

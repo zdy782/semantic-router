@@ -39,6 +39,7 @@ class ExitSpec:
     dimensions: tuple[int, ...] = (768, 512, 256, 128, 64)
     layer_weights: tuple[float, ...] = (0.2, 0.2, 0.2, 0.4)
     dimension_weights: tuple[float, ...] = (2 / 6, 1 / 6, 1 / 6, 1 / 6, 1 / 6)
+    exit_weights: tuple[tuple[float, ...], ...] | None = None
 
     def validate(self, layer_count: int, hidden_size: int) -> None:
         if not self.layers or tuple(sorted(set(self.layers))) != self.layers:
@@ -62,8 +63,28 @@ class ExitSpec:
                 raise ValueError("Every exit requires a positive finite weight")
             if abs(sum(weights) - 1.0) > _WEIGHT_SUM_TOLERANCE:
                 raise ValueError("Exit weights must sum to one on each axis")
+        if self.exit_weights is not None:
+            if len(self.exit_weights) != len(self.layers) or any(
+                len(row) != len(self.dimensions) for row in self.exit_weights
+            ):
+                raise ValueError(
+                    "Explicit exit weights require the complete exit matrix"
+                )
+            weights = [weight for row in self.exit_weights for weight in row]
+            if (
+                any(not 0 < weight <= 1 for weight in weights)
+                or abs(sum(weights) - 1.0) > _WEIGHT_SUM_TOLERANCE
+            ):
+                raise ValueError(
+                    "Explicit exit weights must be positive and sum to one"
+                )
 
     def weighted(self):
+        if self.exit_weights is not None:
+            for layer, row in zip(self.layers, self.exit_weights, strict=True):
+                for dimension, weight in zip(self.dimensions, row, strict=True):
+                    yield (layer, dimension), weight
+            return
         for layer, layer_weight in zip(self.layers, self.layer_weights, strict=True):
             for dimension, dimension_weight in zip(
                 self.dimensions, self.dimension_weights, strict=True
@@ -71,13 +92,24 @@ class ExitSpec:
                 yield (layer, dimension), layer_weight * dimension_weight
 
     def to_dict(self) -> dict:
-        return {name: list(getattr(self, name)) for name in self.__dataclass_fields__}
+        result = {
+            name: list(getattr(self, name))
+            for name in self.__dataclass_fields__
+            if name != "exit_weights"
+        }
+        if self.exit_weights is not None:
+            result["exit_weights"] = [list(row) for row in self.exit_weights]
+        return result
 
     @classmethod
     def from_dict(cls, value: dict) -> ExitSpec:
-        if set(value) != set(cls.__dataclass_fields__):
+        required = set(cls.__dataclass_fields__) - {"exit_weights"}
+        if not required <= set(value) or set(value) - set(cls.__dataclass_fields__):
             raise ValueError("Incomplete or unknown exit contract")
-        return cls(**{name: tuple(items) for name, items in value.items()})
+        args = {name: tuple(value[name]) for name in required}
+        if "exit_weights" in value:
+            args["exit_weights"] = tuple(tuple(row) for row in value["exit_weights"])
+        return cls(**args)
 
 
 def state_digest(state: dict[str, torch.Tensor]) -> str:
@@ -228,6 +260,80 @@ class NewBaseTask(nn.Module):
         }
         verify_files(directory, expected_files)
         return cls(encoder, task, exits, lineage)
+
+    @classmethod
+    def from_task(
+        cls,
+        directory: Path,
+        task: str,
+        exits: ExitSpec,
+        *,
+        expected_files: dict[str, str],
+        provenance: dict,
+        heads_file: str = "classification_heads.safetensors",
+    ):
+        """Continue a locked task artifact, explicitly distinct from fresh Base.
+
+        Only this representation contract is supported. All encoder tensors and
+        every reranker head must match; this is neither a partial head warm start
+        nor optimizer resume. Source lineage is preserved as caller provenance.
+        """
+        required = {"config.json", "tokenizer.json", "model.safetensors"}
+        if task == "reranker":
+            required |= {heads_file, "matryoshka_config.json"}
+        if not required <= expected_files.keys() or not provenance:
+            raise ValueError(
+                "Continued task requires complete files and explicit lineage"
+            )
+        verify_files(directory, expected_files)
+        config = json.loads((directory / "config.json").read_bytes())
+        contract = read_representation_contract(config, task)
+        if contract != vela_representation_contract(task):
+            raise ValueError("Continued task representation differs from the trainer")
+        # Discarded temporary head initialization must not alter training RNG.
+        with torch.random.fork_rng(devices=[]):
+            encoder, _ = _load_encoder(directory)
+            result = cls(encoder, task, exits, {})
+        original = load_file(str(directory / "model.safetensors"))
+        if set(original) != set(encoder.state_dict()) or any(
+            value.dtype != original[name].dtype
+            or not torch.equal(value.cpu(), original[name])
+            for name, value in encoder.state_dict().items()
+        ):
+            raise ValueError("Continued encoder differs from its exact native tensors")
+        if task == "reranker":
+            metadata = json.loads((directory / "matryoshka_config.json").read_bytes())
+            if any(
+                metadata.get(name) != expected
+                for name, expected in {
+                    "layer_indices": list(exits.layers),
+                    "dim_indices": list(exits.dimensions),
+                    "hidden_size": encoder.config.hidden_size,
+                    "num_layers": len(encoder.layers),
+                    "pooling_strategy": "cls",
+                    "representation_contract": contract,
+                }.items()
+            ):
+                raise ValueError("Continued head layout or representation differs")
+            state = load_file(str(directory / heads_file))
+            expected = result.layer_heads.state_dict()
+            if set(state) != set(expected) or any(
+                value.dtype != expected[name].dtype
+                or value.shape != expected[name].shape
+                or not torch.isfinite(value).all()
+                for name, value in state.items()
+            ):
+                raise ValueError("Continued task requires every exact FP32 head")
+            result.layer_heads.load_state_dict(state, strict=True)
+        result.lineage = {
+            "initialization": "continued_task",
+            "source_files": expected_files,
+            "provenance": provenance,
+            "initial_encoder_state_sha256": state_digest(encoder.state_dict()),
+            "initial_task_state_sha256": state_digest(result.state_dict()),
+        }
+        verify_files(directory, expected_files)
+        return result
 
     def forward(self, input_ids, attention_mask) -> dict[tuple[int, int], torch.Tensor]:
         if (

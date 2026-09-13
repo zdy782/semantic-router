@@ -41,6 +41,60 @@ class CompleteTokenizer:
 
 @unittest.skipIf(torch is None, "requires torch and transformers")
 class NewBaseBatchesTest(unittest.TestCase):
+    def test_broad_anchors_train_every_layer_across_complete_microbatches(self):
+        class Cache:
+            def lookup(self, inputs, components, batch, device):
+                return torch.stack(
+                    [torch.arange(1, 17).float().roll(i) for i in range(len(inputs))]
+                ).to(device)
+
+        _, components = self.examples()
+        rows = [{"source": "natural", "component_id": key} for key in components]
+        model = self.model("embedding")
+        results = []
+        for budget in (1000, 8):
+            model.zero_grad(set_to_none=True)
+            loss, metrics = embedding_step(
+                model,
+                CompleteTokenizer(),
+                rows,
+                components,
+                device=torch.device("cpu"),
+                token_budget=budget,
+                maximum=128,
+                objective=ObjectiveConfig("representation"),
+                amp=False,
+                anchor_cache=Cache(),
+                anchor_weight=1.0,
+            )
+            loss.backward()
+            gradients = {
+                name: parameter.grad.clone()
+                for name, parameter in model.named_parameters()
+            }
+            self.assertTrue(all(torch.isfinite(g).all() for g in gradients.values()))
+            for layer in model.encoder.layers:
+                self.assertTrue(any(p.grad.abs().max() > 0 for p in layer.parameters()))
+            results.append((loss.detach(), gradients, metrics["token_sha256"]))
+        torch.testing.assert_close(results[0][0], results[1][0], atol=1e-6, rtol=1e-5)
+        self.assertEqual(results[0][2], results[1][2])
+        for name in results[0][1]:
+            torch.testing.assert_close(
+                results[0][1][name], results[1][1][name], atol=2e-5, rtol=2e-4
+            )
+        with self.assertRaisesRegex(ValueError, "explicit teacher"):
+            embedding_step(
+                model,
+                CompleteTokenizer(),
+                rows,
+                components,
+                device=torch.device("cpu"),
+                token_budget=128,
+                maximum=128,
+                objective=ObjectiveConfig("representation"),
+                amp=False,
+            )
+
     def model(self, task):
         config = ModernBertConfig(
             vocab_size=32,
@@ -148,8 +202,9 @@ class NewBaseBatchesTest(unittest.TestCase):
             (embedding_step, "retrieval"),
             (reranker_step, "ranking"),
         ):
-            with self.subTest(kind=kind), self.assertRaisesRegex(
-                ValueError, "explicit relevance membership"
+            with (
+                self.subTest(kind=kind),
+                self.assertRaisesRegex(ValueError, "explicit relevance membership"),
             ):
                 function(
                     None,
