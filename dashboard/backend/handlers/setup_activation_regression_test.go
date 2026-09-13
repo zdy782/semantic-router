@@ -149,8 +149,8 @@ func TestSetupActivationFailureRestoresBootstrapAndAllowsRetry(t *testing.T) {
 	}
 	// Router starts, but its peer cannot start. The second request must handle
 	// both the already-running router and the newly recoverable Envoy.
-	if err := os.WriteFile(fake.envoyStatusPath, []byte("dead\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(fake.envoyStatusPath, []byte("dead\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	resolver := setupmode.New(configPath, false)
 	handler := SetupActivateHandler(configPath, false, root, resolver)
@@ -161,8 +161,8 @@ func TestSetupActivationFailureRestoresBootstrapAndAllowsRetry(t *testing.T) {
 		t.Fatalf("failed runtime must not report success: %d %s", w.Code, w.Body.String())
 	}
 	var response map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
+	if decodeErr := json.Unmarshal(w.Body.Bytes(), &response); decodeErr != nil {
+		t.Fatal(decodeErr)
 	}
 	if response["configuration_restored"] != true || response["setupMode"] != true || response["stage"] != "runtime_start" {
 		t.Fatalf("failure was not retryable: %#v", response)
@@ -171,8 +171,8 @@ func TestSetupActivationFailureRestoresBootstrapAndAllowsRetry(t *testing.T) {
 	if err != nil || !bytes.Equal(restored, previous) || !resolver.Resolve().Active {
 		t.Fatalf("bootstrap was not restored: %s, %v", restored, err)
 	}
-	if err := os.WriteFile(fake.envoyStatusPath, []byte("created\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(fake.envoyStatusPath, []byte("created\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	w = httptest.NewRecorder()
 	handler(w, httptest.NewRequest(http.MethodPost, "/api/setup/activate", bytes.NewReader(body)))
@@ -199,8 +199,8 @@ func TestSetupActivationReportsRollbackFailureWithoutRawError(t *testing.T) {
 		t.Fatalf("unsafe failure response: %d %s", w.Code, w.Body.String())
 	}
 	var response map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
+	if decodeErr := json.Unmarshal(w.Body.Bytes(), &response); decodeErr != nil {
+		t.Fatal(decodeErr)
 	}
 	if response["configuration_restored"] != false {
 		t.Fatalf("failed rollback claimed restoration: %#v", response)
