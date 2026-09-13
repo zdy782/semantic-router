@@ -5,6 +5,7 @@ import unittest
 try:
     import torch
 
+    from src.training.model_embeddings.mmbert_32k.newbase_data import retrieval_masks
     from src.training.model_embeddings.mmbert_32k.newbase_objectives import (
         cosent_loss,
         lambda_loss,
@@ -18,6 +19,44 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch")
 class NewBaseObjectivesTest(unittest.TestCase):
+    def test_shared_parent_preference_has_gradient_without_absolute_gold(self):
+        components = {
+            key: {"normalized_sha256": key, "parent_groups": ["matched-background"]}
+            for key in ("positive", "alternative")
+        }
+        row = {
+            "positive_component_ids": ["positive"],
+            "judged_negative_component_ids": [],
+            "unjudged_component_ids": ["alternative"],
+            "candidate_component_ids": list(components),
+        }
+        scores = torch.tensor([[0.2, 0.5]], requires_grad=True)
+        positive, valid = retrieval_masks([row], list(components), components)
+        before = multi_positive_loss(
+            scores, torch.tensor(positive), torch.tensor(valid)
+        )
+        before.backward()
+        self.assertEqual(before.item(), 0)
+        torch.testing.assert_close(scores.grad, torch.zeros_like(scores))
+        scores.grad.zero_()
+        row["contrastive_preference_component_ids"] = ["alternative"]
+        positive, valid = retrieval_masks([row], list(components), components)
+        after = multi_positive_loss(scores, torch.tensor(positive), torch.tensor(valid))
+        after.backward()
+        self.assertGreater(after.item(), 0)
+        self.assertLess(scores.grad[0, 0].item(), 0)
+        self.assertGreater(scores.grad[0, 1].item(), 0)
+        scores.grad.zero_()
+        labels = torch.tensor([[1.0, -1.0]])
+        terms = ranking_terms(
+            scores,
+            labels,
+            torch.tensor(valid),
+            torch.zeros_like(labels, dtype=torch.bool),
+        )
+        (terms["pairwise"] + terms["bce"]).backward()
+        torch.testing.assert_close(scores.grad, torch.zeros_like(scores))
+
     def test_multiple_positives_are_marginalized_and_masked_scores_have_no_gradient(
         self,
     ):

@@ -44,6 +44,19 @@ def _unique_strings(values, field: str) -> set[str]:
     return result
 
 
+def _contrastive_preferences(record: dict) -> set[str]:
+    preferences = _unique_strings(
+        record.get("contrastive_preference_component_ids", []),
+        "contrastive preferences",
+    )
+    if preferences and (
+        not preferences <= set(record.get("unjudged_component_ids", []))
+        or not preferences <= set(record.get("candidate_component_ids", []))
+    ):
+        raise ValueError("Contrastive preferences must be explicit unjudged candidates")
+    return preferences
+
+
 def validate_record(record: dict, components: dict[str, dict], split: str) -> None:
     """Validate a query's complete positive/negative/unknown partition."""
     if not split or record.get("split") != split:
@@ -52,7 +65,10 @@ def validate_record(record: dict, components: dict[str, dict], split: str) -> No
         raise ValueError("Missing record identity, source or language")
     if not _unique_strings(record.get("parent_groups"), "parent_groups"):
         raise ValueError("Every record needs a parent group")
+    preferences = _contrastive_preferences(record)
     if "pair_component_ids" in record:
+        if preferences:
+            raise ValueError("Semantic pairs cannot declare retrieval preferences")
         refs = _unique_strings(record.get("pair_component_ids"), "pair components")
         if len(refs) != _PAIR_SIZE or not 0 <= record.get("label", -1) <= 1:
             raise ValueError(
@@ -187,7 +203,12 @@ class GroupCycle:
 def retrieval_masks(
     records: list[dict], document_ids: list[str], components: dict[str, dict]
 ) -> tuple[list[list[bool]], list[list[bool]]]:
-    """Mask duplicate/related unjudged negatives while preserving known qrels."""
+    """Mask related unknowns, retaining qrels and explicit contrastive preferences.
+
+    A producer may declare an ordered, unjudged alternative even when it shares
+    a source parent. This permits a contrastive denominator without assigning
+    absolute relevance gold or changing BCE/Lambda masks.
+    """
     if len(set(document_ids)) != len(document_ids):
         raise ValueError("Deduplicate physical documents before scoring")
     hashes = [components[key]["normalized_sha256"] for key in document_ids]
@@ -201,6 +222,10 @@ def retrieval_masks(
         positive_parents = {
             group for key in positive for group in components[key]["parent_groups"]
         }
+        preference_hashes = {
+            components[key]["normalized_sha256"]
+            for key in _contrastive_preferences(record)
+        }
         row_positive, row_valid = [], []
         for key in document_ids:
             item = components[key]
@@ -209,7 +234,12 @@ def retrieval_masks(
             )
             related = bool(positive_parents & set(item["parent_groups"]))
             row_positive.append(is_positive)
-            row_valid.append(is_positive or key in negative or not related)
+            row_valid.append(
+                is_positive
+                or key in negative
+                or item["normalized_sha256"] in preference_hashes
+                or not related
+            )
         if not any(row_positive):
             raise ValueError("Logical candidate batch omitted a query's positive")
         positive_masks.append(row_positive)

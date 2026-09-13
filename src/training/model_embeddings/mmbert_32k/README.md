@@ -91,6 +91,12 @@ those relevance partitions. Semantic-pair records instead contain two
 exclusion in the data producer; loading a valid manifest does not establish
 those properties.
 
+Related, unjudged documents are masked as contrastive alternatives by default.
+For a deliberately ordered pair that shares source parents, the producer can
+set `contrastive_preference_component_ids` to an explicit subset of its
+unjudged candidates. This enables that contrastive comparison while preserving
+the unknown relevance label; it does not admit the pair to BCE or Lambda loss.
+
 Freeze batches before training with
 [`prepare_stream`](newbase_stream.py). A stream specification contains `seed`,
 `cycles`, and a `sources` mapping. Each source specifies `steps_per_cycle`,

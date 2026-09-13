@@ -103,6 +103,31 @@ class NewBaseDataTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "changed"):
                 FrozenCorpus.load(root, "train")
 
+    def test_explicit_preference_retains_only_its_unjudged_alternative(self):
+        components = {
+            key: {"normalized_sha256": key, "parent_groups": ["same-article"]}
+            for key in ("p", "alternative", "other")
+        }
+        row = {
+            "positive_component_ids": ["p"],
+            "judged_negative_component_ids": [],
+            "unjudged_component_ids": ["alternative", "other"],
+            "candidate_component_ids": ["p", "alternative", "other"],
+        }
+        self.assertEqual(
+            retrieval_masks([row], list(components), components)[1],
+            [[True, False, False]],
+        )
+        row["contrastive_preference_component_ids"] = ["alternative"]
+        positive, valid = retrieval_masks([row], list(components), components)
+        self.assertEqual(positive, [[True, False, False]])
+        self.assertEqual(valid, [[True, True, False]])
+        self.assertEqual(row["judged_negative_component_ids"], [])
+        for invalid in (["p"], ["missing"], ["alternative", "alternative"]):
+            row["contrastive_preference_component_ids"] = invalid
+            with self.assertRaises(ValueError):
+                retrieval_masks([row], list(components), components)
+
 
 if __name__ == "__main__":
     unittest.main()
