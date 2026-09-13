@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package evaluationplane
 
@@ -10,7 +10,7 @@ import (
 )
 
 func TestDeploymentRegistryDescriptorPinsRootAcrossPathSubstitution(t *testing.T) {
-	parent := t.TempDir()
+	parent := deploymentRegistryTestRoot(t)
 	root := filepath.Join(parent, "deployments")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestDeploymentRegistryDescriptorPinsRootAcrossPathSubstitution(t *testing.T
 }
 
 func TestDeploymentRegistryNeverFollowsRacingConfigSymlink(t *testing.T) {
-	root := t.TempDir()
+	root := deploymentRegistryTestRoot(t)
 	safeConfig := []byte(modelArmTestYAML)
 	outsideConfig := []byte("version: v0.3\nrouting:\n  strategy: attacker\n  modelCards: []\n")
 	writeDeploymentRegistryFixture(t, root, []evaluationDeploymentDefinition{{
