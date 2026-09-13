@@ -311,10 +311,43 @@ if [[ "${http_code}" != "200" ]]; then
     exit 1
 fi
 
+# The running model determines the physical vector namespace. Read the store
+# that actually initialized instead of recomputing its identity in the test or
+# querying the old logical collection. This fresh stack must have one store;
+# missing or conflicting initialization events are a failed prerequisite.
+router_container="$(python3 -c 'from cli.runtime_stack import resolve_runtime_stack; print(resolve_runtime_stack().router_container_name)')"
+router_startup_log="${TEST_DIR}/router-startup.log"
+"${CONTAINER_RUNTIME}" logs "${router_container}" >"${router_startup_log}" 2>&1
+memory_collection="$(python3 - "${router_startup_log}" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+collections = set()
+for line in Path(sys.argv[1]).read_text().splitlines():
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if not isinstance(event, dict):
+        continue
+    if event.get("component") != "memory" or event.get("event") != "milvus_store_initialized":
+        continue
+    name = event.get("collection_name")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise SystemExit("Invalid initialized memory collection")
+    collections.add(name)
+if len(collections) != 1:
+    raise SystemExit("Expected exactly one initialized Milvus memory collection")
+print(collections.pop())
+PY
+)"
+
 cd "${REPO_ROOT}/e2e/testing"
 PYTHONUNBUFFERED=1 \
 ROUTER_ENDPOINT="${ROUTER_ENDPOINT}" \
 ROUTER_HEALTH_ENDPOINT="${ROUTER_API_HEALTH_URL}" \
 MILVUS_ADDRESS=localhost:19530 \
-MILVUS_COLLECTION=memory_test_ci \
+MILVUS_COLLECTION="${memory_collection}" \
 python3 09-memory-features-test.py
