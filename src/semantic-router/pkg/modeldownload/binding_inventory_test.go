@@ -91,6 +91,9 @@ func TestSharedCandleORTArtifactKeepsBothFormats(t *testing.T) {
 		if err := inventory.addDeployment(&config.RouterConfig{}, config.ResolvedModelBinding{Deployment: config.ModelDeployment{Provider: provider, Artifact: "models/shared"}, Binding: config.ModelBinding{Contract: "label_distribution.v1"}}); err != nil {
 			t.Fatal(err)
 		}
+		if provider == "candle" && !slices.Contains(inventory.specs["models/shared"].ExcludePatterns, "onnx/weights.data") {
+			t.Fatal("Candle-only snapshot downloads unused ONNX external weights")
+		}
 	}
 	spec := inventory.specs["models/shared"]
 	if len(spec.ExcludePatterns) != 0 || len(spec.RequiredFileGroups) != 2 {

@@ -161,7 +161,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Embedding",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding",
-		Revision:                "4cd14064da151af4508d5ce1b1c2327f7c3fa30f",
+		Revision:                "aa234e965dc317e54c1d421f7cad92becb87f529",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Embedding"},
 		Purpose:                 PurposeEmbedding,
@@ -213,7 +213,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Reranker",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker",
-		Revision:                "b6305795b0a297b16957e9c48b0defb19ecd595b",
+		Revision:                "5956c0f9ff49856d13beb9de03a57f8f38906041",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Reranker"},
 		Purpose:                 PurposeReranking,

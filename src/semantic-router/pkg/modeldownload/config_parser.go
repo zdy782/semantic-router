@@ -140,6 +140,7 @@ var onnxWeightExcludePatterns = []string{
 	"*.onnx",
 	"*.onnx.data",
 	"*.onnx_data",
+	"onnx/weights.data",
 }
 
 // candleEmbeddingModelExcludePatterns returns, per configured embedding model path,

@@ -133,7 +133,7 @@ resolve_embedding_settings() {
         Vela-1.0-Encoder-307M-Embedding)
             EMBEDDING_MODEL="Vela-1.0-Encoder-307M-Embedding"
             EMBEDDING_MODEL_REPO="llm-semantic-router/Vela-1.0-Encoder-307M-Embedding"
-            EMBEDDING_MODEL_REVISION="4cd14064da151af4508d5ce1b1c2327f7c3fa30f"
+            EMBEDDING_MODEL_REVISION="aa234e965dc317e54c1d421f7cad92becb87f529"
             EMBEDDING_MODEL_TYPE="mmbert"
             EMBEDDING_MODEL_PATH_KEY="mmbert_model_path"
             ;;
