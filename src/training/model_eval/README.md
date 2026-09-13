@@ -1,23 +1,33 @@
 # Classifier Model Evaluation
 
 `mom_collection_eval.py` defaults to the Router's served classifier collection:
-Vela Feedback (five classes), FactCheck, Domain (`intent` CLI key), and PII,
-plus the currently served legacy PromptGuard (`jailbreak` key). Vela native
+Vela Feedback (five classes), FactCheck, Domain (`intent` CLI key), PII,
+and Guard (`jailbreak` key). Vela native
 snapshots are pinned to the immutable revisions in the Router registry.
 
 `--collection legacy-mom` explicitly selects the previous five mmBERT-32K
 models and their legacy adapter entries. The filename remains compatible.
 Loading preserves each artifact's tokenizer, context configuration, pooling and
 complete classification head. Wrong label orders or missing head parameters
-fail before scoring. Vela `lora/` bundles have their own published reproduction
-contracts and are not supported by this generic `--use_lora` path.
+fail before scoring. The generic `--use_lora` path supports only the explicit
+legacy collection.
 
 The default datasets are **historical source diagnostics**, not independent
 Vela release benchmarks. In particular, the old Feedback dataset has no
 NO_FEEDBACK gold examples. Results retain all five classes, their support,
 unsupported labels, and full-contract macro F1; zero support does not establish
 quality for that class. Use a separately held-out custom dataset for five-class
-coverage. FactCheck predicts whether verification is needed, not factual truth.
+coverage. FactCheck predicts whether external factual knowledge is needed,
+not factual truth.
+
+Guard detects instruction attacks. Its `benign`/`jailbreak` class names do not
+make the previous mixed toxicity/jailbreak dataset compatible. Served Guard
+therefore requires `--custom_dataset`: a JSON array or CSV with complete `text`
+and independently reviewed `label` values (`benign`/`jailbreak`, or 0/1 in that
+order). Unknown annotations must be resolved or excluded before evaluation;
+they are never silently converted to benign. `safe`/`unsafe` aliases remain
+exclusive to the legacy collection. No default Guard quality score is emitted
+without compatible data.
 
 ## Install
 
@@ -32,6 +42,9 @@ Evaluate one merged model:
 
 ```bash
 python mom_collection_eval.py --model feedback --device cpu --limit 100
+
+python mom_collection_eval.py --model jailbreak --device cpu \
+  --custom_dataset reviewed-attacks.json
 ```
 
 Evaluate several models or their LoRA variants:
@@ -73,7 +86,7 @@ rejects them instead of scoring a random head.
 ## Results
 
 This evaluator uses native full-input argmax inference; it does not reproduce
-Router PII scanning windows or FactCheck threshold decisions. The loaded
+Router Guard/PII scanning windows or FactCheck threshold decisions. The loaded
 precision, pooling, model revision and token budget are recorded in each result.
 
 The default output directory is `src/training/model_eval/results/`. JSON files
@@ -100,12 +113,12 @@ the result.
 
 ```
 python src/training/model_eval/quality_baseline.py \
-    --task jailbreak --device cuda --output-dir baseline/jailbreak
+    --task fact-check --device cuda --output-dir baseline/fact-check
 
 # From src/training/model_eval. The served artifacts predate the training-run
 # manifests, so this reports one missing run_ref per artifact until a run
 # publishes one. Everything else has to pass.
-python -m provenance.cli validate baseline/jailbreak/manifests
+python -m provenance.cli validate baseline/fact-check/manifests
 
 python src/training/model_eval/gap_report.py \
     --baseline baseline/*/*_baseline.json --output baseline/gap-report.md
@@ -116,14 +129,20 @@ python src/training/model_eval/gap_report.py \
 before anything is published. Both are recorded in the result, so a candidate
 number is never mistaken for the baseline.
 
+The baseline runner's historical `jailbreak` dataset is restricted to the
+explicit original mmBERT merged/adapter artifacts. It rejects current Guard
+before accessing that dataset. Use the custom-data collection evaluator above
+for reviewed instruction-attack annotations.
+
 A referenced manifest supplies the identity every number is published under, so
 it also selects the bytes: the run downloads the repository and revision the
 manifest names, and re-hashes the files it lists, whether they came from the Hub
 or from `--artifact-dir`. A directory that does not hash to the manifest, or an
 `--artifact-repo` the manifest does not describe, fails before scoring starts.
 
-The inventory covers every task a maintained configuration loads a classifier
-artifact for. Complexity is not one of them: the signal scores embedding
+The inventory identifies known task bindings and reports other classifier
+artifacts as coverage gaps. A generic `classifiers` signal is not assumed to be
+Guard merely because it uses a classification head. Complexity scores embedding
 prototypes against candidate phrases rather than loading a classifier, so there
 is no artifact to measure until #2568 adds a trained-classifier mode.
 

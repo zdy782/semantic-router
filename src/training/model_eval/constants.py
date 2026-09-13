@@ -147,6 +147,7 @@ VELA_RELEASE_REVISIONS = {
 MODEL_REGISTRY = deepcopy(LEGACY_MODEL_REGISTRY)
 for _role, _suffix in {
     "feedback": "Feedback",
+    "jailbreak": "Guard",
     "fact-check": "FactCheck",
     "intent": "Domain",
     "pii": "PII",
@@ -157,6 +158,10 @@ for _role, _suffix in {
     # Vela releases are self-contained task models.
     del _entry["lora_id"]
 MODEL_REGISTRY["feedback"]["labels"].append("NO_FEEDBACK")
+# Guard detects instruction attacks. The historical dataset mixed toxicity
+# with attacks; identical binary label names do not make that gold compatible.
+del MODEL_REGISTRY["jailbreak"]["hf_dataset"]
+del MODEL_REGISTRY["jailbreak"]["dataset_label_aliases"]
 
 COLLECTIONS = {"served": MODEL_REGISTRY, "legacy-mom": LEGACY_MODEL_REGISTRY}
 

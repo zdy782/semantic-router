@@ -33,9 +33,11 @@ from tqdm import tqdm
 
 try:
     from .constants import COLLECTIONS, LANGUAGE_CODES, MODEL_REGISTRY, model_registry
+    from .dataset_contracts import classification_label_id, require_default_dataset
     from .model_loading import load_registered_model, tokenize_complete
 except ImportError:
     from constants import COLLECTIONS, LANGUAGE_CODES, MODEL_REGISTRY, model_registry
+    from dataset_contracts import classification_label_id, require_default_dataset
     from model_loading import load_registered_model, tokenize_complete
 import warnings
 
@@ -232,7 +234,12 @@ def load_eval_data(model_name: str, args) -> Dataset:
                 )
             if args.limit:
                 ds = ds.select(range(min(len(ds), args.limit)))
+            if config["type"] == "text_classification":
+                ds = ds.map(
+                    lambda row: {"label": classification_label_id(row["label"], config)}
+                )
             return ds
+        require_default_dataset(config)
         #  da  PII
         if model_name == "pii":
             logger.info("Fetching Presidio dataset...")
@@ -337,17 +344,8 @@ def load_eval_data(model_name: str, args) -> Dataset:
                 ds = ds.remove_columns(["label"])
             ds = ds.rename_column(config["label_col"], "label")
 
-        label2id = {label: i for i, label in enumerate(config["labels"])}
-
         def map_to_int(example):
-            label = example["label"]
-            if isinstance(label, str):
-                label = config.get("dataset_label_aliases", {}).get(label, label)
-                if label not in label2id:
-                    raise ValueError(f"Unrecognized dataset label: {label}")
-                example["label"] = label2id[label]
-            elif label not in range(len(config["labels"])):
-                raise ValueError(f"Dataset label outside artifact contract: {label}")
+            example["label"] = classification_label_id(example["label"], config)
             return example
 
         ds = ds.map(map_to_int)

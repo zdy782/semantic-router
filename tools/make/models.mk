@@ -114,7 +114,7 @@ download-models-lora: ## Download models for LoRA and advanced embedding tests
 # The evaluation registry pins current Vela native snapshots. The MMBERT lists
 # below and their download targets intentionally remain explicit legacy tools.
 .PHONY: download-eval-models
-download-eval-models: ## Download current native evaluation models (Vela plus legacy PromptGuard)
+download-eval-models: ## Download Vela native eval models, including attack-only Guard (legacy is explicit)
 	@python3 -m src.training.model_eval.download_models --output $(MODELS_DIR)
 
 # Minimal model set for perf/benchmarks (CI performance tests).

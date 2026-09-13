@@ -152,10 +152,14 @@ class EvaluationRegistryMatchesServedModels(unittest.TestCase):
         self.assertEqual(len(MODEL_REGISTRY["feedback"]["labels"]), 5)
         self.assertEqual(MODEL_REGISTRY["feedback"]["labels"][4], "NO_FEEDBACK")
         self.assertEqual(len(LEGACY_MODEL_REGISTRY["feedback"]["labels"]), 4)
+        self.assertEqual(MODEL_REGISTRY["jailbreak"]["labels"], ["benign", "jailbreak"])
+        self.assertNotIn("hf_dataset", MODEL_REGISTRY["jailbreak"])
+        self.assertNotIn("dataset_label_aliases", MODEL_REGISTRY["jailbreak"])
         self.assertEqual(
-            MODEL_REGISTRY["jailbreak"], LEGACY_MODEL_REGISTRY["jailbreak"]
+            LEGACY_MODEL_REGISTRY["jailbreak"]["dataset_label_aliases"],
+            {"safe": "benign", "unsafe": "jailbreak"},
         )
-        for role in ("feedback", "fact-check", "intent", "pii"):
+        for role in MODEL_REGISTRY:
             self.assertNotIn("lora_id", MODEL_REGISTRY[role])
             self.assertRegex(MODEL_REGISTRY[role]["revision"], r"^[0-9a-f]{40}$")
         with self.assertRaises(ValueError):
