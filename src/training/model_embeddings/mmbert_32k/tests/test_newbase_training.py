@@ -8,6 +8,7 @@ from pathlib import Path
 
 try:
     import torch
+    from safetensors.torch import save_file
     from transformers import ModernBertConfig, ModernBertModel
 
     from src.training.model_embeddings.mmbert_32k.newbase_data import (
@@ -21,6 +22,12 @@ try:
         state_digest,
     )
     from src.training.model_embeddings.mmbert_32k.newbase_stream import prepare_stream
+    from src.training.model_embeddings.mmbert_32k.newbase_teacher import (
+        identity_digest,
+        input_identity,
+        record_inputs,
+        token_digest,
+    )
     from src.training.model_embeddings.mmbert_32k.newbase_training import (
         make_optimizer,
         restore_training_state,
@@ -241,6 +248,83 @@ class NewBaseTrainingTest(unittest.TestCase):
                 ],
             )
             self.assertEqual(len(NewBaseTask.resume(output / "step-2").layer_heads), 4)
+            cache = root / "teacher"
+            cache.mkdir()
+            inputs = sorted(
+                {
+                    ids
+                    for row in datasets["train"].records
+                    for ids in record_inputs(row, "reranker")
+                }
+            )
+            entries = []
+            for index, ids in enumerate(inputs):
+                identity = input_identity(ids, components)
+                batch = batch_fixtures.TokenBatch.encode(
+                    tokenizer,
+                    [components[ids[0]]["text"]],
+                    [components[ids[1]]["text"]],
+                    128,
+                )
+                entries.append(
+                    {
+                        "key": identity_digest(identity),
+                        "identity": identity,
+                        "value_index": index,
+                        "token_sha256": token_digest(batch.rows[0], batch.pad_id),
+                    }
+                )
+            (cache / "entries.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in entries)
+            )
+            save_file(
+                {"values": torch.arange(len(inputs), dtype=torch.float32)[:, None]},
+                cache / "values.safetensors",
+            )
+            (cache / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "complete": True,
+                        "task": "reranker",
+                        "source_split": "train",
+                        "train_manifest_sha256": datasets["train"].manifest_sha256,
+                        "draws_sha256": stream["draws_sha256"],
+                        "dimensions": 1,
+                        "teacher": {
+                            "repo_id": "synthetic/teacher",
+                            "revision": "fixed",
+                            "files": {"model.safetensors": "fixed-digest"},
+                            "representation": "synthetic pair scores",
+                        },
+                        "files": {
+                            filename: file_digest(cache / filename)
+                            for filename in ("entries.jsonl", "values.safetensors")
+                        },
+                    }
+                )
+            )
+            config["teacher"] = {
+                "objective": "query_order",
+                "weight": 0.25,
+                "directory": str(cache),
+                "manifest_sha256": file_digest(cache / "manifest.json"),
+            }
+            path.write_text(json.dumps(config))
+            treated = root / "teacher-run"
+            run(config, file_digest(path), treated, device=torch.device("cpu"))
+            result = json.loads((treated / "completion.json").read_bytes())
+            self.assertTrue(result["all_draws_complete"])
+            self.assertEqual(
+                result["teacher_manifest_sha256"], config["teacher"]["manifest_sha256"]
+            )
+            self.assertEqual(
+                state_digest(NewBaseTask.resume(output / "step-0").state_dict()),
+                state_digest(NewBaseTask.resume(treated / "step-0").state_dict()),
+            )
+            self.assertNotEqual(
+                state_digest(NewBaseTask.resume(output / "step-2").state_dict()),
+                state_digest(NewBaseTask.resume(treated / "step-2").state_dict()),
+            )
 
 
 if __name__ == "__main__":

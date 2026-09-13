@@ -47,7 +47,7 @@ def order_distillation(
     valid: torch.Tensor,
     temperature: float = 2.0,
 ) -> torch.Tensor:
-    """KL on candidate ordering; the current full-exit teacher is detached."""
+    """KL on candidate ordering; either an internal or external teacher is detached."""
     _validate_scores(student, valid)
     _validate_scores(teacher, valid)
     if not math.isfinite(temperature) or temperature <= 0:
@@ -65,6 +65,43 @@ def order_distillation(
         reduction="none",
     )
     return terms.masked_fill(~mask, 0).sum(dim=1).mean() * temperature**2
+
+
+def relational_cosine_loss(
+    student_left: torch.Tensor,
+    student_right: torch.Tensor,
+    teacher_left: torch.Tensor,
+    teacher_right: torch.Tensor,
+    valid: torch.Tensor,
+) -> torch.Tensor:
+    """Mean squared cosine discrepancy, with equal weight per eligible anchor.
+
+    Only relations are matched, so an orthogonal change of representation basis
+    is immaterial. The teacher supplies soft geometry rather than relevance gold.
+    """
+    if (
+        student_left.ndim != _MATRIX_DIMENSIONS
+        or student_right.ndim != _MATRIX_DIMENSIONS
+        or teacher_left.shape != student_left.shape
+        or teacher_right.shape != student_right.shape
+        or student_left.shape[1] != student_right.shape[1]
+        or valid.shape != (len(student_left), len(student_right))
+        or valid.dtype != torch.bool
+    ):
+        raise ValueError("Cosine relation geometry and boolean mask must agree")
+    vectors = (student_left, student_right, teacher_left, teacher_right)
+    if any(not torch.isfinite(value).all() for value in vectors):
+        raise ValueError("Cosine relation inputs must be finite")
+    left, right = [functional.normalize(value.float(), dim=-1) for value in vectors[:2]]
+    reference_left, reference_right = [
+        functional.normalize(value.detach().float(), dim=-1) for value in vectors[2:]
+    ]
+    error = (left @ right.T - reference_left @ reference_right.T).square()
+    counts = valid.sum(-1)
+    selected = counts > 0
+    if not selected.any():
+        return error.sum() * 0.0
+    return (error.masked_fill(~valid, 0).sum(-1)[selected] / counts[selected]).mean()
 
 
 def cosent_loss(

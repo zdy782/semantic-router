@@ -18,6 +18,7 @@ from .newbase_objectives import (
     paraphrase_loss,
     ranking_terms,
 )
+from .newbase_teacher import embedding_teacher_loss
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,9 @@ def embedding_step(
     maximum: int,
     objective: ObjectiveConfig,
     amp: bool,
+    teacher_cache=None,
+    teacher_weight: float = 0.0,
+    teacher_temperature: float = 2.0,
 ):
     objective.validate("embedding")
     source = records[0]["source"]
@@ -229,8 +233,9 @@ def embedding_step(
         intervention = next(iter(losses.values())) * 0.0
     else:
         positives, valid = retrieval_masks(records, documents, components)
-        positives, valid = torch.tensor(positives, device=device), torch.tensor(
-            valid, device=device
+        positives, valid = (
+            torch.tensor(positives, device=device),
+            torch.tensor(valid, device=device),
         )
         count = len(records)
         scores = {
@@ -255,7 +260,7 @@ def embedding_step(
         )
     total = sum(weight * losses[key] for key, weight in model.exits.weighted())
     total = total + objective.distillation_weight * intervention
-    return total, {
+    metrics = {
         "base_loss": sum(
             weight * losses[key].detach().item()
             for key, weight in model.exits.weighted()
@@ -265,6 +270,22 @@ def embedding_step(
         "maximum_tokens": max(map(len, batch.rows)),
         "token_sha256": batch.digest(),
     }
+    if teacher_weight:
+        if teacher_cache is None:
+            raise ValueError("Nonzero external teacher weight requires a cache")
+        reference = teacher_cache.lookup(
+            [(key,) for key in component_ids], components, batch, device
+        )
+        extra = embedding_teacher_loss(
+            values[model.exits.layers[-1], model.exits.dimensions[0]],
+            reference,
+            component_ids,
+            components,
+            query_count=None if semantic else len(records),
+        )
+        total = total + teacher_weight * extra
+        metrics["external_teacher_loss"] = extra.detach().item()
+    return total, metrics
 
 
 def reranker_step(
@@ -278,6 +299,9 @@ def reranker_step(
     maximum: int,
     objective: ObjectiveConfig,
     amp: bool,
+    teacher_cache=None,
+    teacher_weight: float = 0.0,
+    teacher_temperature: float = 2.0,
 ):
     objective.validate("reranker")
     candidates = [
@@ -293,8 +317,9 @@ def reranker_step(
     values = forward_complete(model, batch, device, token_budget, amp=amp)
     width = max(map(len, candidates))
     labels = torch.full((len(records), width), -1.0, device=device)
-    valid, judged = torch.zeros_like(labels, dtype=torch.bool), torch.zeros_like(
-        labels, dtype=torch.bool
+    valid, judged = (
+        torch.zeros_like(labels, dtype=torch.bool),
+        torch.zeros_like(labels, dtype=torch.bool),
     )
     for index, (row, ids) in enumerate(zip(records, candidates, strict=True)):
         valid[index, : len(ids)] = True
@@ -306,6 +331,7 @@ def reranker_step(
                 labels[index, column] = 0.0
                 judged[index, column] = True
     total, auxiliary = next(iter(values.values())).sum() * 0.0, 0.0
+    full_scores = None
     for key, weight in model.exits.weighted():
         scores = torch.zeros_like(labels)
         offset = 0
@@ -321,9 +347,28 @@ def reranker_step(
         )
         total = total + weight * (base + objective.lambda_weight * extra)
         auxiliary += weight * extra.detach().item()
-    return total, {
+        if key == (model.exits.layers[-1], model.exits.dimensions[0]):
+            full_scores = scores
+    metrics = {
         "intervention": auxiliary,
         "input_count": len(batch.rows),
         "maximum_tokens": max(map(len, batch.rows)),
         "token_sha256": batch.digest(),
     }
+    if teacher_weight:
+        if teacher_cache is None:
+            raise ValueError("Nonzero external teacher weight requires a cache")
+        inputs = [
+            (row["query_component_id"], key)
+            for row, ids in zip(records, candidates, strict=True)
+            for key in ids
+        ]
+        cached = teacher_cache.lookup(inputs, components, batch, device).flatten()
+        reference, offset = torch.zeros_like(labels), 0
+        for row, ids in enumerate(candidates):
+            reference[row, : len(ids)] = cached[offset : offset + len(ids)]
+            offset += len(ids)
+        extra = order_distillation(full_scores, reference, valid, teacher_temperature)
+        total = total + teacher_weight * extra
+        metrics["external_teacher_loss"] = extra.detach().item()
+    return total, metrics

@@ -24,6 +24,7 @@ from .newbase_evaluation import select_candidate
 from .newbase_model import ExitSpec, NewBaseTask, state_digest, verify_files
 from .newbase_scoring import score_corpus
 from .newbase_stream import load_stream
+from .newbase_teacher import TeacherCache, validate_teacher_config
 
 _ADAM_MOMENTS = 2
 
@@ -70,8 +71,9 @@ def make_optimizer(model, *, steps: int, warmup: int, config: dict | None = None
     config = config or {}
     encoder_lr, head_lr = config.get("encoder_lr", 2e-5), config.get("head_lr", 1e-4)
     weight_decay, epsilon = config.get("weight_decay", 0.01), config.get("eps", 1e-8)
-    minimum_ratio, betas = config.get("minimum_lr_ratio", 0.1), tuple(
-        config.get("betas", (0.9, 0.999))
+    minimum_ratio, betas = (
+        config.get("minimum_lr_ratio", 0.1),
+        tuple(config.get("betas", (0.9, 0.999))),
     )
     if (
         any(
@@ -241,6 +243,8 @@ def validate_config(config: dict) -> None:
         if type(config[key]) is not int or config[key] <= 0:
             raise ValueError("Token budgets must be positive integers")
     ExitSpec.from_dict(config["exits"])
+    if config.get("teacher") is not None:
+        validate_teacher_config(config["teacher"], config["task"])
 
 
 def run(
@@ -271,6 +275,19 @@ def run(
     draws, stream = load_stream(Path(plan["draws_directory"]), corpus)
     if stream["draws_sha256"] != plan["draws_sha256"] or len(draws) != plan["steps"]:
         raise ValueError("Training stream differs from the configured run")
+    teacher = plan.get("teacher") or {}
+    teacher_cache = (
+        TeacherCache.load(
+            Path(teacher["directory"]),
+            teacher["manifest_sha256"],
+            task=task,
+            corpus=corpus,
+            draws=draws,
+            draws_sha256=stream["draws_sha256"],
+        )
+        if teacher.get("weight", 0)
+        else None
+    )
     baseline = (
         _read_locked(Path(plan["baseline_path"]), plan["baseline_sha256"])
         if plan.get("selection")
@@ -312,6 +329,10 @@ def run(
     tokenizer = AutoTokenizer.from_pretrained(
         base, local_files_only=True, trust_remote_code=False
     )
+    if teacher_cache is not None:
+        teacher_cache.validate_tokens(
+            tokenizer, corpus.components, max(plan["source_maximum_tokens"].values())
+        )
     model.to(device)
     frozen_buffers = state_digest(dict(model.encoder.named_buffers()))
     optimizer, scheduler, parameters = make_optimizer(
@@ -328,6 +349,8 @@ def run(
         "draws_sha256": stream["draws_sha256"],
         "expected_initial_state_sha256": plan.get("expected_initial_state_sha256"),
     }
+    if teacher_cache is not None:
+        identity["teacher_manifest_sha256"] = teacher_cache.manifest_sha256
     completed, elapsed_before = 0, 0.0
     evaluations = []
     if resume:
@@ -424,6 +447,9 @@ def run(
                     maximum=plan["source_maximum_tokens"][draw["source"]],
                     objective=ObjectiveConfig(**plan["objectives"][draw["source"]]),
                     amp=plan["training_precision"] == "bfloat16",
+                    teacher_cache=teacher_cache,
+                    teacher_weight=teacher.get("weight", 0.0),
+                    teacher_temperature=teacher.get("temperature", 2.0),
                 )
                 if not torch.isfinite(loss):
                     raise ValueError("Nonfinite logical objective")

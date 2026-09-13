@@ -13,61 +13,19 @@ The public [mmBERT-32K model guide](../../../../website/docs/training/mmbert-32k
 explains when to use each architecture. This README focuses on running the
 checked training configurations.
 
-## Reproduce Vela text checkpoints
+## Published Vela checkpoints
 
-The Vela task-weight continuation uses the run-specific `reproduction/`
-package shipped with `llm-semantic-router/Vela-1.0-Encoder-307M-Embedding`
-and `llm-semantic-router/Vela-1.0-Encoder-307M-Reranker`. Find each published
-checkpoint and its immutable revision in the
-[Vela model collection](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798).
-The BGE/AllNLI configurations below are the original training entry points;
-they do not reproduce the Vela MIRACL, semantic-pair, and long-context repair
-mixtures.
+Current Vela embedding and reranking checkpoints use the shared
+[Vela Base](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M).
+Their model cards provide native loading examples. The BGE/AllNLI and
+BGE/Quora/FEVER configurations below describe the original mmBERT training
+recipes; they do not reproduce a current Vela checkpoint.
 
-Download the chosen checkpoint's reproduction package, using the exact
-revision reported by its model card:
-
-```bash
-export VELA_MODEL=llm-semantic-router/Vela-1.0-Encoder-307M-Embedding
-export VELA_REVISION="REPLACE_WITH_MODEL_CARD_COMMIT_SHA"
-export VELA_SNAPSHOT=/path/to/vela-snapshot
-
-hf download "$VELA_MODEL" --revision "$VELA_REVISION" \
-  --include 'reproduction/*' --local-dir "$VELA_SNAPSHOT"
-cd "$VELA_SNAPSHOT/reproduction"
-python -m pip install --requirement requirements.txt
-export VELA_REPRODUCTION_ROOT="$PWD/data-and-runs"
-python download_inputs.py --root "$VELA_REPRODUCTION_ROOT"
-python train_vela_long_repair_clean.py --help
-```
-
-Install the package's recorded PyTorch accelerator build before its Python
-requirements. Follow `reproduction/README.md` for the complete initial
-training, development selection, clean correction, frozen final evaluation,
-and ONNX export commands. It includes pinned inputs, source hashes, actual
-training arguments, and the explicit intermediate/full-layer representation
-contract. The task models continue their original task weights; shared encoder
-architecture does not imply descent from the newly continued Vela Base weights.
-
-Vela native inference follows the loaded encoder dtype with inference autocast
-disabled. Embedding masked mean and L2 normalization use FP32; reranker heads
-also execute in FP32, including when an outer caller enables autocast. The
-explicit reranker reader enforces this inference boundary while preserving
-legacy behavior for checkpoints without representation metadata. Training may
-use FP32 master weights with BF16 AMP, but checkpoint selection must evaluate a
-separate candidate in the declared deployment precision. Historical AMP
-inference results are a different arithmetic mode and must be labeled as such;
-they cannot establish native or ONNX accuracy in another mode.
-
-The Vela PAWS-X loader defaults to excluding either-sentence empty or `NS`
-placeholders with `strip().casefold()`, using [pawsx_data.py](pawsx_data.py).
-The clean correction records exclusion counts and asserts that sampled pairs
-contain no placeholders. Archived recipes explicitly opt into historical
-sampling only to reproduce their recorded runs; their existing manifests and
-scores remain unchanged. Raw and cleaned PAWS-X evaluations are reported
-separately, with thresholds selected on development data. The BGE/AllNLI and
-BGE/Quora/FEVER loaders in this repository do not load PAWS-X, so this
-dataset-specific placeholder rule is not applied to those sources.
+Native evaluation uses the declared encoder dtype with inference autocast
+disabled. Embedding pooling/normalization and reranker heads use FP32. Training
+may use FP32 master weights with BF16 forward, but development selection must
+use the declared evaluation precision. Results from different arithmetic modes
+remain separate.
 
 ## Train a new task from a standard Base
 
@@ -145,6 +103,45 @@ from BCE and LambdaLoss; `positive_bce_judged: false` also excludes an
 unjudged composite positive from those absolute relevance terms. See
 [`ObjectiveConfig`](newbase_batches.py) for scales, temperature, candidate
 limits, and defaults. Source names do not select the loss implicitly.
+
+An optional `teacher` configuration adds frozen external soft supervision:
+
+```json
+{
+  "teacher": {
+    "objective": "query_order",
+    "weight": 0.25,
+    "temperature": 2.0,
+    "directory": "/data/retrieval/teacher-cache",
+    "manifest_sha256": "CACHE_MANIFEST_SHA256"
+  }
+}
+```
+
+Use `query_order` for rerankers or `relational_cosine` for embeddings. Rerankers
+match the teacher's per-query score distribution at the full exit. Embeddings
+match cosine relations at the full exit, with equal weight per eligible anchor
+and relation family. Duplicate or related components do not create unrelated
+negative pairs; semantic batches also retain their explicitly paired relation.
+Both objectives leave the original supervised losses and relevance masks
+unchanged. Teacher tensors are detached. Omitting the configuration, or setting
+its weight to zero, preserves the original loss computation.
+
+Generate the cache only from the frozen training stream. Its `manifest.json`
+contains `complete: true`, `task`, `source_split`, `train_manifest_sha256`,
+`draws_sha256`, `dimensions`, and a `files` mapping from `entries.jsonl` and
+`values.safetensors` to SHA256s. A `teacher` object records `repo_id`, `revision`,
+model `files` and the actual `representation`. Each JSONL entry has an ordered
+`identity` made with [`input_identity`](newbase_teacher.py), its
+`identity_digest` as `key`, a contiguous `value_index`, and a `token_sha256`
+made with `token_digest(input_ids, pad_id)`. `record_inputs` enumerates every
+required component or query/document pair. The safetensors file contains one
+FP32 `values` tensor: unit vectors shaped `[entries, dimensions]` for embedding,
+or scores shaped `[entries, 1]` for reranking. Cache loading checks exact input
+coverage, corpus/stream identities, file hashes, geometry and finite values;
+each lookup also checks the actual complete token sequence. Tokenization
+mismatches fail rather than reusing another input's prediction. Cache generation,
+source admission and teacher choice remain the caller's responsibility.
 
 Run from the repository root with an environment that supports the Base's
 actual Transformers configuration and accelerator. Expose one assigned device
