@@ -131,9 +131,12 @@ func classifierScoresFinite(
 	labels []string,
 	scores map[string]float64,
 ) bool {
+	if len(labels) == 0 || len(scores) != len(labels) {
+		return false
+	}
 	for _, label := range labels {
-		score := scores[label]
-		if math.IsNaN(score) || math.IsInf(score, 0) {
+		score, exists := scores[label]
+		if !exists || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > 1 {
 			return false
 		}
 	}
