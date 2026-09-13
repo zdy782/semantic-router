@@ -189,7 +189,7 @@ type ReMoMAlgorithmConfig struct {
 }
 
 type ModelReasoningControl struct {
-	UseReasoning         *bool  `yaml:"use_reasoning"`
+	UseReasoning         *bool  `yaml:"use_reasoning,omitempty"`
 	ReasoningDescription string `yaml:"reasoning_description,omitempty"`
 	ReasoningMode        string `yaml:"reasoning_mode,omitempty"`
 	ReasoningEffort      string `yaml:"reasoning_effort,omitempty"`
