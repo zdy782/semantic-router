@@ -12,12 +12,17 @@ import (
 	"testing"
 
 	"github.com/vllm-project/semantic-router/dashboard/backend/setupmode"
+	routerconfig "github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 )
 
 func setupActivationRegressionRuntime(t *testing.T) (string, string, fakeLifecycleDocker) {
 	t.Helper()
 	root := t.TempDir()
-	configPath := createBootstrapSetupConfig(t, root)
+	stateDir := filepath.Join(root, ".vllm-sr")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := createBootstrapSetupConfig(t, stateDir)
 	fake := writeFakeLifecycleDockerCLI(t)
 	t.Setenv("PATH", filepath.Dir(fake.path)+":"+os.Getenv("PATH"))
 	t.Setenv(routerContainerNameEnv, "activation-vllm-sr-router-container")
@@ -29,6 +34,7 @@ func setupActivationRegressionRuntime(t *testing.T) (string, string, fakeLifecyc
 	t.Setenv("TEST_ENVOY_CONTAINER", "activation-vllm-sr-envoy-container")
 	t.Setenv("TEST_ENVOY_STATUS_FILE", fake.envoyStatusPath)
 	t.Setenv("VLLM_SR_RUNTIME_CONFIG_PATH", configPath)
+	t.Setenv(routerconfig.ManagementInternalListenerEnv, "true")
 	t.Setenv("VLLM_SR_ENVOY_CONFIG_PATH", filepath.Join(root, "envoy.yaml"))
 	t.Setenv("VLLM_SR_PYTHON_BIN", testRuntimeSyncPythonBinary(t))
 	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
@@ -68,9 +74,70 @@ func TestSetupActivationRendersOmittedReasoningAndStartsRuntime(t *testing.T) {
 	if err != nil || bytes.Contains(data, []byte("use_reasoning: null")) {
 		t.Fatalf("activated config is not canonical: %s, %v", data, err)
 	}
-	data, err = os.ReadFile(filepath.Join(root, "envoy.yaml"))
-	if err != nil || !bytes.Contains(data, []byte("test_model_cluster")) {
+	active, err := routerconfig.Parse(configPath)
+	if err != nil || active.ManagementAPI.BindAddress != "0.0.0.0" || active.ManagementAPI.Port != 8080 {
+		t.Fatalf("setup did not materialize the container management listener: %+v, %v", active, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(configPath), ".vllm-sr", "runtime-config.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("activation nested the runtime-owned config: %v", statErr)
+	}
+	data, err = os.ReadFile(filepath.Join(filepath.Dir(configPath), "envoy.yaml"))
+	if err != nil || !bytes.Contains(data, []byte("model_test_2dmodel_cluster")) {
 		t.Fatalf("actual Envoy configuration was not generated: %s, %v", data, err)
+	}
+}
+
+func TestSetupActivationMaterializesAuthoredEmptyListener(t *testing.T) {
+	configPath, root, _ := setupActivationRegressionRuntime(t)
+	patch := createValidSetupPatch()
+	// An authored empty listener retains its omission semantics through the
+	// shared managed CLI materializer, without typed-transport cleanup.
+	patch["global"] = map[string]interface{}{
+		"services": map[string]interface{}{"management_api": map[string]interface{}{}},
+	}
+	w := httptest.NewRecorder()
+	body := mustJSONRaw(t, SetupConfigRequest{Config: mustJSONRaw(t, patch)})
+	SetupActivateHandler(configPath, false, root, setupmode.New(configPath, false))(
+		w, httptest.NewRequest(http.MethodPost, "/api/setup/activate", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("activation failed: %d %s", w.Code, w.Body.String())
+	}
+	active, err := routerconfig.Parse(configPath)
+	if err != nil || active.ManagementAPI.BindAddress != "0.0.0.0" || active.ManagementAPI.Port != 8080 {
+		t.Fatalf("authored empty listener suppressed runtime materialization: %+v, %v", active, err)
+	}
+}
+
+func TestSetupActivationPreservesExplicitManagementListener(t *testing.T) {
+	configPath, root, _ := setupActivationRegressionRuntime(t)
+	patch := createValidSetupPatch()
+	patch["global"] = map[string]interface{}{
+		"services": map[string]interface{}{
+			"management_api": map[string]interface{}{
+				"bind_address": "0.0.0.0",
+				"port":         9091,
+				"auth": map[string]interface{}{
+					"mode":   "bearer",
+					"tokens": []map[string]interface{}{{"env": "TEST_MANAGEMENT_TOKEN", "role": "admin"}},
+				},
+			},
+		},
+	}
+	w := httptest.NewRecorder()
+	body := mustJSONRaw(t, SetupConfigRequest{Config: mustJSONRaw(t, patch)})
+	SetupActivateHandler(configPath, false, root, setupmode.New(configPath, false))(
+		w, httptest.NewRequest(http.MethodPost, "/api/setup/activate", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("activation failed: %d %s", w.Code, w.Body.String())
+	}
+	active, err := routerconfig.Parse(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := active.ManagementAPI
+	if listener.BindAddress != "0.0.0.0" || listener.Port != 9091 || listener.Auth.Mode != "bearer" ||
+		len(listener.Auth.Tokens) != 1 || listener.Auth.Tokens[0].Env != "TEST_MANAGEMENT_TOKEN" {
+		t.Fatalf("explicit listener/auth was changed: %+v", listener)
 	}
 }
 

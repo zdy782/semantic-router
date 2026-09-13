@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from cli import container_start
 from cli.bootstrap import build_bootstrap_config, ensure_bootstrap_workspace
 from cli.commands.runtime_support import realize_runtime_config
@@ -28,9 +27,7 @@ def test_fresh_amd_bootstrap_reaches_standby_specs_with_real_envoy_render(
     monkeypatch.setattr(
         container_start,
         "get_runtime_images",
-        lambda **kwargs: {
-            name: "test-image" for name in ("router", "envoy", "dashboard")
-        },
+        lambda **kwargs: dict.fromkeys(("router", "envoy", "dashboard"), "test-image"),
     )
     docker = tmp_path / "docker"
     docker.touch()
