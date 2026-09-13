@@ -11,7 +11,7 @@ has an overall unsafe threshold and may select specific hazard categories.
 Content risk and prompt attacks require different labels. A benign discussion
 of a harmful topic can be safe, while a harmful request need not contain any
 attempt to override system instructions. Safety extracts content-risk scores;
-PromptGuard supplies the separate jailbreak signal.
+Guard supplies the separate jailbreak signal.
 
 ## When to Use
 
@@ -89,7 +89,7 @@ returns HTTP 503 when the decision remains unknown. A scored unsafe request
 selects the configured handling route. Diagnostics expose matched rule names in
 `x-vsr-matched-safety`, the classification result, dashboard and replay record.
 
-See [shared model configuration](../../../installation/runtime/safety.md)
+See [shared model configuration](/docs/installation/runtime/safety)
 for native context budgets, external endpoints and failure policies, and the
 [complete HTTP example](https://github.com/vllm-project/semantic-router/blob/main/config/fragments/signal/safety/content-safety.yaml)
 for a category-specific policy.

@@ -27,10 +27,12 @@ func (p *identityViewProvider) RepresentationIdentity(options Options, policy st
 	}
 	return IdentityFromDescriptor(raw, policy)
 }
+
 func (p *identityViewProvider) CacheIdentityForOptions(options Options) string {
 	identity, _ := p.RepresentationIdentity(options, "embedding-request-cache-v1")
 	return identity.Fingerprint
 }
+
 func (p *identityViewProvider) CacheIdentity() string { return p.CacheIdentityForOptions(Options{}) }
 
 func TestOwnedProviderViewsKeepResourceAndSeparateRepresentations(t *testing.T) {

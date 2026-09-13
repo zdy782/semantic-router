@@ -14,10 +14,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from ..sequence_repair.data import assert_disjoint, file_receipts
-from ..sequence_repair.model import load_model, save_adapter
+from ..sequence_repair.optimization import (
+    initial_artifact_receipt,
+    load_trainable_model,
+    optimizer_groups,
+    save_training_checkpoint,
+    validate_method,
+)
 from ..sequence_repair.train import token_budget_microbatches
 from .vela_hazard import evaluate, masked_loss, read_rows
 from .vela_hazard_diagnostics import SupervisionDiagnostics
+from .vela_hazard_joint import safe_group_indices, select_joint_operating_point
 from .vela_hazard_operating import select_operating_point
 
 SAFE_SAMPLE_FRACTION = 0.3
@@ -128,11 +135,13 @@ def main():
     for key in [
         "base",
         "base-revision",
-        "adapter",
         "contract",
         "output",
     ]:
         parser.add_argument(f"--{key}", required=True)
+    parser.add_argument("--adapter")
+    parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    parser.add_argument("--fresh-head", action="store_true")
     parser.add_argument("--train", nargs="+", required=True)
     parser.add_argument("--dev", nargs="+", required=True)
     parser.add_argument("--source-balanced-sampling", action="store_true")
@@ -144,10 +153,19 @@ def main():
     parser.add_argument("--length-balanced-sampling", action="store_true")
     parser.add_argument(
         "--selection",
-        choices=["macro-ap", "source-macro-ap", "fp-budget-macro-f1"],
+        choices=[
+            "macro-ap",
+            "source-macro-ap",
+            "fp-budget-macro-f1",
+            "joint-fp-budget-macro-f1",
+        ],
         default="macro-ap",
     )
     parser.add_argument("--selection-false-positive-budget", type=float, default=0.05)
+    parser.add_argument(
+        "--selection-safe-groups",
+        help="Joint selector only: JSON mapping group names to fully-safe DEV IDs; all-safe is always constrained",
+    )
     parser.add_argument("--steps", type=int, default=1500)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--accumulate", type=int, default=4)
@@ -159,12 +177,23 @@ def main():
     )
     parser.add_argument("--selection-minimum-support", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
+    parser.add_argument("--head-learning-rate", type=float)
     parser.add_argument("--eval-every", type=int, default=150)
     parser.add_argument(
         "--evaluation-dtype", choices=["bfloat16", "float32"], default="bfloat16"
     )
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
+    validate_method(args.method, args.adapter, args.fresh_head)
+    if args.selection_safe_groups and args.selection != "joint-fp-budget-macro-f1":
+        raise ValueError("Explicit safe groups require joint-fp-budget-macro-f1")
+    if (
+        args.selection == "joint-fp-budget-macro-f1"
+        and args.selection_minimum_support != 1
+    ):
+        raise ValueError(
+            "Joint selection preserves all-taxonomy F1 with minimum support 1"
+        )
     if (
         min(
             args.steps,
@@ -190,8 +219,9 @@ def main():
     torch.set_num_threads(8)
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
-    model, tokenizer, _label_to_id, id_to_label = load_model(
-        args.base, args.contract, args.adapter, trainable=True
+    initial_artifacts = initial_artifact_receipt(args.base, args.adapter)
+    model, tokenizer, _label_to_id, id_to_label = load_trainable_model(
+        args.base, args.contract, args.adapter, args.method, args.fresh_head
     )
     if model.config.problem_type != "multi_label_classification":
         raise ValueError("Hazard must have a multi-label config contract")
@@ -200,6 +230,13 @@ def main():
     labels = [id_to_label[i] for i in range(len(id_to_label))]
     rows, dev = read_rows(args.train, len(labels)), read_rows(args.dev, len(labels))
     assert_disjoint(rows, dev)
+    selection_safe_groups = (
+        json.loads(Path(args.selection_safe_groups).read_text())
+        if args.selection_safe_groups
+        else None
+    )
+    if args.selection == "joint-fp-budget-macro-f1":
+        safe_group_indices(dev, selection_safe_groups)
     train, rejected, pools = [], [], [[] for _ in labels]
     safe = []
     for row in rows:
@@ -240,11 +277,15 @@ def main():
     metadata = {
         "base_model": args.base_id,
         "base_revision": args.base_revision,
-        "initial_adapter_sha256": hashlib.sha256(
-            (Path(args.adapter) / "adapter_model.safetensors").read_bytes()
-        ).hexdigest(),
+        "method": args.method,
+        "fresh_head": args.fresh_head,
+        "initial_artifacts": initial_artifacts,
+        "initial_adapter_sha256": initial_artifacts.get("adapter_model.safetensors"),
         "train": file_receipts(args.train),
         "dev": file_receipts(args.dev),
+        "selection_safe_groups": file_receipts(
+            [args.selection_safe_groups] if args.selection_safe_groups else []
+        ),
         "rejected": rejected,
         "labels": labels,
         "objective": (
@@ -268,6 +309,9 @@ def main():
         ),
         "scores": "unconditional independent sigmoid scores; not calibrated posteriors",
         "parameters": sum(p.numel() for p in model.parameters()),
+        "trainable_parameters": sum(
+            p.numel() for p in model.parameters() if p.requires_grad
+        ),
         "precision": "FP32 parameters/BCE, BF16 autocast",
         "evaluation_dtype": args.evaluation_dtype,
         "attention": "sdpa",
@@ -283,7 +327,9 @@ def main():
                 Path(__file__).with_name("vela_hazard.py"),
                 Path(__file__).with_name("vela_hazard_diagnostics.py"),
                 Path(__file__).with_name("vela_hazard_operating.py"),
+                Path(__file__).with_name("vela_hazard_joint.py"),
                 Path(__file__).parent.parent / "sequence_repair/model.py",
+                Path(__file__).parent.parent / "sequence_repair/optimization.py",
                 Path(__file__).parent.parent / "sequence_repair/data.py",
                 Path(__file__).parent.parent / "sequence_repair/train.py",
             ]
@@ -293,11 +339,11 @@ def main():
             for name in [
                 "torch",
                 "transformers",
-                "peft",
                 "scikit-learn",
                 "numpy",
                 "tokenizers",
             ]
+            + (["peft"] if args.method == "lora" else [])
         },
         "torch_hip": torch.version.hip,
         "config_sha256": hashlib.sha256(
@@ -311,7 +357,10 @@ def main():
     model.to("cuda")
     model.train()
     parameters = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(
+        optimizer_groups(model, args.learning_rate, args.head_learning_rate),
+        weight_decay=0.01,
+    )
     best = -math.inf
     sampled_unique, sampled_sources, sampled_languages = set(), Counter(), Counter()
     positive_exposures = [0] * len(labels)
@@ -425,7 +474,7 @@ def main():
                 )
             )
             for group in optimizer.param_groups:
-                group["lr"] = args.learning_rate * factor
+                group["lr"] = group["initial_lr"] * factor
             optimizer.step()
             log = {
                 "step": step,
@@ -487,14 +536,16 @@ def main():
                 + "\n"
             )
             operating_point = None
-            if args.selection == "fp-budget-macro-f1":
-                operating_point = select_operating_point(
-                    dev,
-                    probabilities,
-                    labels,
-                    false_positive_budget=args.selection_false_positive_budget,
-                    minimum_support=args.selection_minimum_support,
-                )
+            if args.selection in {"fp-budget-macro-f1", "joint-fp-budget-macro-f1"}:
+                options = {
+                    "false_positive_budget": args.selection_false_positive_budget,
+                    "minimum_support": args.selection_minimum_support,
+                }
+                selector = select_operating_point
+                if args.selection == "joint-fp-budget-macro-f1":
+                    selector = select_joint_operating_point
+                    options["safe_groups"] = selection_safe_groups
+                operating_point = selector(dev, probabilities, labels, **options)
                 score = operating_point["selection_score"]
                 (output / f"dev-operating-point-step-{step}.json").write_text(
                     json.dumps(operating_point, indent=2) + "\n"
@@ -518,10 +569,12 @@ def main():
             )
             if score > best:
                 best = score
-                save_adapter(
+                save_training_checkpoint(
                     model,
                     tokenizer,
-                    output / "best-adapter",
+                    output
+                    / ("best-adapter" if args.method == "lora" else "best-model"),
+                    args.method,
                     args.base_id,
                     args.base_revision,
                 )
@@ -547,10 +600,11 @@ def main():
                     )
                     + "\n"
                 )
-    save_adapter(
+    save_training_checkpoint(
         model,
         tokenizer,
-        output / "last-adapter",
+        output / ("last-adapter" if args.method == "lora" else "last-model"),
+        args.method,
         args.base_id,
         args.base_revision,
     )

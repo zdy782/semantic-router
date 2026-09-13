@@ -106,18 +106,13 @@ def initial_artifact_receipt(base, adapter):
     return result
 
 
-def save_training_checkpoint(model, tokenizer, destination, method, base_id, revision):
-    if method == "lora":
-        save_adapter(model, tokenizer, destination, base_id, revision)
-        return
-    if method != "full" or hasattr(model, "peft_config"):
+def verify_full_checkpoint(model, checkpoint):
+    """Require every tensor of a complete sequence checkpoint to be preserved."""
+    if type(model).__name__ != "ModernBertForSequenceClassification":
         raise ValueError("Full checkpoints must own the actual encoder weights")
     from safetensors.torch import load_file
 
-    destination.mkdir(parents=True, exist_ok=True)
-    expected = task_head_scope(model)
-    model.save_pretrained(destination, safe_serialization=True)
-    saved = load_file(str(destination / "model.safetensors"), device="cpu")
+    saved = load_file(str(Path(checkpoint) / "model.safetensors"), device="cpu")
     state = model.state_dict()
     if saved.keys() != state.keys():
         raise ValueError("Full checkpoint omitted or introduced model tensors")
@@ -128,6 +123,18 @@ def save_training_checkpoint(model, tokenizer, destination, method, base_id, rev
             saved[name], value.detach().cpu()
         ):
             raise ValueError(f"Full checkpoint changed tensor: {name}")
+
+
+def save_training_checkpoint(model, tokenizer, destination, method, base_id, revision):
+    if method == "lora":
+        save_adapter(model, tokenizer, destination, base_id, revision)
+        return
+    if method != "full" or hasattr(model, "peft_config"):
+        raise ValueError("Full checkpoints must own the actual encoder weights")
+    destination.mkdir(parents=True, exist_ok=True)
+    expected = task_head_scope(model)
+    model.save_pretrained(destination, safe_serialization=True)
+    verify_full_checkpoint(model, destination)
     tokenizer.save_pretrained(destination)
     (destination / "task-head.json").write_text(json.dumps(expected, indent=2) + "\n")
     (destination / "training-origin.json").write_text(

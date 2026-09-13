@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.training.model_classifier.sequence_repair import complete_adapter
+from src.training.model_classifier.sequence_repair import complete_adapter, export
 from src.training.model_classifier.sequence_repair.model import load_model, save_adapter
 from src.training.model_classifier.sequence_repair.optimization import (
     initial_artifact_receipt,
@@ -307,6 +307,115 @@ class TaskHeadStorageTests(unittest.TestCase):
         for rate in (float("nan"), float("inf"), 0, -1):
             with self.assertRaises(ValueError):
                 optimizer_groups(fresh, rate)
+
+    def _export(self, checkpoint, method="full", adapter=None, contract=None):
+        manifest = self.root / "run.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "method": method,
+                    "base_model": "fixture-base",
+                    "base_revision": "fixture-revision",
+                    "test_used": False,
+                }
+            )
+        )
+        destination = self.root / "exported"
+        argv = [
+            "export",
+            "--base",
+            str(checkpoint),
+            "--method",
+            method,
+            "--base-id",
+            "fixture-base",
+            "--base-revision",
+            "fixture-revision",
+            "--contract",
+            str(contract or self.contract),
+            "--output",
+            str(destination),
+            "--run-manifest",
+            str(manifest),
+            "--runtime-task",
+            "safety",
+        ]
+        if adapter is not None:
+            argv.extend(["--adapter", str(adapter)])
+        with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()):
+            export.main()
+        return destination
+
+    def _trained_full_checkpoint(self):
+        model, tokenizer, _, _ = load_trainable_model(
+            self.base, self.contract, None, "full"
+        )
+        self._update(model)
+        destination = self.root / "trained-full"
+        save_training_checkpoint(
+            model, tokenizer, destination, "full", "fixture-base", "fixture-revision"
+        )
+        return model, destination
+
+    def test_full_export_preserves_all_weights_and_runtime_contract(self):
+        from safetensors.torch import load_file
+
+        model, checkpoint = self._trained_full_checkpoint()
+        destination = self._export(checkpoint)
+        receipt = json.loads((destination / "candidate-lock.json").read_text())
+        self.assertEqual(receipt["method"], "full")
+        self.assertTrue(receipt["all_tensors_preserved_after_reload"])
+        self.assertNotIn("adapter_sha256", receipt)
+        self.assertNotIn("merge_probe_max_absolute_difference", receipt)
+        saved = load_file(str(destination / "model.safetensors"))
+        for name, tensor in model.state_dict().items():
+            self.assertTrue(self.torch.equal(tensor, saved[name]), name)
+        mapping = json.loads((destination / "label_mapping.json").read_text())
+        self.assertEqual(mapping["label2id"], {"safe": 0, "unsafe": 1})
+
+    def test_adapter_export_retains_merge_verification(self):
+        destination = self._export(self.base, "lora", self.legacy_path)
+        receipt = json.loads((destination / "candidate-lock.json").read_text())
+        self.assertEqual(receipt["method"], "lora")
+        self.assertTrue(receipt["task_head_preserved_after_merge_and_reload"])
+        self.assertTrue(receipt["all_tensors_preserved_after_reload"])
+        self.assertLess(receipt["merge_probe_max_absolute_difference"], 2e-4)
+        self.assertIn("adapter_sha256", receipt)
+
+    def test_full_export_rejects_contract_relabeling(self):
+        _, checkpoint = self._trained_full_checkpoint()
+        changed = self.root / "changed-contract.json"
+        changed.write_text(
+            json.dumps(
+                {
+                    "label2id": {"unsafe": 0, "safe": 1},
+                    "id2label": {"0": "unsafe", "1": "safe"},
+                    "classifier_pooling": "cls",
+                }
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "contract differs"):
+            self._export(checkpoint, contract=changed)
+        self.assertFalse((self.root / "exported").exists())
+
+    def test_full_export_rejects_missing_head_and_mismatched_origin(self):
+        from safetensors.torch import load_file, save_file
+
+        _, checkpoint = self._trained_full_checkpoint()
+        origin_path = checkpoint / "training-origin.json"
+        origin = origin_path.read_text()
+        changed = json.loads(origin)
+        changed["base_revision"] = "another-parent"
+        origin_path.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(ValueError, "origin differs"):
+            self._export(checkpoint)
+        origin_path.write_text(origin)
+        weights = load_file(str(checkpoint / "model.safetensors"))
+        del weights["head.dense.weight"]
+        save_file(weights, str(checkpoint / "model.safetensors"))
+        with self.assertRaisesRegex(ValueError, "omitted or introduced"):
+            self._export(checkpoint)
+        self.assertFalse((self.root / "exported").exists())
 
     def test_missing_trainable_head_and_corrupted_saved_classifier_are_rejected(self):
         from safetensors.torch import load_file, save_file

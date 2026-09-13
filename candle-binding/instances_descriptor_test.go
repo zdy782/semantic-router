@@ -12,9 +12,9 @@ import (
 
 func TestOwnedEmbeddingDescriptorIdentityAndLifecycle(t *testing.T) {
 	path := ownedModelFixture(t, 0)
-	model, err := LoadEmbeddingModel(InstanceOptions{ModelPath: path, ModelType: "mmbert"})
-	if err != nil {
-		t.Fatal(err)
+	model, loadErr := LoadEmbeddingModel(InstanceOptions{ModelPath: path, ModelType: "mmbert"})
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	defer model.Close()
 	read := func(m *EmbeddingModel, layer, dimension int) map[string]any {
@@ -24,8 +24,8 @@ func TestOwnedEmbeddingDescriptorIdentityAndLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		var descriptor map[string]any
-		if err := json.Unmarshal([]byte(raw), &descriptor); err != nil {
-			t.Fatal(err)
+		if decodeErr := json.Unmarshal([]byte(raw), &descriptor); decodeErr != nil {
+			t.Fatal(decodeErr)
 		}
 		return descriptor
 	}
@@ -59,17 +59,17 @@ func TestOwnedEmbeddingDescriptorIdentityAndLifecycle(t *testing.T) {
 	defer clone.Close()
 	// The captured descriptor must not reopen the requested path.
 	moved := path + "-moved"
-	if err := os.Rename(path, moved); err != nil {
+	if err = os.Rename(path, moved); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(moved) })
 	if !reflect.DeepEqual(original, read(model, 0, 0)) {
 		t.Fatal("moving source files changed a live instance identity")
 	}
-	if err := model.Close(); err != nil {
+	if err = model.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := model.RuntimeDescriptor(0, 0); !errors.Is(err, ErrInstanceClosed) {
+	if _, err = model.RuntimeDescriptor(0, 0); !errors.Is(err, ErrInstanceClosed) {
 		t.Fatalf("closed descriptor: %v", err)
 	}
 	if !reflect.DeepEqual(original, read(clone, 0, 0)) {

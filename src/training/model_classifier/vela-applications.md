@@ -1,16 +1,16 @@
 # Vela application classifier recipes
 
-This guide covers Feedback, PromptGuard, Safety, and Hazard. A recipe is a
-reproducible experiment; it does not certify a particular checkpoint. Published
-model cards must identify the selected weights, actual encoder parent, dataset
-revisions, separate development and final results, and measured limitations.
+This guide covers Feedback, Guard, Safety, and Hazard. A recipe is a
+reproducible experiment; it does not certify a particular checkpoint. Model cards introduce the task, intended use, and place in the Vela family.
+Keep dataset revisions, training lineage, detailed evaluations, and measured
+limitations in the accompanying technical report.
 
 ## Output contracts
 
 | Task | Ordered labels | Output |
 |---|---|---|
 | Feedback | `SAT`, `NEED_CLARIFICATION`, `WRONG_ANSWER`, `WANT_DIFFERENT`, `NO_FEEDBACK` | Softmax |
-| PromptGuard | `benign`, `jailbreak` | Softmax |
+| Guard | `benign`, `jailbreak` | Softmax |
 | Safety | `safe`, `unsafe` | Softmax |
 | Hazard | `violence`, `criminal_activity`, `sexual_content`, `child_exploitation`, `hate`, `harassment_abuse`, `regulated_substances`, `weapons`, `self_harm`, `privacy`, `specialized_advice`, `misinformation` | Independent sigmoid |
 
@@ -37,8 +37,8 @@ Vela result is an abstention, never a fabricated `SAT` prediction. The checkpoin
 still cannot recover context absent from its input, so mixed intentions and
 ambiguous references need separate reporting.
 
-PromptGuard detects instruction attacks, independently of content risk. A
-harmful request without an instruction attack can be `benign` for PromptGuard
+Guard detects instruction attacks, independently of content risk. A
+harmful request without an instruction attack can be `benign` for Guard
 and `unsafe` for Safety. A quoted attack discussed as data can also be benign.
 The same attack classifier should handle an override requesting harmless
 content. Evaluate all four combinations of content risk and instruction attack.
@@ -76,7 +76,7 @@ the repository root. Download only the source files required by a builder.
   source user turns from an explicit ID/text-hash receipt. This is a single
   model-assisted review, not independent human annotation; source `NEWTOPIC`
   alone is insufficient, and excluded ambiguous cases are recorded.
-- [PromptGuard builder](prompt_guard_fine_tuning_lora/vela_data.py) combines
+- [Guard builder](prompt_guard_fine_tuning_lora/vela_data.py) combines
   [LLMail](https://huggingface.co/datasets/microsoft/llmail-inject-challenge)
   attack annotations with paired
   [SALAD](https://huggingface.co/datasets/OpenSafetyLab/Salad-Data) attacks and
@@ -99,7 +99,7 @@ the repository root. Download only the source files required by a builder.
   group. Repeated prompt families are reserved for test before validation and
   training. Disagreeing category annotations become unknown dimensions. The
   data is synthetic translation/adaptation, not twelve independent natural
-  benchmarks. Its jailbreak tag is never converted into a PromptGuard target.
+  benchmarks. Its jailbreak tag is never converted into a Guard target.
 
 Hazard's historical `safety_classifier.vela_hazard_supervision` v3 projection
 remains reproducible. The subsequent `safety_classifier.vela_hazard_partial` v4
@@ -287,6 +287,14 @@ raw crosswalk data for historical reproduction. Its selection choices are
 negatives plus positive categories. Do not pass Hazard data through the
 single-label trainer or use softmax to decode its logits.
 
+Both trainers also support `--method full` without `--adapter`. Set `--base` to
+the actual encoder checkpoint and use `--fresh-head` to initialize a new task;
+all encoder and task-head parameters then train together. An optional
+`--head-learning-rate` separates the head rate from the encoder rate while
+sharing the schedule. Full runs save `best-model` and `last-model`, with the
+complete weights and their `training-origin.json`. This is a distinct experiment
+from LoRA continuation and requires its own development and final evaluation.
+
 For deployment with a false-alarm budget, use `--selection fp-budget-macro-f1
 --selection-false-positive-budget 0.05`. At each development checkpoint it fits
 one shared threshold to maximize supported-category macro-F1 while at most 5%
@@ -365,9 +373,12 @@ when a large weak corpus would hide regressions on smaller independent
 families. Preserve per-class, per-source, per-language, per-length and position
 breakdowns. Test files are not accepted by the training selection loop.
 
-The shared `sequence_repair.export` command merges a selected adapter into a
-standard safetensors checkpoint, checks before/after logits, and records parent,
-parameter counts, label order and file hashes. Its run manifest must explicitly
+The shared `sequence_repair.export` command freezes either a selected full
+checkpoint (`--method full`, `--base` pointing to that checkpoint) or a LoRA
+adapter (`--method lora`, with its original base and `--adapter`). Both paths
+verify every exported tensor and reloaded logits, preserve the trained label
+contract, and record parent, parameter counts, label order and file hashes.
+The LoRA path additionally checks numerical equivalence across merging. Its run manifest must explicitly
 record that test data did not select the checkpoint. Run independent final
 inference only after freezing that candidate. A newly trained checkpoint needs
 new inference graphs; an ONNX file from previous weights is not a valid export.

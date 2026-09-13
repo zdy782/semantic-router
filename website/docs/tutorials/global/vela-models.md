@@ -28,10 +28,17 @@ uses the Vela development-selected threshold of **0.85**. Feedback retains its
 **0.7** confidence policy and supports the `NO_FEEDBACK` class without emitting
 a feedback match.
 
-PromptGuard keeps its existing model. Safety and Hazard do not gain new built-in
-defaults in this migration. Vela Reranker is available through its published
-Python and ONNX interfaces; Router has no existing native cross-encoder
-reranking endpoint to select by default.
+Guard keeps its existing model while Vela Guard, Safety and Hazard complete
+release qualification. Safety and Hazard already have recipe-scoped runtime
+bindings and a [Safety signal](../signal/learned/safety.md); compatible artifacts
+can be configured explicitly.
+
+Vela Reranker is integrated with the vectorstore RAG plugin. Bind a local pair
+scorer through `rag.reranker` and enable the plugin's `rerank` setting, as shown
+in [neural reranking](../plugin/rag.md#neural-reranking). It scores retrieved
+query/document pairs during a live request. Route preview reports routing
+signals and their latency; actual reranker timing comes from the RAG request
+trace. An encoder Base is a training parent, not an additional routing signal.
 
 ## Configuration
 

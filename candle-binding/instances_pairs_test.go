@@ -22,7 +22,7 @@ func ownedPairFixture(t *testing.T) string {
 			t.Fatal(err)
 		}
 		var value map[string]any
-		if err := json.Unmarshal(data, &value); err != nil {
+		if err = json.Unmarshal(data, &value); err != nil {
 			t.Fatal(err)
 		}
 		change(value)
@@ -30,7 +30,7 @@ func ownedPairFixture(t *testing.T) string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -51,7 +51,7 @@ func ownedPairFixture(t *testing.T) string {
 	}
 	size := binary.LittleEndian.Uint64(weights[:8])
 	var original map[string]any
-	if err := json.Unmarshal(weights[8:8+size], &original); err != nil {
+	if err = json.Unmarshal(weights[8:8+size], &original); err != nil {
 		t.Fatal(err)
 	}
 	renamed := map[string]any{}
@@ -59,9 +59,9 @@ func ownedPairFixture(t *testing.T) string {
 		renamed[strings.TrimPrefix(name, "model.")] = value
 	}
 	writeTensorFile := func(name string, header map[string]any, data []byte) {
-		content, err := json.Marshal(header)
-		if err != nil {
-			t.Fatal(err)
+		content, marshalErr := json.Marshal(header)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
 		}
 		for len(content)%8 != 0 {
 			content = append(content, ' ')
@@ -69,8 +69,8 @@ func ownedPairFixture(t *testing.T) string {
 		artifact := binary.LittleEndian.AppendUint64(nil, uint64(len(content)))
 		artifact = append(artifact, content...)
 		artifact = append(artifact, data...)
-		if err := os.WriteFile(filepath.Join(dir, name), artifact, 0o600); err != nil {
-			t.Fatal(err)
+		if writeErr := os.WriteFile(filepath.Join(dir, name), artifact, 0o600); writeErr != nil {
+			t.Fatal(writeErr)
 		}
 	}
 	writeTensorFile("model.safetensors", renamed, weights[8+size:])
@@ -81,8 +81,10 @@ func ownedPairFixture(t *testing.T) string {
 		shape []int
 		value float32
 	}{
-		{"1.4.0.weight", []int{2, 4}, 0}, {"1.4.0.bias", []int{2}, 1},
-		{"1.4.3.weight", []int{1, 2}, 1}, {"1.4.3.bias", []int{1}, 2},
+		{"1.4.0.weight", []int{2, 4}, 0},
+		{"1.4.0.bias", []int{2}, 1},
+		{"1.4.3.weight", []int{1, 2}, 1},
+		{"1.4.3.bias", []int{1}, 2},
 	} {
 		count := 1
 		for _, n := range tensor.shape {
@@ -109,11 +111,11 @@ func TestOwnedPairScorerNativeContractAndLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clone.Close()
-	if err := model.Close(); err != nil {
+	if err = model.Close(); err != nil {
 		t.Fatal(err)
 	}
 	pairs := []TextPair{{Query: "hello world", Document: "safe 猫"}}
-	if _, err := model.ScorePairs(pairs); !errors.Is(err, ErrInstanceClosed) {
+	if _, err = model.ScorePairs(pairs); !errors.Is(err, ErrInstanceClosed) {
 		t.Fatalf("closed owner: %v", err)
 	}
 	result, err := clone.ScorePairs(pairs)
@@ -123,7 +125,7 @@ func TestOwnedPairScorerNativeContractAndLifecycle(t *testing.T) {
 	if len(result.Scores) != 1 || math.Abs(float64(result.Scores[0])-3.682689492) > 1e-6 || len(result.Inputs) != 1 || result.Inputs[0].InputTokens != 7 || result.Inputs[0].ProcessedTokens != 7 || result.Inputs[0].Truncated {
 		t.Fatalf("incorrect raw pair output: %+v", result)
 	}
-	if _, err := clone.ScorePairs([]TextPair{{Query: string([]byte{0xff}), Document: "hello"}}); err == nil {
+	if _, err = clone.ScorePairs([]TextPair{{Query: string([]byte{0xff}), Document: "hello"}}); err == nil {
 		t.Fatal("invalid UTF-8 was silently replaced by JSON encoding")
 	}
 	info, err := clone.Info()
@@ -133,13 +135,13 @@ func TestOwnedPairScorerNativeContractAndLifecycle(t *testing.T) {
 	if info.Task != "pair_scores" || info.PairScorer == nil || *info.PairScorer != (PairScorerSelection{Layer: 1, Dimension: 4}) {
 		t.Fatalf("actual selected head: %+v", info)
 	}
-	if _, err := clone.ScorePairs([]TextPair{{Query: "hello world", Document: "safe 猫 world"}}); err == nil {
+	if _, err = clone.ScorePairs([]TextPair{{Query: "hello world", Document: "safe 猫 world"}}); err == nil {
 		t.Fatal("combined pair budget silently truncated")
 	}
-	if _, err := clone.ScorePairs(nil); err == nil {
+	if _, err = clone.ScorePairs(nil); err == nil {
 		t.Fatal("empty pair batch accepted")
 	}
-	if invalid, err := LoadPairScorer(options, PairScorerSelection{Dimension: 3}); err == nil {
+	if invalid, loadErr := LoadPairScorer(options, PairScorerSelection{Dimension: 3}); loadErr == nil {
 		_ = invalid.Close()
 		t.Fatal("untrained exit accepted")
 	}

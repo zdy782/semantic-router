@@ -234,7 +234,15 @@ mapping, and writes a `candidate-lock.json` with hashes. Supply the selected run
 receipt. The base revision must match that receipt and test selection must be
 explicitly false.
 Export also verifies the effective head tensors before and after merge and after
-reloading the serialized model, including inherited frozen head tensors.
+reloading the serialized model, including inherited frozen head tensors. Both
+export modes verify every saved tensor and bitwise-equal FP32 reloaded logits.
+
+For a full training run, pass `--method full`, point `--base` to its selected
+`best-model` or `last-model`, and omit `--adapter`. Use the original training
+parent for `--base-id` and `--base-revision`. The selected checkpoint's
+`training-origin.json`, run receipt, and task contract must agree. Export
+rejects an incomplete head or a changed label order, pooling mode, or problem
+type; it does not silently reinitialize a missing classifier.
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.export \
@@ -256,7 +264,7 @@ python -m src.training.model_classifier.sequence_repair.evaluate \
 
 The required `--runtime-task` writes the router's actual sidecar schema alongside
 the HF label mapping, before hashing the frozen candidate. Domain uses
-`category_mapping.json`; FactCheck uses `fact_check_mapping.json`; PromptGuard
+`category_mapping.json`; FactCheck uses `fact_check_mapping.json`; Guard
 uses `jailbreak_type_mapping.json`; Modality also receives `modality_mapping.json`
 and must retain the native `AR=0`, `DIFFUSION=1`, `BOTH=2` indices. Feedback,
 Safety, and Hazard retain the complete named label set in `config.json` and

@@ -83,13 +83,19 @@ class HazardEvaluationPrecisionTests(unittest.TestCase):
                     sys, "argv", argv
                 ), patch.object(
                     train,
-                    "load_model",
+                    "load_trainable_model",
                     return_value=(
                         model,
                         lambda *args, **kwargs: {"input_ids": [1, 2]},
                         {"risk": 0},
                         {0: "risk"},
                     ),
+                ), patch.object(
+                    train,
+                    "initial_artifact_receipt",
+                    return_value={"adapter_model.safetensors": "fixture"},
+                ), patch.object(
+                    train, "optimizer_groups", return_value=[]
                 ), patch.object(
                     train, "evaluate", side_effect=EvaluationReachedError
                 ) as evaluate, patch.object(
@@ -113,7 +119,7 @@ class HazardEvaluationPrecisionTests(unittest.TestCase):
                     "--evaluation-dtype",
                     "float16",
                 ],
-            ), patch.object(train, "load_model") as load, redirect_stderr(
+            ), patch.object(train, "load_trainable_model") as load, redirect_stderr(
                 io.StringIO()
             ):
                 with self.assertRaises(SystemExit) as failure:

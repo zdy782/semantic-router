@@ -18,7 +18,7 @@ func TestOwnedIndependentLabelScoresUseNativeHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err = json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
 	config["problem_type"] = "multi_label_classification"
@@ -26,11 +26,11 @@ func TestOwnedIndependentLabelScoresUseNativeHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+	if err = os.WriteFile(configPath, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	options := InstanceOptions{ModelPath: path, ModelType: "modernbert", Overflow: "reject"}
-	if invalid, err := LoadSequenceClassifier(options); err == nil {
+	if invalid, loadErr := LoadSequenceClassifier(options); loadErr == nil {
 		_ = invalid.Close()
 		t.Fatal("multi-label head accepted by categorical loader")
 	}
@@ -43,10 +43,10 @@ func TestOwnedIndependentLabelScoresUseNativeHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clone.Close()
-	if err := model.Close(); err != nil {
+	if err = model.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := model.Score("hello"); !errors.Is(err, ErrInstanceClosed) {
+	if _, err = model.Score("hello"); !errors.Is(err, ErrInstanceClosed) {
 		t.Fatalf("closed owner: %v", err)
 	}
 	result, err := clone.Score("hello world")
@@ -66,7 +66,7 @@ func TestOwnedIndependentLabelScoresUseNativeHandle(t *testing.T) {
 	if windows.Windows[0].Start != 0 || windows.Windows[0].End != 3 || windows.Windows[1].Start != 2 || windows.Windows[1].End != 5 {
 		t.Fatalf("invalid exact token ranges: %+v", windows.Windows)
 	}
-	if _, err := clone.ScoreWindows("hello", SequenceWindowOptions{Size: 3, Overlap: -1}); err == nil {
+	if _, err = clone.ScoreWindows("hello", SequenceWindowOptions{Size: 3, Overlap: -1}); err == nil {
 		t.Fatal("negative overlap reached unsigned ABI")
 	}
 }

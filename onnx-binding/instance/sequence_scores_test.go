@@ -19,7 +19,7 @@ func configureSequenceFixture(t *testing.T, options Options, changes map[string]
 		t.Fatal(err)
 	}
 	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err = json.Unmarshal(data, &config); err != nil {
 		t.Fatal(err)
 	}
 	for key, value := range changes {
@@ -29,7 +29,7 @@ func configureSequenceFixture(t *testing.T, options Options, changes map[string]
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err = os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -43,7 +43,7 @@ func TestOwnedSequenceCheckpointCapacityAndFullTokenBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer legacy.Close()
-	if _, err := legacy.Classify(strings.Repeat("hello ", 511)); err == nil {
+	if _, err = legacy.Classify(strings.Repeat("hello ", 511)); err == nil {
 		t.Fatal("omitted budget no longer preserves 512")
 	}
 	options.MaxInputTokens = 32768
@@ -60,13 +60,13 @@ func TestOwnedSequenceCheckpointCapacityAndFullTokenBudget(t *testing.T) {
 	if result.Input.OriginalTokens != 32768 || result.Input.ProcessedTokens != 32768 || result.Input.Truncated {
 		t.Fatalf("incorrect exact context: %+v", result.Input)
 	}
-	if _, err := model.Classify(text + "hello"); err == nil {
+	if _, err = model.Classify(text + "hello"); err == nil {
 		t.Fatal("32769 tokens were accepted")
 	} else {
 		errorKind(t, err, "input_limit")
 	}
 	options.MaxInputTokens = 32769
-	if invalid, err := LoadSequenceClassifier(options); err == nil {
+	if invalid, loadErr := LoadSequenceClassifier(options); loadErr == nil {
 		_ = invalid.Close()
 		t.Fatal("budget exceeds real capacity")
 	}
@@ -76,7 +76,7 @@ func TestOwnedIndependentScoresAndWindowCoverage(t *testing.T) {
 	options := specialTokenFixture(t, "sequence")
 	options.MaxInputTokens = 512
 	configureSequenceFixture(t, options, map[string]any{"problem_type": "multi_label_classification"})
-	if invalid, err := LoadSequenceClassifier(options); err == nil {
+	if invalid, loadErr := LoadSequenceClassifier(options); loadErr == nil {
 		_ = invalid.Close()
 		t.Fatal("multi-label head loaded as softmax")
 	}
@@ -89,7 +89,7 @@ func TestOwnedIndependentScoresAndWindowCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer shared.Close()
-	if err := model.Close(); err != nil {
+	if err = model.Close(); err != nil {
 		t.Fatal(err)
 	}
 	text := "hello world test hello world"
@@ -122,10 +122,10 @@ func TestOwnedIndependentScoresAndWindowCoverage(t *testing.T) {
 	if info.CompletedInferences != 3 {
 		t.Fatalf("expected full score plus two forwards: %+v", info)
 	}
-	if _, err := shared.ScoreWindows(text, SequenceWindowOptions{Size: 2}); err == nil {
+	if _, err = shared.ScoreWindows(text, SequenceWindowOptions{Size: 2}); err == nil {
 		t.Fatal("special-token-only window accepted")
 	}
-	if _, err := shared.ScoreWindows(strings.Repeat("hello ", 511), SequenceWindowOptions{Size: 5}); err == nil {
+	if _, err = shared.ScoreWindows(strings.Repeat("hello ", 511), SequenceWindowOptions{Size: 5}); err == nil {
 		t.Fatal("full request overflow accepted")
 	}
 }

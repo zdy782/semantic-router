@@ -23,6 +23,42 @@ merged model. Load existing adapters with the base declared in their
 `adapter_config.json`; use the 32K base only for checkpoints produced by this
 workflow.
 
+## Vela independent Hazard thresholds
+
+The Vela `train_vela_hazard` entrypoint trains independent sigmoid labels with
+masked BCE. Unknown dimensions contribute no loss. Its
+`--selection fp-budget-macro-f1` mode fits one shared threshold; the explicit
+`--selection joint-fp-budget-macro-f1` mode fits a threshold for each label under
+joint safe-input false-positive budgets. Neither mode changes the label masks
+or establishes that a checkpoint is qualified for release.
+
+For joint selection, an optional `--selection-safe-groups groups.json` adds
+constraints for named subsets of fully observed safe DEV examples:
+
+```json
+{
+  "clean": ["dev-safe-001", "dev-safe-002"],
+  "boundary": ["dev-boundary-001"]
+}
+```
+
+Every ID must belong to the supplied DEV data. All safe DEV rows are always
+constrained together, and each named group must also meet
+`--selection-false-positive-budget` (default `0.05`, rounded down to a whole
+number of false alarms). A false alarm means any output label fires; separate
+per-label budgets cannot replace this union constraint. The training receipt
+records the sidecar digest, and each evaluation records fitted thresholds and
+group limits.
+
+Joint selection uses deterministic FP32 candidates and two starting points,
+then at most 72 improving coordinate updates. It preserves all-taxonomy macro
+F1 with `--selection-minimum-support 1`; unsupported labels remain in the
+false-alarm rule and are explicitly reported as uncertified. A result with no
+feasible threshold is recorded as infeasible. Fit thresholds only on DEV and
+retain independent evaluation and the task's existing quality gates. See the
+[application recipes](../vela-applications.md) for full-encoder and adapter
+training options.
+
 ## Training Contract
 
 The machine-readable source of truth is

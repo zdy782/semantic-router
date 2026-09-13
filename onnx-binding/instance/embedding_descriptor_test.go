@@ -13,9 +13,9 @@ import (
 func TestOwnedEmbeddingDescriptorPrimaryCloneAndNoReload(t *testing.T) {
 	options := layeredEmbeddingFixture(t)
 	options.ModelFile = filepath.Join("onnx", "layer-1", "model.onnx")
-	model, err := LoadEmbeddingModel(options)
-	if err != nil {
-		t.Fatal(err)
+	model, loadErr := LoadEmbeddingModel(options)
+	if loadErr != nil {
+		t.Fatal(loadErr)
 	}
 	defer model.Close()
 	read := func(m *EmbeddingModel, layer, dimension int) map[string]any {
@@ -25,8 +25,8 @@ func TestOwnedEmbeddingDescriptorPrimaryCloneAndNoReload(t *testing.T) {
 			t.Fatal(err)
 		}
 		var descriptor map[string]any
-		if err := json.Unmarshal([]byte(raw), &descriptor); err != nil {
-			t.Fatal(err)
+		if decodeErr := json.Unmarshal([]byte(raw), &descriptor); decodeErr != nil {
+			t.Fatal(decodeErr)
 		}
 		return descriptor
 	}
@@ -56,14 +56,14 @@ func TestOwnedEmbeddingDescriptorPrimaryCloneAndNoReload(t *testing.T) {
 	defer clone.Close()
 	// Metadata belongs to the successfully loaded sessions, not these paths.
 	moved := options.ModelPath + "-moved"
-	if err := os.Rename(options.ModelPath, moved); err != nil {
+	if err = os.Rename(options.ModelPath, moved); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(moved) })
 	if !reflect.DeepEqual(original, read(model, 0, 0)) {
 		t.Fatal("descriptor reopened source artifacts")
 	}
-	if err := model.Close(); err != nil {
+	if err = model.Close(); err != nil {
 		t.Fatal(err)
 	}
 	_, err = model.RuntimeDescriptor(0, 0)
@@ -79,7 +79,7 @@ func TestOwnedEmbeddingDescriptorRejectsWrongTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sequence.Close()
-	if _, err := (&EmbeddingModel{owner: sequence.owner}).RuntimeDescriptor(0, 0); err == nil {
+	if _, err = (&EmbeddingModel{owner: sequence.owner}).RuntimeDescriptor(0, 0); err == nil {
 		t.Fatal("sequence instance claimed an embedding descriptor")
 	}
 }
