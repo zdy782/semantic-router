@@ -20,6 +20,7 @@ from full_training import (
     validate_method,
 )
 from span_data import align_record, read_jsonl
+from token_loss import document_mean_loss
 
 
 def checkpoint_score(metrics, selection):
@@ -95,6 +96,12 @@ def main():
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
     parser.add_argument("--head-learning-rate", type=float)
+    parser.add_argument(
+        "--loss-normalization",
+        choices=["token_mean", "document_mean"],
+        default="token_mean",
+        help="Token mean per microbatch, or equal weight for every document",
+    )
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument(
         "--evaluation-dtype", choices=["float32", "bfloat16"], default="bfloat16"
@@ -239,7 +246,12 @@ def main():
         "max_length": args.max_length,
         "learning_rate": args.learning_rate,
         "head_learning_rate": args.head_learning_rate or args.learning_rate,
-        "loss_normalization": "mean over attended nonignored token labels in each microbatch",
+        "loss_normalization": args.loss_normalization,
+        "loss_reduction": (
+            "mean over nonignored token labels in each microbatch"
+            if args.loss_normalization == "token_mean"
+            else "mean attended nonignored token CE per document, then mean over logical documents"
+        ),
         "replay_probability": args.replay_probability,
         "replay_balance_entities": args.replay_balance_entities,
         "probe_only": args.probe_only,
@@ -337,8 +349,23 @@ def main():
             with torch.autocast(
                 args.device, dtype=torch.bfloat16, enabled=args.device == "cuda"
             ):
-                outputs = model(**batch)
-                loss = outputs.loss / args.accumulate
+                if args.loss_normalization == "token_mean":
+                    outputs = model(**batch)
+                    loss = outputs.loss / args.accumulate
+                else:
+                    outputs = model(
+                        **{
+                            key: value
+                            for key, value in batch.items()
+                            if key != "labels"
+                        }
+                    )
+                    loss = (
+                        document_mean_loss(
+                            outputs.logits, batch["labels"], batch["attention_mask"]
+                        )
+                        / args.accumulate
+                    )
             if not bool(torch.isfinite(loss)):
                 raise ValueError(f"Non-finite loss at step {step}")
             loss.backward()

@@ -118,10 +118,17 @@ python "$SCRIPT/train_repair.py" --method full --fresh-head \
 ```
 
 The learning rates and budget above are explicit example settings, not a
-qualified training recipe. Both methods retain mean cross-entropy over
-nonignored token labels within each microbatch, including `O` labels. Padding
-and special tokens have ignored labels. Full mode checks that every trainable
-parameter receives a finite gradient. Optional `--head-learning-rate` gives the
+qualified training recipe. Both methods default to `--loss-normalization token_mean`,
+the existing mean cross-entropy over nonignored token labels within each microbatch,
+including `O` labels. Optional `--loss-normalization document_mean` first averages
+the attended, nonignored token losses within each document, then gives every
+document equal weight across the logical batch. It uses FP32 cross-entropy and
+rejects a document with no supervised tokens. The trainer uses equally sized
+microbatches and divides each loss by the accumulation count. Padding and special
+tokens have ignored labels; document mode also excludes masked positions even
+if their labels are populated. The selected reduction is recorded in `run.json`.
+Full mode checks that every trainable parameter receives a finite gradient.
+Optional `--head-learning-rate` gives the
 entire prediction head a separate rate with the same schedule. Evaluation uses
 `--evaluation-dtype` independently of training autocast; the default remains
 BF16. `--device cpu` provides a FP32 engineering path for small fixtures.

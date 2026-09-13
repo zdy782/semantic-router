@@ -332,6 +332,12 @@ class FullTokenTrainingTests(unittest.TestCase):
                 verify_full_checkpoint(model, path)
 
     def test_actual_full_cpu_cli_train_export_and_reload(self):
+        self.run_full_cpu_cli()
+
+    def test_actual_document_mean_cli_train_export_and_reload(self):
+        self.run_full_cpu_cli("document_mean")
+
+    def run_full_cpu_cli(self, normalization=None):
         rows = [
             {
                 "id": "positive",
@@ -345,7 +351,7 @@ class FullTokenTrainingTests(unittest.TestCase):
                     }
                 ],
             },
-            {"id": "negative", "full_text": "The page is blank .", "spans": []},
+            {"id": "negative", "full_text": "The page .", "spans": []},
         ]
         train = self.root / "train.jsonl"
         train.write_text("".join(json.dumps(row) + "\n" for row in rows))
@@ -392,11 +398,14 @@ class FullTokenTrainingTests(unittest.TestCase):
             "--device",
             "cpu",
         ]
+        if normalization is not None:
+            command.extend(["--loss-normalization", normalization])
         result = subprocess.run(command, text=True, capture_output=True, check=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         run = json.loads((output / "run.json").read_text())
         self.assertEqual(run["method"], "full")
         self.assertEqual(run["evaluation_dtype"], "float32")
+        self.assertEqual(run["loss_normalization"], normalization or "token_mean")
         self.assertTrue(run["fresh_head"])
         self.assertEqual(
             run["initial_artifact"]["files"]["model.safetensors"],
