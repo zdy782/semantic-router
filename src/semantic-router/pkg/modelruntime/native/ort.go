@@ -58,10 +58,19 @@ func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 }
 
 func (r *Runtime) ortResource(ctx context.Context, spec config.ResolvedModelBinding, task string, load func(ort.Options) (io.Closer, error)) (*binding.Resource, error) {
+	return r.ortResourceWithExecutionLimit(ctx, spec, task, 0, load)
+}
+
+func (r *Runtime) ortResourceWithExecutionLimit(ctx context.Context, spec config.ResolvedModelBinding, task string, executionLimit int, load func(ort.Options) (io.Closer, error)) (*binding.Resource, error) {
 	options, err := ortOptions(spec)
 	if err != nil {
 		return nil, err
 	}
+	if executionLimit < 0 || (options.MaxInputTokens > 0 && executionLimit > options.MaxInputTokens) {
+		return nil, fmt.Errorf("%w: execution window exceeds document budget", binding.ErrCapability)
+	}
+	// Include physical execution geometry in the existing resource pool identity.
+	options.ExecutionMaxInputTokens = executionLimit
 	revision, err := r.artifactRevision(ctx, options.ModelPath)
 	if err != nil {
 		return nil, err

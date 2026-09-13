@@ -161,13 +161,17 @@ may match. An explicit predicate queries the raw independent score instead.
 Scores do not sum to one. Categorical and unbound classifiers still require
 their existing predicates.
 
-The current policy implementation uses Candle float32 and a complete native
-artifact. It tokenizes once, covers the original content token IDs with the
+The policy supports Candle float32 or an explicitly qualified ORT native graph.
+The sidecar binds the graph and every external tensor file by SHA256, the
+execution provider, and the physical window capacity. A different graph,
+precision conversion or unlisted provider is rejected. The document budget
+remains separate from each window’s execution budget.
+
+It tokenizes once, covers the original content token IDs with the
 declared overlapping windows, restores special tokens, resets positions, and
 takes the maximum sigmoid score for each label. It rejects document overflow,
 incomplete scans, changed artifacts and unsupported execution. Version 1 lacks
-the required identities and is rejected; ORT needs a qualified graph policy
-before this binding can use it. The existing Safety/Hazard combination is
+the required identities and is rejected. The existing Safety/Hazard combination is
 unchanged.
 
 Eval's `metrics.classifier.rules` records policy SHA256, actual provider, device,
@@ -189,7 +193,8 @@ go run ./cmd/classifier-operating-point \
 
 It prints the sidecar SHA256, preserves score/window fields and verifies the
 existing weight identity. It adds final config/tokenizer hashes and the
-supported execution identity. It neither selects thresholds nor qualifies a
+Candle execution identity for version 1; version-2 execution declarations are
+preserved and their files verified. It neither selects thresholds nor qualifies a
 model, and refuses to overwrite an existing file. Publish this sidecar with the
 exact native files; do not copy thresholds between checkpoints.
 

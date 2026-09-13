@@ -194,6 +194,11 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 	groups := [][]string{}
 	excludes := []string(nil)
 	if spec.Deployment.Provider == "ort" {
+		if spec.Binding.OperatingPoint != nil {
+			// A calibrated policy also binds its native source checkpoint.
+			// An existing graph-only cache cannot satisfy that identity check.
+			groups = append(groups, []string{"*.safetensors", "*.safetensors.index.json", "pytorch_model*.bin"})
+		}
 		if spec.Binding.Head != "" {
 			head := spec.Binding.Head
 			if !filepath.IsAbs(head) {

@@ -32,7 +32,13 @@ func (r *Runtime) OperatingPoint(ctx context.Context, spec config.ResolvedModelB
 	if err = r.verifyPreparedArtifact(ctx, spec.Deployment.Artifact); err != nil {
 		return nil, err
 	}
-	handle, err := r.ScoreWindows(ctx, spec, policy.Window())
+	var handle *binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelScores]
+	if graph := policy.ONNX(); graph != nil {
+		spec.Binding.Head = graph.File
+		handle, err = r.ortScoreWindowsWithPolicy(ctx, spec, policy.Window(), policy)
+	} else {
+		handle, err = r.ScoreWindows(ctx, spec, policy.Window())
+	}
 	if err != nil {
 		return nil, err
 	}

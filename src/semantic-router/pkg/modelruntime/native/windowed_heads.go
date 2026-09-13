@@ -9,6 +9,7 @@ import (
 	ort "github.com/vllm-project/semantic-router/onnx-binding/instance"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/binding"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/operatingpoint"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/tasks"
 )
 
@@ -62,7 +63,7 @@ func (r *Runtime) SequenceWindows(ctx context.Context, spec config.ResolvedModel
 }
 
 func (r *Runtime) ortSequenceWindows(ctx context.Context, spec config.ResolvedModelBinding, window tasks.TextWindowsRequest) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error) {
-	resource, err := r.ortResource(ctx, windowLoadSpec(spec), "sequence", func(options ort.Options) (io.Closer, error) { return ort.LoadSequenceClassifier(options) })
+	resource, err := r.ortResourceWithExecutionLimit(ctx, windowLoadSpec(spec), "sequence", window.Size, func(options ort.Options) (io.Closer, error) { return ort.LoadSequenceClassifier(options) })
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,11 @@ func (r *Runtime) ScoreWindows(ctx context.Context, spec config.ResolvedModelBin
 }
 
 func (r *Runtime) ortScoreWindows(ctx context.Context, spec config.ResolvedModelBinding, window tasks.TextWindowsRequest) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelScores], error) {
-	resource, err := r.ortResource(ctx, windowLoadSpec(spec), "label_scores", func(options ort.Options) (io.Closer, error) { return ort.LoadLabelScorer(options) })
+	return r.ortScoreWindowsWithPolicy(ctx, spec, window, nil)
+}
+
+func (r *Runtime) ortScoreWindowsWithPolicy(ctx context.Context, spec config.ResolvedModelBinding, window tasks.TextWindowsRequest, policy *operatingpoint.Policy) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelScores], error) {
+	resource, err := r.ortResourceWithExecutionLimit(ctx, windowLoadSpec(spec), "label_scores", window.Size, func(options ort.Options) (io.Closer, error) { return ort.LoadLabelScorer(options) })
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +171,12 @@ func (r *Runtime) ortScoreWindows(ctx context.Context, spec config.ResolvedModel
 	if err != nil {
 		_ = resource.Close()
 		return nil, err
+	}
+	if policy != nil {
+		if err = validateOperatingPointSession(policy, spec, info); err != nil {
+			_ = resource.Close()
+			return nil, err
+		}
 	}
 	if window.Size > capability.Limits.EffectiveTokens() {
 		_ = resource.Close()

@@ -532,3 +532,36 @@ func TestExplicitOperatingPointIsDownloadedWithBoundSnapshot(t *testing.T) {
 		t.Fatal("policy discovered without reference")
 	}
 }
+
+func TestORTOperatingPointRequiresNativeSourceInCachedSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	cfg := deploymentConfig("ort", dir)
+	deployment := cfg.ModelDeployments["new"]
+	deployment.Input = config.ModelInputBudget{MaxTokens: 32768, Overflow: "reject"}
+	cfg.ModelDeployments["new"] = deployment
+	cfg.ClassifierRules = []config.ClassifierSignalRule{{Name: "risk", Type: "local", Labels: []string{"one", "two"}}}
+	cfg.ModelBindings = map[string]config.ModelBinding{"classifier.risk": {Deployment: "new", Adapter: "modernbert", Contract: config.RemoteClassifierContractLabelScores, OperatingPoint: &config.OperatingPointReference{Path: "point.json", SHA256: strings.Repeat("a", 64)}}}
+	cfg.Decisions = []config.Decision{{Name: "route", Rules: config.RuleNode{Type: "classifier", Name: "risk", Label: "one"}}}
+	specs, err := BuildModelSpecs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := findSpecByPath(specs, dir)
+	if !ok {
+		t.Fatal("missing bound snapshot")
+	}
+	for name, data := range map[string][]byte{"config.json": []byte("{}"), "tokenizer.json": []byte("{}"), "point.json": []byte("{}"), "model.onnx": protoBytes(7, nil)} {
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if complete, err := isSpecComplete(spec); err != nil || complete {
+		t.Fatalf("graph-only cache accepted: complete=%v err=%v", complete, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "model.safetensors"), []byte("source checkpoint"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := isSpecComplete(spec); err != nil || !complete {
+		t.Fatalf("source checkpoint omitted: complete=%v err=%v", complete, err)
+	}
+}

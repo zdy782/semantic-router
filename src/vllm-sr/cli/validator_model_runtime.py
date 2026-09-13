@@ -132,19 +132,20 @@ def _binding_error(consumer, binding, deployment, profile=None):
             contracts[consumer] = binding.contract
             if (
                 binding.operating_point is None
-                or provider != "candle"
-                or binding.head
+                or provider not in {"candle", "ort"}
+                or (provider == "candle" and binding.head)
                 or rule.type == "llm"
             ):
-                return "Independent scores require operating_point and a complete Candle artifact"
+                return "Independent scores require operating_point and a complete Candle or qualified ORT artifact"
             budget = deployment.get("input") or {}
             if (
                 budget.get("max_tokens", 0) <= 0
                 or (budget.get("overflow") or "reject") != "reject"
             ):
                 return "operating_point requires an explicit document budget and reject overflow"
-            if (deployment.get("precision") or "native") not in {"native", "fp32"}:
-                return "operating_point requires float32 execution"
+            precision = deployment.get("precision") or "native"
+            if precision != "native" and (provider != "candle" or precision != "fp32"):
+                return "operating_point requires Candle float32 or qualified ORT native execution"
         elif binding.operating_point is not None:
             return "operating_point requires label_scores.v1"
         if rule.type == "llm":

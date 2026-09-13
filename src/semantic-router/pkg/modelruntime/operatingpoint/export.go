@@ -13,7 +13,9 @@ import (
 
 // BindArtifact converts an explicit score policy into a version-2 runtime
 // sidecar. It preserves every score/window field and checks the existing weight
-// identity. This is packaging, never threshold selection or model qualification.
+// identity. Version-2 execution declarations are preserved and their files
+// verified; their qualification must precede packaging. This never selects
+// thresholds or certifies graph equivalence.
 func BindArtifact(ctx context.Context, source []byte, root string) ([]byte, error) {
 	if err := rejectDuplicateKeys(json.NewDecoder(bytes.NewReader(source))); err != nil {
 		return nil, err
@@ -33,7 +35,11 @@ func BindArtifact(ctx context.Context, source []byte, root string) ([]byte, erro
 	}
 	// Preserve original thresholds (including their serialized precision) and all
 	// input-policy fields. Only execution identity and schema version are added.
-	for name, value := range map[string]any{"version": 2, "executions": []Execution{{Provider: "candle", Precision: "float32", WeightsFile: "model.safetensors"}}} {
+	executions := original.Executions
+	if original.Version == 1 {
+		executions = []Execution{{Provider: "candle", Precision: "float32", WeightsFile: "model.safetensors"}}
+	}
+	for name, value := range map[string]any{"version": 2, "executions": executions} {
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return nil, err
@@ -61,9 +67,13 @@ func BindArtifact(ctx context.Context, source []byte, root string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	if err := policy.VerifyArtifacts(ctx, root); err != nil {
-		return nil, err
+	for i := range policy.definition.Executions {
+		policy.execution = &policy.definition.Executions[i]
+		if err := policy.VerifyArtifacts(ctx, root); err != nil {
+			return nil, err
+		}
 	}
+	policy.execution = nil
 	if err := policy.validateMetadata(root); err != nil {
 		return nil, err
 	}

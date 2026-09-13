@@ -194,7 +194,7 @@ def test_independent_policy_binding_roundtrip_and_predicate_free_leaf(named):
     [
         "missing",
         "categorical",
-        "ort",
+        "remote",
         "head",
         "budget",
         "truncate",
@@ -213,8 +213,8 @@ def test_independent_policy_ref_rejects_unsupported_execution(scenario):
         binding.pop("operating_point")
     elif scenario == "categorical":
         binding["contract"] = "label_distribution.v1"
-    elif scenario == "ort":
-        deployment["provider"] = "ort"
+    elif scenario == "remote":
+        deployment["provider"] = "http"
     elif scenario == "head":
         binding["head"] = "other"
     elif scenario == "budget":
@@ -244,3 +244,16 @@ def test_independent_policy_ref_rejects_unsupported_execution(scenario):
 def test_operating_point_requires_unambiguous_immutable_reference(reference):
     with pytest.raises(ValidationError):
         OperatingPointReference.model_validate(reference)
+
+
+def test_independent_ort_binding_allows_explicit_qualified_graph_reference():
+    document = generic_document("ort")
+    binding = document["routing"]["model_bindings"]["classifier.risk.tenant"]
+    binding["contract"] = "label_scores.v1"
+    binding["operating_point"] = {"path": "point.json", "sha256": "a" * 64}
+    binding["head"] = "onnx/model.onnx"
+    deployment = document["global"]["model_catalog"]["deployments"]["selected"]
+    deployment["input"] = {"max_tokens": 32768, "overflow": "reject"}
+    assert not validate_model_runtime_references(UserConfig.model_validate(document))
+    deployment["precision"] = "fp16"
+    assert validate_model_runtime_references(UserConfig.model_validate(document))

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 )
@@ -25,8 +26,8 @@ func Load(ctx context.Context, spec config.ResolvedModelBinding, labels []string
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	if spec.Binding.Contract != config.RemoteClassifierContractLabelScores || spec.Deployment.Provider != "candle" || spec.Binding.Head != "" {
-		return nil, fmt.Errorf("operating point requires a complete Candle label_scores.v1 artifact; ORT or separate heads are not qualified")
+	if spec.Binding.Contract != config.RemoteClassifierContractLabelScores || (spec.Deployment.Provider != "candle" && spec.Deployment.Provider != "ort") {
+		return nil, fmt.Errorf("operating point requires a complete local label_scores.v1 artifact")
 	}
 	file, err := os.Open(ref.ResolvePath(spec.Deployment.Artifact))
 	if err != nil {
@@ -55,8 +56,23 @@ func Load(ctx context.Context, spec config.ResolvedModelBinding, labels []string
 	if deployment.Input.MaxTokens != p.MaxTokens() || deployment.Input.Overflow != "reject" {
 		return nil, fmt.Errorf("deployment must explicitly match the operating point document budget and reject overflow")
 	}
-	if deployment.Precision != "native" && deployment.Precision != "fp32" {
-		return nil, fmt.Errorf("operating point execution requires float32")
+	precision := deployment.Precision
+	if deployment.Provider == "candle" && (precision == "native" || precision == "fp32") {
+		precision = "float32"
+	}
+	execution, err := p.selectExecution(deployment.Provider, precision, deployment.Device)
+	if err != nil {
+		return nil, err
+	}
+	p.execution = execution
+	if execution.ONNX == nil && spec.Binding.Head != "" {
+		return nil, fmt.Errorf("operating point forbids separate Candle heads")
+	}
+	if execution.ONNX != nil && spec.Binding.Head != "" && spec.Binding.Head != execution.ONNX.File {
+		return nil, fmt.Errorf("selected ONNX head differs from operating point")
+	}
+	if deployment.CustomOpsProfile != "" {
+		return nil, fmt.Errorf("operating point graph does not declare a custom-ops execution")
 	}
 	if err := p.VerifyArtifacts(ctx, deployment.Artifact); err != nil {
 		return nil, err
@@ -70,8 +86,25 @@ func Load(ctx context.Context, spec config.ResolvedModelBinding, labels []string
 // VerifyArtifacts is also called after native preparation. Startup replacement
 // cannot bind a policy to different files; a published generation is immutable.
 func (p *Policy) VerifyArtifacts(ctx context.Context, root string) error {
-	for name, want := range map[string]string{"model.safetensors": p.definition.ModelWeightsSHA256, "config.json": p.definition.ModelConfigSHA256, "tokenizer.json": p.definition.TokenizerSHA256} {
-		file, err := os.Open(filepath.Join(root, name))
+	files := map[string]string{"model.safetensors": p.definition.ModelWeightsSHA256, "config.json": p.definition.ModelConfigSHA256, "tokenizer.json": p.definition.TokenizerSHA256}
+	if graph := p.ONNX(); graph != nil {
+		for _, artifact := range graph.Artifacts {
+			path := graph.File
+			if artifact.Role != "graph" {
+				path = filepath.Join(filepath.Dir(graph.File), strings.TrimPrefix(artifact.Role, "external:"))
+			}
+			if previous, exists := files[path]; exists && previous != artifact.SHA256 {
+				return fmt.Errorf("conflicting artifact identities for %s", path)
+			}
+			files[path] = artifact.SHA256
+		}
+	}
+	for name, want := range files {
+		path, err := containedArtifact(root, name)
+		if err != nil {
+			return err
+		}
+		file, err := os.Open(path)
 		if err != nil {
 			return err
 		}
@@ -89,6 +122,30 @@ func (p *Policy) VerifyArtifacts(ctx context.Context, root string) error {
 		}
 	}
 	return nil
+}
+
+// Explicit artifact paths may not escape the selected model, including symlinks.
+func containedArtifact(root, name string) (string, error) {
+	if !localArtifactPath(name) {
+		return "", fmt.Errorf("invalid artifact path %q", name)
+	}
+	base, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	base, err = filepath.Abs(base)
+	if err != nil {
+		return "", err
+	}
+	actual, err := filepath.EvalSymlinks(filepath.Join(base, name))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(base, actual)
+	if err != nil || !filepath.IsLocal(relative) {
+		return "", fmt.Errorf("artifact escapes model directory: %s", name)
+	}
+	return actual, nil
 }
 
 type contextReader struct {

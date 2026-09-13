@@ -10,6 +10,7 @@
 //! - CPU OpenVINO FP32: ~22ms
 //! - CPU ORT FP32: ~41ms
 
+use crate::core::compilation_cache::CompilationCacheLease;
 use crate::core::instance_options::{InstanceOptions, Provider};
 use crate::core::unified_error::{errors, UnifiedResult};
 use crate::model_architectures::modernbert_inputs;
@@ -230,6 +231,7 @@ pub enum ClassifierExecutionProvider {
 /// - Factcheck classification
 pub struct MmBertSequenceClassifier {
     session: Session,
+    cache_lease: Option<CompilationCacheLease>,
     tokenizer: Arc<Tokenizer>,
     config: MmBertClassifierConfig,
     model_path: String,
@@ -297,6 +299,7 @@ impl MmBertSequenceClassifier {
 
         Ok(Self {
             session,
+            cache_lease: None,
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: model_path_str,
@@ -312,8 +315,7 @@ impl MmBertSequenceClassifier {
         let mut tokenizer =
             Tokenizer::from_file(Path::new(&options.model_path).join("tokenizer.json"))
                 .map_err(|e| errors::tokenization_error(&e.to_string()))?;
-        let max_sequence_length =
-            classifier_context_length(config.max_position_embeddings, options.max_input_tokens)?;
+        let max_sequence_length = options.execution_limit(config.max_position_embeddings)?;
         configure_classifier_tokenizer(&mut tokenizer, max_sequence_length)?;
         // Owned sessions select the standard graph deterministically. Legacy
         // environment-driven FA ranking must not change an instance's identity.
@@ -324,10 +326,11 @@ impl MmBertSequenceClassifier {
             Self::find_onnx_models(&options.model_path, provider)?
         };
         let graph = options.select_graph(candidates)?;
-        let session = options.create_session(&graph)?;
-        modernbert_inputs::validate(&session.inputs)?;
+        let prepared = modernbert_inputs::prepare_session(options, &graph, max_sequence_length)?;
+        modernbert_inputs::validate(&prepared.session.inputs)?;
         Ok(Self {
-            session,
+            session: prepared.session,
+            cache_lease: prepared.cache_lease,
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: options.model_path.clone(),
@@ -766,8 +769,9 @@ impl MmBertSequenceClassifier {
         max_len: usize,
         multi_label: bool,
     ) -> UnifiedResult<Vec<ClassificationResult>> {
-        let outputs = modernbert_inputs::run(
+        let outputs = modernbert_inputs::run_cached(
             &mut self.session,
+            &mut self.cache_lease,
             input_ids,
             attention_mask,
             batch_size,
@@ -1080,6 +1084,7 @@ fn logits_to_scores(
 /// Used for PII detection with BIO tagging
 pub struct MmBertTokenClassifier {
     session: Session,
+    cache_lease: Option<CompilationCacheLease>,
     tokenizer: Arc<Tokenizer>,
     config: MmBertClassifierConfig,
     model_path: String,
@@ -1142,6 +1147,7 @@ impl MmBertTokenClassifier {
 
         Ok(Self {
             session,
+            cache_lease: None,
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: model_path_str,
@@ -1155,6 +1161,7 @@ impl MmBertTokenClassifier {
         let sequence = MmBertSequenceClassifier::load_with_options(options)?;
         Ok(Self {
             session: sequence.session,
+            cache_lease: sequence.cache_lease,
             tokenizer: sequence.tokenizer,
             config: sequence.config,
             model_path: sequence.model_path,
@@ -1207,8 +1214,9 @@ impl MmBertTokenClassifier {
             attention_mask[i] = enc_attention_mask[i] as i64;
         }
 
-        let outputs = modernbert_inputs::run(
+        let outputs = modernbert_inputs::run_cached(
             &mut self.session,
+            &mut self.cache_lease,
             input_ids,
             attention_mask,
             1,

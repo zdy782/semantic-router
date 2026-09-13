@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,9 +34,24 @@ type Definition struct {
 }
 
 type Execution struct {
-	Provider    string `json:"provider"`
-	Precision   string `json:"precision"`
-	WeightsFile string `json:"weights_file"`
+	Provider    string         `json:"provider"`
+	Precision   string         `json:"precision"`
+	WeightsFile string         `json:"weights_file"`
+	ONNX        *ONNXExecution `json:"onnx,omitempty"`
+}
+
+// ONNXExecution names a complete graph and its qualified physical execution.
+// Artifact roles match the owned session's content evidence, not directory scans.
+type ONNXExecution struct {
+	File               string           `json:"file"`
+	ExecutionProvider  string           `json:"execution_provider"`
+	MaxExecutionTokens int              `json:"max_execution_tokens"`
+	Artifacts          []ArtifactDigest `json:"artifacts"`
+}
+
+type ArtifactDigest struct {
+	Role   string `json:"role"`
+	SHA256 string `json:"sha256"`
 }
 
 type InputPolicy struct {
@@ -62,6 +78,7 @@ type InputPolicy struct {
 type Policy struct {
 	definition Definition
 	digest     string
+	execution  *Execution
 }
 
 func Decode(data []byte, digest string) (*Policy, error) {
@@ -111,8 +128,8 @@ func Decode(data []byte, digest string) (*Policy, error) {
 			return nil, fmt.Errorf("operating point threshold is outside [0,1]")
 		}
 	}
-	if len(d.Executions) != 1 || d.Executions[0] != (Execution{Provider: "candle", Precision: "float32", WeightsFile: "model.safetensors"}) {
-		return nil, fmt.Errorf("operating point currently supports only an explicitly declared Candle float32 model.safetensors execution; ORT needs a qualified graph contract")
+	if err := validateExecutions(d.Executions, d.Input.WindowTokens); err != nil {
+		return nil, err
 	}
 	w := d.Input
 	if w.Strategy != "overlapping_content_windows" || w.Aggregation != "per-label maximum sigmoid over all covering windows" || w.Positions != "reset for each window" || w.Overflow != "reject" || w.PaddingSide != "right" || w.PadTokenID == nil || w.PaddingAttentionMask == nil || *w.PaddingAttentionMask != 0 {
@@ -131,6 +148,9 @@ func Decode(data []byte, digest string) (*Policy, error) {
 // envelopes. Use the schema's struct tags: encoding/json alone accepts omitted
 // fields and case-folded aliases, which other consumers may interpret differently.
 func requireExactFields(data []byte, shape reflect.Type) error {
+	if shape.Kind() == reflect.Pointer {
+		shape = shape.Elem()
+	}
 	if shape.Kind() == reflect.Slice && shape.Elem().Kind() == reflect.Struct {
 		var entries []json.RawMessage
 		if err := json.Unmarshal(data, &entries); err != nil {
@@ -152,8 +172,12 @@ func requireExactFields(data []byte, shape reflect.Type) error {
 	}
 	for i := 0; i < shape.NumField(); i++ {
 		field := shape.Field(i)
-		key := field.Tag.Get("json")
+		tag := strings.Split(field.Tag.Get("json"), ",")
+		key := tag[0]
 		raw, exists := fields[key]
+		if !exists && slices.Contains(tag[1:], "omitempty") {
+			continue
+		}
 		if !exists {
 			return fmt.Errorf("operating point requires field %q", key)
 		}
@@ -182,10 +206,97 @@ func (p *Policy) Window() tasks.TextWindowsRequest {
 func (p *Policy) MaxTokens() int { return p.definition.Input.MaxDocumentTokens }
 
 func (p *Policy) ValidateCapability(c binding.Capability) error {
-	if c.Contract != "label_scores.v1" || c.Provider != "candle" || c.Precision != "float32" || !slices.Equal(c.Labels, p.definition.Labels) || c.Limits.EffectiveTokens() != p.MaxTokens() || c.Limits.Overflow != "window" {
+	if c.Contract != "label_scores.v1" || !slices.Equal(c.Labels, p.definition.Labels) || c.Limits.EffectiveTokens() != p.MaxTokens() || c.Limits.Overflow != "window" {
 		return fmt.Errorf("%w: actual owned head/execution differs from operating point", binding.ErrCapability)
 	}
+	if _, err := p.selectExecution(c.Provider, c.Precision, c.Device); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateExecutions(executions []Execution, window int) error {
+	if len(executions) == 0 {
+		return fmt.Errorf("operating point has no qualified execution")
+	}
+	seen := map[string]bool{}
+	for _, execution := range executions {
+		key := execution.Provider
+		if execution.WeightsFile != "model.safetensors" {
+			return fmt.Errorf("execution must bind complete model.safetensors weights")
+		}
+		switch execution.Provider {
+		case "candle":
+			if execution.Precision != "float32" || execution.ONNX != nil {
+				return fmt.Errorf("execution for Candle requires float32 without ONNX fields")
+			}
+		case "ort":
+			graph := execution.ONNX
+			if execution.Precision != "native" || graph == nil || !localArtifactPath(graph.File) || filepath.Ext(graph.File) != ".onnx" || graph.MaxExecutionTokens != window {
+				return fmt.Errorf("ORT execution requires a complete qualified native graph and exact window budget")
+			}
+			if graph.ExecutionProvider != "CPUExecutionProvider" && graph.ExecutionProvider != "MIGraphXExecutionProvider" {
+				return fmt.Errorf("unsupported qualified ONNX execution provider")
+			}
+			key += ":" + graph.ExecutionProvider
+			roles := map[string]bool{}
+			for _, artifact := range graph.Artifacts {
+				if roles[artifact.Role] || !validSHA256(artifact.SHA256) {
+					return fmt.Errorf("duplicate or invalid ONNX artifact identity")
+				}
+				if artifact.Role != "graph" && (!strings.HasPrefix(artifact.Role, "external:") || !localArtifactPath(strings.TrimPrefix(artifact.Role, "external:"))) {
+					return fmt.Errorf("invalid ONNX artifact role")
+				}
+				roles[artifact.Role] = true
+			}
+			if !roles["graph"] {
+				return fmt.Errorf("ONNX execution requires graph content identity")
+			}
+		default:
+			return fmt.Errorf("unsupported operating point execution provider")
+		}
+		if seen[key] {
+			return fmt.Errorf("ambiguous duplicate operating point execution")
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func localArtifactPath(path string) bool {
+	return path != "." && filepath.IsLocal(path) && filepath.Clean(path) == path && !strings.Contains(path, "\\")
+}
+
+func (p *Policy) selectExecution(provider, precision, device string) (*Execution, error) {
+	for i := range p.definition.Executions {
+		execution := &p.definition.Executions[i]
+		if execution.Provider != provider || execution.Precision != precision {
+			continue
+		}
+		if provider == "ort" {
+			ep := ""
+			if device == "cpu" {
+				ep = "CPUExecutionProvider"
+			} else if strings.HasPrefix(device, "migraphx:") {
+				ep = "MIGraphXExecutionProvider"
+			}
+			if execution.ONNX.ExecutionProvider != ep {
+				continue
+			}
+		}
+		return execution, nil
+	}
+	return nil, fmt.Errorf("%w: deployment has no qualified operating point execution", binding.ErrCapability)
+}
+
+// ONNX returns a copy of the selected graph contract after preparation.
+func (p *Policy) ONNX() *ONNXExecution {
+	if p.execution == nil || p.execution.ONNX == nil {
+		return nil
+	}
+	graph := *p.execution.ONNX
+	graph.Artifacts = slices.Clone(graph.Artifacts)
+	return &graph
 }
 
 // Reduce preserves independent scores and requires the exact declared covering

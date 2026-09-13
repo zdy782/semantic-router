@@ -51,7 +51,8 @@ and may sum above one. The loader checks the task head and its activation;
 these contracts are not interchangeable.
 
 For standalone independent-label routing, the generic classifier binding accepts
-an explicit immutable operating-point sidecar with Candle float32. Its frozen
+an explicit immutable operating-point sidecar with Candle float32 or a qualified
+ORT native graph and execution provider. Its frozen
 window and threshold policy replaces manually repeated threshold predicates;
 see [Classifier signals](../../tutorials/signal/learned/classifier.md#independent-labels-with-a-frozen-operating-point).
 

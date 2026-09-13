@@ -153,7 +153,7 @@ func TestIndependentBindingAndDecisionContract(t *testing.T) {
 	if !reflect.DeepEqual(decl, restored) {
 		t.Fatal("policy reference lost in canonical roundtrip")
 	}
-	for _, scenario := range []string{"no policy", "categorical policy", "ORT", "separate head", "bad sha", "escape", "missing budget", "truncate", "half precision"} {
+	for _, scenario := range []string{"no policy", "categorical policy", "HTTP", "separate head", "bad sha", "escape", "missing budget", "truncate", "half precision"} {
 		t.Run(scenario, func(t *testing.T) {
 			bad := decl
 			dep := deployment
@@ -164,8 +164,8 @@ func TestIndependentBindingAndDecisionContract(t *testing.T) {
 				bad.OperatingPoint = nil
 			case "categorical policy":
 				bad.Contract = RemoteClassifierContractLabelDistribution
-			case "ORT":
-				dep.Provider = "ort"
+			case "HTTP":
+				dep.Provider = "http"
 			case "separate head":
 				bad.Head = "head"
 			case "bad sha":
@@ -189,5 +189,25 @@ func TestIndependentBindingAndDecisionContract(t *testing.T) {
 	cfg.ModelBindings = nil
 	if validateClassifierDecisionLeaf(cfg, "route", &node) == nil {
 		t.Fatal("unbound classifier omitted predicate")
+	}
+}
+
+func TestIndependentORTBindingDefersGraphIdentityToPreparation(t *testing.T) {
+	cfg := genericBindingConfig("ort", ClassifierSignalTypeLocal)
+	decl := cfg.ModelBindings["classifier.risk.tenant"]
+	decl.Contract = RemoteClassifierContractLabelScores
+	decl.OperatingPoint = &OperatingPointReference{Path: "point.json", SHA256: strings.Repeat("a", 64)}
+	decl.Head = "onnx/model.onnx"
+	cfg.ModelBindings["classifier.risk.tenant"] = decl
+	dep := cfg.ModelDeployments["selected"]
+	dep.Input = ModelInputBudget{MaxTokens: 32768, Overflow: "reject"}
+	cfg.ModelDeployments["selected"] = dep
+	if _, err := CompileModelBindings(cfg); err != nil {
+		t.Fatal(err)
+	}
+	dep.Precision = "fp16"
+	cfg.ModelDeployments["selected"] = dep
+	if _, err := CompileModelBindings(cfg); err == nil {
+		t.Fatal("unqualified conversion accepted")
 	}
 }
