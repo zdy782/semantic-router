@@ -30,13 +30,13 @@ func TestDefaultOperatorSamplesSelectVelaModels(t *testing.T) {
 				t.Fatal(err)
 			}
 			const prefix = "models/Vela-1.0-Encoder-307M-"
-			if cfg.EmbeddingModels.MmBertModelPath != prefix+"Embedding" {
-				t.Fatalf("embedding artifact = %q", cfg.EmbeddingModels.MmBertModelPath)
+			if cfg.MmBertModelPath != prefix+"Embedding" {
+				t.Fatalf("embedding artifact = %q", cfg.MmBertModelPath)
 			}
 			if cfg.PromptGuard.ModelID != prefix+"Guard" || cfg.PromptGuard.Variant != routerconfig.PromptGuardVariantMmBERT32K {
 				t.Fatalf("guard model = %+v", cfg.PromptGuard)
 			}
-			if cfg.CategoryModel.ModelID != prefix+"Domain" || cfg.CategoryModel.Variant != routerconfig.CategoryVariantMmBERT32K {
+			if cfg.CategoryModel.ModelID != prefix+"Domain" || cfg.Variant != routerconfig.CategoryVariantMmBERT32K {
 				t.Fatalf("domain model = %+v", cfg.CategoryModel)
 			}
 			if cfg.PIIModel.ModelID != prefix+"PII" || !cfg.PIIModel.UseMmBERT32K || cfg.PIIMappingPath != prefix+"PII/pii_mapping.json" {
