@@ -54,6 +54,16 @@ class FakeTokenizer:
 
 
 class SpanDataTests(unittest.TestCase):
+    def test_optional_entity_ids_follow_individual_annotation_spans(self):
+        sample = record(
+            "a@x.io b@y.io", [("EMAIL_ADDRESS", 0, 6), ("EMAIL_ADDRESS", 7, 13)]
+        )
+        tokenizer = FakeTokenizer([(0, 0), (0, 2), (2, 6), (6, 9), (9, 13), (0, 0)])
+        original = align_record(sample, tokenizer, LABELS, 6)
+        with_ids = align_record(sample, tokenizer, LABELS, 6, include_entity_ids=True)
+        self.assertEqual(with_ids.pop("entity_ids"), [-1, 0, 0, 1, 1, -1])
+        self.assertEqual(original, with_ids)
+
     def test_label_contract_rejects_reordered_mapping(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.json"

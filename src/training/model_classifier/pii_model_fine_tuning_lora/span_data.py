@@ -56,7 +56,9 @@ def validated_spans(record, label_to_id):
     return spans
 
 
-def align_record(record, tokenizer, label_to_id, max_length):
+def align_record(
+    record, tokenizer, label_to_id, max_length, *, include_entity_ids=False
+):
     """Label every subword without silently truncating or overwriting spans."""
     spans = validated_spans(record, label_to_id)
     encoding = tokenizer(
@@ -70,7 +72,8 @@ def align_record(record, tokenizer, label_to_id, max_length):
         raise ValueError("Input exceeds the explicitly configured training budget")
     offsets = encoding["offset_mapping"]
     labels = [-100 if start == end else label_to_id["O"] for start, end in offsets]
-    for span in spans:
+    entity_ids = [-1] * len(offsets)
+    for entity_id, span in enumerate(spans):
         indices = [
             index
             for index, (start, end) in enumerate(offsets)
@@ -90,12 +93,16 @@ def align_record(record, tokenizer, label_to_id, max_length):
                 raise ValueError("A token overlaps multiple annotated entities")
             prefix = "B-" if position == 0 else "I-"
             labels[index] = label_to_id[prefix + span["entity_type"]]
-    return {
+            entity_ids[index] = entity_id
+    result = {
         "input_ids": encoding["input_ids"],
         "attention_mask": encoding["attention_mask"],
         "labels": labels,
         "offset_mapping": offsets,
     }
+    if include_entity_ids:
+        result["entity_ids"] = entity_ids
+    return result
 
 
 def decode_entities(text, offsets, labels):

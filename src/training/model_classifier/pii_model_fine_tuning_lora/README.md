@@ -144,6 +144,16 @@ microbatches and divides each loss by the accumulation count. Padding and specia
 tokens have ignored labels; document mode also excludes masked positions even
 if their labels are populated. The selected reduction is recorded in `run.json`.
 Full mode checks that every trainable parameter receives a finite gradient.
+For sparse entity supervision, `--loss-normalization entity_document_mean`
+gives half of a positive document's weight to the mean of its individual entity
+losses and half to its `O`-token mean. Each entity loss averages all of that
+entity's subwords, so longer values do not outweigh shorter values. Fully
+negative documents retain their full `O`-token mean; documents with no `O`
+tokens use the entity mean alone. Documents then receive equal weight, without
+inverse-frequency class weights. Explicit annotation-span IDs are padded only
+for this loss and never passed to the model. Special, ignored, and masked tokens
+enter neither term. This is an optional training method; it changes no BIO
+labels, decoding, evaluation gates, or default reduction.
 Optional `--head-learning-rate` gives the entire prediction head a separate rate
 with the same schedule. Evaluation uses
 `--evaluation-dtype` independently of training autocast; the default remains

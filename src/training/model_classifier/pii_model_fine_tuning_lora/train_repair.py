@@ -20,7 +20,7 @@ from full_training import (
     validate_method,
 )
 from span_data import align_record, read_jsonl
-from token_loss import document_mean_loss
+from token_loss import document_mean_loss, entity_document_mean_loss, pad_entity_ids
 
 
 def checkpoint_score(metrics, selection):
@@ -35,11 +35,19 @@ def checkpoint_score(metrics, selection):
     raise ValueError(f"Unknown checkpoint selection metric: {selection}")
 
 
-def prepare_records(records, tokenizer, label_to_id, max_length):
+def prepare_records(
+    records, tokenizer, label_to_id, max_length, *, include_entity_ids=False
+):
     accepted, rejected = [], []
     for record in records:
         try:
-            encoded = align_record(record, tokenizer, label_to_id, max_length)
+            encoded = align_record(
+                record,
+                tokenizer,
+                label_to_id,
+                max_length,
+                include_entity_ids=include_entity_ids,
+            )
         except ValueError as error:
             if "budget" not in str(error) and "boundary crosses a token" not in str(
                 error
@@ -98,9 +106,9 @@ def main():
     parser.add_argument("--head-learning-rate", type=float)
     parser.add_argument(
         "--loss-normalization",
-        choices=["token_mean", "document_mean"],
+        choices=["token_mean", "document_mean", "entity_document_mean"],
         default="token_mean",
-        help="Token mean per microbatch, or equal weight for every document",
+        help="Token mean, document mean, or equal entity/O mass per document",
     )
     parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     parser.add_argument(
@@ -159,11 +167,19 @@ def main():
     model.to(args.device)
     model.train()
     train, rejected = prepare_records(
-        read_jsonl(args.train), tokenizer, label_to_id, args.max_length
+        read_jsonl(args.train),
+        tokenizer,
+        label_to_id,
+        args.max_length,
+        include_entity_ids=args.loss_normalization == "entity_document_mean",
     )
     replay, replay_rejected = (
         prepare_records(
-            read_jsonl(args.replay), tokenizer, label_to_id, args.max_length
+            read_jsonl(args.replay),
+            tokenizer,
+            label_to_id,
+            args.max_length,
+            include_entity_ids=args.loss_normalization == "entity_document_mean",
         )
         if args.replay
         else ([], [])
@@ -247,7 +263,11 @@ def main():
         "loss_reduction": (
             "mean over nonignored token labels in each microbatch"
             if args.loss_normalization == "token_mean"
-            else "mean attended nonignored token CE per document, then mean over logical documents"
+            else (
+                "mean attended nonignored token CE per document, then mean over logical documents"
+                if args.loss_normalization == "document_mean"
+                else "half mean entity CE and half mean O CE per document; absent groups omitted; then mean over logical documents"
+            )
         ),
         "replay_probability": args.replay_probability,
         "replay_balance_entities": args.replay_balance_entities,
@@ -337,12 +357,19 @@ def main():
                     {
                         key: value
                         for key, value in item.items()
-                        if key != "offset_mapping"
+                        if key not in {"offset_mapping", "entity_ids"}
                     }
                     for item in selected
                 ]
             )
             batch = {key: value.to(args.device) for key, value in batch.items()}
+            entity_ids = (
+                pad_entity_ids(
+                    selected, batch["labels"].shape[1], tokenizer.padding_side
+                ).to(args.device)
+                if args.loss_normalization == "entity_document_mean"
+                else None
+            )
             with torch.autocast(
                 args.device, dtype=torch.bfloat16, enabled=args.device == "cuda"
             ):
@@ -361,8 +388,16 @@ def main():
                         document_mean_loss(
                             outputs.logits, batch["labels"], batch["attention_mask"]
                         )
-                        / args.accumulate
+                        if args.loss_normalization == "document_mean"
+                        else entity_document_mean_loss(
+                            outputs.logits,
+                            batch["labels"],
+                            batch["attention_mask"],
+                            entity_ids,
+                            o_label_id=label_to_id["O"],
+                        )
                     )
+                    loss = loss / args.accumulate
             if not bool(torch.isfinite(loss)):
                 raise ValueError(f"Non-finite loss at step {step}")
             loss.backward()

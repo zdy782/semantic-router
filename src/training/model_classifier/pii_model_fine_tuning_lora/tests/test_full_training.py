@@ -337,6 +337,9 @@ class FullTokenTrainingTests(unittest.TestCase):
     def test_actual_document_mean_cli_train_export_and_reload(self):
         self.run_full_cpu_cli("document_mean")
 
+    def test_actual_entity_document_mean_cli_train_export_and_reload(self):
+        self.run_full_cpu_cli("entity_document_mean")
+
     def run_full_cpu_cli(self, normalization=None):
         rows = [
             {
