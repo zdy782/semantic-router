@@ -219,6 +219,12 @@ def _start_vllm_sr_locked(
         stack_layout,
     )
     management_port = _configured_management_port(user_config)
+    stack_layout.host_port(management_port, name="management API host port")
+    for listener in listeners:
+        stack_layout.host_port(
+            listener["port"],
+            name=f"listener {listener.get('name', 'unknown')} host port",
+        )
     readiness_token_env = _configured_management_readiness_token_env(
         user_config, env_vars
     )
