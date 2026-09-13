@@ -13,6 +13,13 @@ from unittest.mock import patch
 
 from src.training.model_classifier.sequence_repair import complete_adapter
 from src.training.model_classifier.sequence_repair.model import load_model, save_adapter
+from src.training.model_classifier.sequence_repair.optimization import (
+    initial_artifact_receipt,
+    load_trainable_model,
+    optimizer_groups,
+    save_training_checkpoint,
+    validate_method,
+)
 from src.training.model_classifier.sequence_repair.task_head import (
     assert_task_head_preserved,
     task_head_scope,
@@ -226,6 +233,81 @@ class TaskHeadStorageTests(unittest.TestCase):
                 rtol=0,
             )
 
+    def test_full_training_updates_encoder_and_preserves_complete_checkpoint(self):
+        model, tokenizer, _, _ = load_trainable_model(
+            self.base, self.contract, None, "full"
+        )
+        before = {
+            name: value.detach().clone() for name, value in model.state_dict().items()
+        }
+        groups = optimizer_groups(model, 0.001, 0.002)
+        self.assertEqual([group["initial_lr"] for group in groups], [0.001, 0.002])
+        parameter_ids = [id(p) for group in groups for p in group["params"]]
+        self.assertEqual(len(parameter_ids), len(set(parameter_ids)))
+        self.assertEqual(set(parameter_ids), {id(p) for p in model.parameters()})
+        optimizer = self.torch.optim.AdamW(groups)
+        loss = self.torch.nn.functional.cross_entropy(
+            model(**self.inputs).logits, self.torch.tensor([0, 1])
+        )
+        loss.backward()
+        self.assertTrue(
+            all(
+                p.grad is not None and bool(self.torch.isfinite(p.grad).all())
+                for p in model.parameters()
+            )
+        )
+        optimizer.step()
+        self.assertTrue(
+            any(
+                not self.torch.equal(before[name], value)
+                for name, value in model.state_dict().items()
+                if name.startswith("model.")
+            )
+        )
+        destination = self.root / "full-checkpoint"
+        save_training_checkpoint(
+            model, tokenizer, destination, "full", "fixture-base", "fixture-revision"
+        )
+        restored, _, _, _ = load_model(destination, self.contract)
+        model.eval()
+        restored.eval()
+        with self.torch.inference_mode():
+            self.torch.testing.assert_close(
+                model(**self.inputs).logits,
+                restored(**self.inputs).logits,
+                atol=0,
+                rtol=0,
+            )
+        self.assertFalse((destination / "adapter_config.json").exists())
+        receipt = initial_artifact_receipt(destination, None)
+        self.assertIn("model.safetensors", receipt["base_files"])
+
+    def test_fresh_full_head_keeps_exact_base_encoder(self):
+        inherited, _, _, _ = load_trainable_model(
+            self.base, self.contract, None, "full"
+        )
+        fresh, _, _, _ = load_trainable_model(
+            self.base, self.contract, None, "full", fresh_head=True
+        )
+        inherited_state, fresh_state = inherited.state_dict(), fresh.state_dict()
+        for name in inherited_state:
+            if name.startswith("model."):
+                self.assertTrue(
+                    self.torch.equal(inherited_state[name], fresh_state[name])
+                )
+        for name in ("head.dense.weight", "classifier.weight"):
+            self.assertFalse(self.torch.equal(inherited_state[name], fresh_state[name]))
+        for method, adapter, reset in (
+            ("full", self.legacy_path, False),
+            ("lora", None, False),
+            ("lora", self.legacy_path, True),
+        ):
+            with self.assertRaises(ValueError):
+                validate_method(method, adapter, reset)
+        for rate in (float("nan"), float("inf"), 0, -1):
+            with self.assertRaises(ValueError):
+                optimizer_groups(fresh, rate)
+
     def test_missing_trainable_head_and_corrupted_saved_classifier_are_rejected(self):
         from safetensors.torch import load_file, save_file
 
@@ -242,6 +324,19 @@ class TaskHeadStorageTests(unittest.TestCase):
         save_file(weights, corrupt)
         with self.assertRaisesRegex(ValueError, "changed effective task tensor"):
             verify_saved_task_head(self.legacy, corrupt)
+
+    def test_missing_encoder_cannot_be_replaced_by_random_initialization(self):
+        import shutil
+
+        from safetensors.torch import load_file, save_file
+
+        broken = self.root / "incomplete-base"
+        shutil.copytree(self.base, broken)
+        weights = load_file(str(broken / "model.safetensors"))
+        del weights["model.layers.1.mlp.Wi.weight"]
+        save_file(weights, str(broken / "model.safetensors"))
+        with self.assertRaisesRegex(ValueError, "missing encoder tensors"):
+            load_trainable_model(broken, self.contract, None, "full")
 
 
 if __name__ == "__main__":

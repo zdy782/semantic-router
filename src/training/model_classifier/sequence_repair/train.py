@@ -1,4 +1,4 @@
-"""Explicit single-GPU LoRA continuation with development-only selection."""
+"""Explicit single-GPU classifier training with development-only selection."""
 
 # ruff: noqa: PLC0415
 
@@ -13,7 +13,13 @@ from pathlib import Path
 
 from .data import assert_disjoint, file_receipts, label_counts, read_records
 from .evaluate import evaluate_records
-from .model import load_model, save_adapter
+from .optimization import (
+    initial_artifact_receipt,
+    load_trainable_model,
+    optimizer_groups,
+    save_training_checkpoint,
+    validate_method,
+)
 from .selection import (
     BINARY_FP_SELECTION,
     binary_checkpoint_key,
@@ -181,7 +187,9 @@ def main():
     parser.add_argument("--base", required=True)
     parser.add_argument("--base-id", default="llm-semantic-router/mmbert-32k-yarn")
     parser.add_argument("--base-revision", required=True)
-    parser.add_argument("--adapter", type=Path, required=True)
+    parser.add_argument("--adapter", type=Path)
+    parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    parser.add_argument("--fresh-head", action="store_true")
     parser.add_argument("--contract", required=True)
     parser.add_argument("--train", nargs="+", required=True)
     parser.add_argument("--dev", nargs="+", required=True)
@@ -191,6 +199,7 @@ def main():
     parser.add_argument("--accumulate", type=int, default=2)
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument("--head-learning-rate", type=float)
     parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument(
         "--evaluation-dtype", choices=["bfloat16", "float32"], default="bfloat16"
@@ -218,6 +227,7 @@ def main():
     parser.add_argument("--probe-only", action="store_true")
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
+    validate_method(args.method, args.adapter, args.fresh_head)
     if (
         min(
             args.steps,
@@ -239,8 +249,9 @@ def main():
     torch.set_num_threads(8)
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
-    model, tokenizer, label_to_id, id_to_label = load_model(
-        args.base, args.contract, args.adapter, trainable=True
+    initial_artifacts = initial_artifact_receipt(args.base, args.adapter)
+    model, tokenizer, label_to_id, id_to_label = load_trainable_model(
+        args.base, args.contract, args.adapter, args.method, args.fresh_head
     )
     if model.config.problem_type != "single_label_classification":
         raise ValueError("This training loop requires single-label targets")
@@ -252,8 +263,9 @@ def main():
     )
     if args.max_length > model.config.max_position_embeddings:
         raise ValueError("Training budget exceeds checkpoint position capacity")
-    rows, dev = read_records(args.train, label_to_id), read_records(
-        args.dev, label_to_id
+    rows, dev = (
+        read_records(args.train, label_to_id),
+        read_records(args.dev, label_to_id),
     )
     assert_disjoint(rows, dev)
     if args.selection == BINARY_FP_SELECTION:
@@ -304,21 +316,17 @@ def main():
     parameters = [
         parameter for parameter in model.parameters() if parameter.requires_grad
     ]
-    optimizer = torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=0.01)
+    groups = optimizer_groups(model, args.learning_rate, args.head_learning_rate)
+    optimizer = torch.optim.AdamW(groups, weight_decay=0.01)
     args.output.mkdir(parents=True, exist_ok=True)
     metadata = {
         "base_model": args.base_id,
         "base_revision": args.base_revision,
-        "initial_adapter_sha256": hashlib.sha256(
-            (args.adapter / "adapter_model.safetensors").read_bytes()
-        ).hexdigest(),
-        "initial_adapter_config_sha256": (
-            hashlib.sha256(
-                (args.adapter / "adapter_config.json").read_bytes()
-            ).hexdigest()
-            if (args.adapter / "adapter_config.json").is_file()
-            else None
-        ),
+        "method": args.method,
+        "fresh_head": args.fresh_head,
+        "initial_artifacts": initial_artifacts,
+        "initial_adapter_sha256": initial_artifacts.get("adapter_model.safetensors"),
+        "initial_adapter_config_sha256": initial_artifacts.get("adapter_config.json"),
         "contract_sha256": hashlib.sha256(Path(args.contract).read_bytes()).hexdigest(),
         "classifier_pooling": model.config.classifier_pooling,
         "task_head": task_head_scope(model),
@@ -339,6 +347,14 @@ def main():
         "dropout_trajectory_equivalence": args.microbatch_token_budget is None,
         "max_length": args.max_length,
         "learning_rate": args.learning_rate,
+        "optimizer_groups": [
+            {
+                "name": group["name"],
+                "learning_rate": group["initial_lr"],
+                "parameters": sum(parameter.numel() for parameter in group["params"]),
+            }
+            for group in groups
+        ],
         "balanced_sampling": args.balanced_sampling,
         "length_balanced_sampling": args.length_balanced_sampling,
         "source_balanced_sampling": balance_sources,
@@ -441,10 +457,12 @@ def main():
         if key is not None and (best_key is None or key > best_key):
             best = score
             best_key = key
-            save_adapter(
+            save_training_checkpoint(
                 model,
                 tokenizer,
-                args.output / "best-adapter",
+                args.output
+                / ("best-adapter" if args.method == "lora" else "best-model"),
+                args.method,
                 args.base_id,
                 args.base_revision,
             )
@@ -550,7 +568,7 @@ def main():
             * (1 + math.cos(math.pi * (step - warmup) / max(1, args.steps - warmup)))
         )
         for group in optimizer.param_groups:
-            group["lr"] = args.learning_rate * rate
+            group["lr"] = group["initial_lr"] * rate
         optimizer.step()
         torch.cuda.synchronize()
         log = {
@@ -577,17 +595,18 @@ def main():
         json.dumps(sampling_exposure([row for row, _ in train], drawn), indent=2) + "\n"
     )
     if not args.probe_only:
-        save_adapter(
+        save_training_checkpoint(
             model,
             tokenizer,
-            args.output / "last-adapter",
+            args.output / ("last-adapter" if args.method == "lora" else "last-model"),
+            args.method,
             args.base_id,
             args.base_revision,
         )
         if best_key is None:
             raise ValueError(
-                "No checkpoint met the development FP budget; last adapter and "
-                "infeasibility receipts were retained without selecting a best adapter"
+                "No checkpoint met the development FP budget; last checkpoint and "
+                "infeasibility receipts were retained without selecting a best checkpoint"
             )
     print(
         json.dumps(

@@ -30,13 +30,12 @@ def configuration_overrides(contract):
 
 def load_model(base, contract, adapter=None, trainable=False):
     import torch
-    from peft import PeftModel
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     label_to_id, id_to_label = load_contract(contract)
     overrides = configuration_overrides(contract)
     tokenizer = AutoTokenizer.from_pretrained(base)
-    model = AutoModelForSequenceClassification.from_pretrained(
+    model, loading = AutoModelForSequenceClassification.from_pretrained(
         base,
         num_labels=len(label_to_id),
         label2id=label_to_id,
@@ -44,9 +43,17 @@ def load_model(base, contract, adapter=None, trainable=False):
         torch_dtype=torch.float32,
         attn_implementation="sdpa",
         reference_compile=False,
+        output_loading_info=True,
         **overrides,
     )
+    missing_encoder = [
+        name for name in loading["missing_keys"] if name.startswith("model.")
+    ]
+    if missing_encoder:
+        raise ValueError(f"Checkpoint is missing encoder tensors: {missing_encoder}")
     if adapter:
+        from peft import PeftModel
+
         model = PeftModel.from_pretrained(model, adapter, is_trainable=trainable)
     elif trainable:
         raise ValueError("Continuation requires an explicit initial adapter")

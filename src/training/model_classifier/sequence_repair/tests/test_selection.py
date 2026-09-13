@@ -138,9 +138,10 @@ class BinarySelectionTests(unittest.TestCase):
                 for value in [None, True, "0.1", -1, 1.1, math.nan, math.inf]
             ),
         ]:
-            with self.subTest(
-                mapping=mapping, positive=positive, budget=budget
-            ), self.assertRaises(ValueError):
+            with (
+                self.subTest(mapping=mapping, positive=positive, budget=budget),
+                self.assertRaises(ValueError),
+            ):
                 validate_selection_options(
                     BINARY_FP_SELECTION, mapping, positive, budget
                 )
@@ -204,6 +205,8 @@ class BinarySelectionTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            base = root / "base"
+            base.mkdir()
             adapter = root / "adapter"
             adapter.mkdir()
             (adapter / "adapter_model.safetensors").write_bytes(b"fixture")
@@ -234,7 +237,7 @@ class BinarySelectionTests(unittest.TestCase):
             arguments = [
                 "train",
                 "--base",
-                "fixture-base",
+                str(base),
                 "--base-revision",
                 "fixture-revision",
                 "--adapter",
@@ -262,25 +265,28 @@ class BinarySelectionTests(unittest.TestCase):
                 argv = [*arguments, "--output", str(output)]
                 if explicit is not None:
                     argv += ["--evaluation-dtype", explicit]
-                with patch.dict(sys.modules, {"torch": fake_torch}), patch.object(
-                    sys, "argv", argv
-                ), patch.object(
-                    train,
-                    "load_model",
-                    return_value=(
-                        model,
-                        lambda *args, **kwargs: {"input_ids": [1, 2]},
-                        {"safe": 0, "unsafe": 1},
-                        {0: "safe", 1: "unsafe"},
+                with (
+                    patch.dict(sys.modules, {"torch": fake_torch}),
+                    patch.object(sys, "argv", argv),
+                    patch.object(
+                        train,
+                        "load_trainable_model",
+                        return_value=(
+                            model,
+                            lambda *args, **kwargs: {"input_ids": [1, 2]},
+                            {"safe": 0, "unsafe": 1},
+                            {0: "safe", 1: "unsafe"},
+                        ),
                     ),
-                ), patch.object(
-                    train, "task_head_scope", return_value={"fixture": True}
-                ), patch.object(
-                    train, "evaluate_records", side_effect=EvaluationReachedError
-                ) as evaluate, patch(
-                    "builtins.print"
-                ), self.assertRaises(
-                    EvaluationReachedError
+                    patch.object(train, "optimizer_groups", return_value=[]),
+                    patch.object(
+                        train, "task_head_scope", return_value={"fixture": True}
+                    ),
+                    patch.object(
+                        train, "evaluate_records", side_effect=EvaluationReachedError
+                    ) as evaluate,
+                    patch("builtins.print"),
+                    self.assertRaises(EvaluationReachedError),
                 ):
                     train.main()
                 expected = explicit or "bfloat16"
@@ -304,18 +310,21 @@ class BinarySelectionTests(unittest.TestCase):
                         else None
                     ),
                 )
-            with patch.dict(sys.modules, {"torch": fake_torch}), patch.object(
-                sys,
-                "argv",
-                [
-                    *arguments,
-                    "--output",
-                    str(root / "invalid"),
-                    "--evaluation-dtype",
-                    "float16",
-                ],
-            ), patch.object(train, "load_model") as load, redirect_stderr(
-                io.StringIO()
+            with (
+                patch.dict(sys.modules, {"torch": fake_torch}),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        *arguments,
+                        "--output",
+                        str(root / "invalid"),
+                        "--evaluation-dtype",
+                        "float16",
+                    ],
+                ),
+                patch.object(train, "load_trainable_model") as load,
+                redirect_stderr(io.StringIO()),
             ):
                 with self.assertRaises(SystemExit) as failure:
                     train.main()

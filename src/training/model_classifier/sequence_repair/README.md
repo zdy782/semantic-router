@@ -2,7 +2,7 @@
 
 This module initializes, continues, evaluates, and freezes standard Hugging Face
 `ModernBertForSequenceClassification` checkpoints. Domain, FactCheck, and Modality
-keep their existing label IDs. Safety, Feedback, and PromptGuard can reuse the
+keep their existing label IDs. Safety, Feedback, and Guard can reuse the
 single-label runner; multi-label Hazard uses its own masked-loss training loop.
 The shared loader and exporter preserve the contract's `problem_type`.
 
@@ -73,6 +73,22 @@ An optional `classifier_pooling` contract field selects the standard HF `mean`
 or `cls` mode. Omit it to retain the base's setting. Treat a pooling change as a
 new trained candidate and compare short and long development quality; changing
 the configuration alone does not make a mean-trained head a valid CLS model.
+
+For full-encoder optimization, run `train` with `--method full` and omit
+`--adapter`. This updates the complete checkpoint from `--base` and saves
+`best-model` and `last-model`, each containing all encoder and head weights.
+Use `--fresh-head` to reset both the dense classification head and final
+classifier while preserving the encoder exactly. Without that flag, the
+standard loader retains compatible head weights from the supplied checkpoint.
+An adapter cannot stand in for a full checkpoint or be applied to a different
+base by this mode.
+
+`--head-learning-rate` optionally gives the task head its own learning rate;
+the encoder uses `--learning-rate`, with the same schedule applied to both.
+Both methods record hashes of the actual local initialization, the effective
+task head, and trainable parameter groups. Full checkpoint serialization checks
+every tensor. Select the training method and rates before comparing development
+results, then qualify the selected artifact on separate test data.
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.train \

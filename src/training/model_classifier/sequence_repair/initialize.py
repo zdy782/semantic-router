@@ -6,7 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
-from .model import load_model, save_adapter
+from .model import save_adapter
+from .optimization import load_trainable_model
 
 
 def main():
@@ -30,7 +31,9 @@ def main():
         raise ValueError("Invalid LoRA dimensions or dropout")
     torch.set_num_threads(8)
     torch.manual_seed(args.seed)
-    model, tokenizer, _labels, _ids = load_model(args.base, args.contract)
+    model, tokenizer, _labels, _ids = load_trainable_model(
+        args.base, args.contract, None, "full", fresh_head=True
+    )
     model = get_peft_model(
         model,
         LoraConfig(
