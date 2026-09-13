@@ -115,6 +115,30 @@ class RerankerHeadStorageTest(unittest.TestCase):
         with mock.patch("torch.load", side_effect=AssertionError("legacy read")):
             self.assert_state_equal(self.load().layer_heads.state_dict())
 
+    def test_task_auto_map_does_not_replace_the_native_backbone(self):
+        path = self.checkpoint / "config.json"
+        config = json.loads(path.read_text())
+        config["auto_map"] = {"AutoModel": "task_wrapper.TaskModel"}
+        path.write_text(json.dumps(config))
+        (self.checkpoint / "task_wrapper.py").write_text(
+            'raise RuntimeError("task wrapper must not initialize the backbone")\n'
+        )
+        loaded = self.load()
+        self.assertIsInstance(loaded.encoder, ModernBertModel)
+        self.assert_state_equal(loaded.layer_heads.state_dict())
+        for name, tensor in loaded.encoder.state_dict().items():
+            torch.testing.assert_close(
+                tensor, self.model.encoder.state_dict()[name], atol=0, rtol=0
+            )
+        ids = torch.tensor([[1, 3, 4, 2], [1, 5, 2, 0]])
+        mask = ids.ne(0).long()
+        with torch.inference_mode():
+            expected = self.model(ids, mask, return_all_scores=True)["all_scores"]
+            actual = loaded(ids, mask, return_all_scores=True)["all_scores"]
+        self.assertEqual(set(actual), set(expected))
+        for name in actual:
+            torch.testing.assert_close(actual[name], expected[name], atol=0, rtol=0)
+
     def test_legacy_format_uses_restricted_weights_only_reader(self):
         torch.save(self.model.layer_heads.state_dict(), self.legacy_path)
         self.safe_path.unlink()

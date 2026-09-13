@@ -110,14 +110,17 @@ class Matryoshka2DReranker(nn.Module):
     ):
         super().__init__()
         config = AutoConfig.from_pretrained(
-            model_name_or_path, revision=model_revision, trust_remote_code=True
+            model_name_or_path, revision=model_revision, trust_remote_code=False
         )
+        # The checkpoint may publish an AutoModel task wrapper for convenient
+        # inference. Training and export restore the native backbone and its
+        # separately stored heads, so that wrapper must not become the encoder.
         self.encoder = AutoModel.from_pretrained(
             model_name_or_path,
             revision=model_revision,
             config=config,
             torch_dtype=torch_dtype,
-            trust_remote_code=True,
+            trust_remote_code=False,
             attn_implementation=_attention_implementation(use_flash_attn),
         )
         self.hidden_size = config.hidden_size
