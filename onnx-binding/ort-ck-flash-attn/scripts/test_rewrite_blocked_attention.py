@@ -1,12 +1,17 @@
 """Execute tiny FP32 ONNX attention graphs with dynamic batch/sequence shapes."""
 
 import copy
+import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 from rewrite_blocked_attention import rewrite_model, specialize_batch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from onnx_portable_ops import lower_nan_predicates
 
 try:
     import onnxruntime as ort
@@ -167,6 +172,46 @@ def feeds(batch, length, all_masked=False):
 
 @unittest.skipIf(ort is None, "onnxruntime CPU is needed for execution tests")
 class BlockedNumerics(unittest.TestCase):
+    def test_portable_nan_predicate_composes_with_blocking_in_either_order(self):
+        for radius in [None, 2]:
+            original = attention_model(radius=radius, gathered=True)
+            reference = session(original)
+            for lower_first in [False, True]:
+                candidate = copy.deepcopy(original)
+                if lower_first:
+                    lower_nan_predicates(candidate)
+                candidate, receipt = rewrite_model(candidate, max_score_bytes=16384)
+                self.assertEqual(receipt["attention_blocks"], 1)
+                lowered = lower_nan_predicates(candidate)
+                self.assertEqual(lowered["rewritten_nan_predicates"], 1)
+                self.assertEqual(lowered["unsupported_nan_predicates"], 0)
+                onnx.checker.check_model(candidate)
+                actual = session(candidate)
+                for batch, length in [(1, 7), (2, 17), (2, 257)]:
+                    for all_masked in [False, True]:
+                        inputs = feeds(batch, length, all_masked=all_masked)
+                        np.testing.assert_allclose(
+                            actual.run(None, inputs)[0],
+                            reference.run(None, inputs)[0],
+                            atol=2e-6,
+                            rtol=2e-6,
+                        )
+
+    def test_similar_predicate_is_not_accepted_as_nan_guard(self):
+        for corruption in ["different_operand", "custom_equal", "custom_not"]:
+            model = attention_model()
+            lower_nan_predicates(model)
+            guard = next(node for node in model.graph.node if node.op_type == "Not")
+            equal = next(node for node in model.graph.node if node.op_type == "Equal")
+            if corruption == "different_operand":
+                equal.input[1] = "zero"
+            elif corruption == "custom_equal":
+                equal.domain = "custom"
+            else:
+                guard.domain = "custom"
+            with self.assertRaises(ValueError):
+                rewrite_model(model)
+
     def test_static_batch_rejects_unqualified_batches(self):
         inputs = [
             helper.make_tensor_value_info(

@@ -56,23 +56,42 @@ def scalar_value(graph, out2node, name):
     return None
 
 
+def nan_guard_nodes(out2node, condition, probability):
+    """Prove a NaN predicate, including its exact self-equality lowering."""
+    guard = out2node.get(condition)
+    if guard is None or guard.domain or guard.attribute:
+        return []
+    if guard.op_type == "IsNaN" and list(guard.input) == [probability]:
+        return [guard]
+    if guard.op_type != "Not" or len(guard.input) != 1:
+        return []
+    equal = out2node.get(guard.input[0])
+    if (
+        equal is not None
+        and not equal.domain
+        and not equal.attribute
+        and equal.op_type == "Equal"
+        and list(equal.input) == [probability, probability]
+    ):
+        return [equal, guard]
+    return []
+
+
 def attention_probability_path(graph, out2node, softmax):
-    """Accept only direct probabilities or Where(IsNaN(p), scalar_zero, p)."""
+    """Accept direct probabilities or a proven NaN-to-zero guard."""
     probability = softmax.output[0]
     extra = []
     for node in graph.node:
         if node.op_type != "Where" or len(node.input) != WHERE_INPUT_COUNT:
             continue
-        guard = out2node.get(node.input[0])
+        guards = nan_guard_nodes(out2node, node.input[0], probability)
         if (
             node.input[2] == probability
-            and guard is not None
-            and guard.op_type == "IsNaN"
-            and list(guard.input) == [probability]
+            and guards
             and scalar_value(graph, out2node, node.input[1]) == 0
         ):
             probability = node.output[0]
-            extra = [guard, node]
+            extra = [*guards, node]
             break
     consumers = [
         n for n in graph.node if n.op_type == "MatMul" and n.input[0] == probability

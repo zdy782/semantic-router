@@ -18,6 +18,7 @@ import transformers
 from model_precision import cast_parameters_preserving_buffers
 from modernbert_inputs import ort_inputs
 from onnx_artifacts import external_data_sha256, sha256, strip_debug_annotations
+from onnx_portable_ops import lower_nan_predicates
 from onnx_shape_simplification import simplify_batch_reshapes
 from transformers import (
     AutoConfig,
@@ -277,6 +278,7 @@ def main():
     shape_simplification = (
         simplify_batch_reshapes(graph) if not args.verify_only else None
     )
+    portable_operators = lower_nan_predicates(graph) if not args.verify_only else None
     external_files = external_data_sha256(graph, path)
     strip_debug_annotations(graph)
     onnx.save(graph, path)
@@ -299,6 +301,7 @@ def main():
     tokenizer.save_pretrained(args.output)
     receipt = {
         "shape_simplification": shape_simplification,
+        "portable_operators": portable_operators,
         "task": "token-classification" if token_task else "text-classification",
         "dtype": args.dtype,
         "head_dtype": "float32",

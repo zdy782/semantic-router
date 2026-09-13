@@ -33,6 +33,7 @@ from onnx_artifacts import (
     source_snapshot_sha256,
     strip_debug_annotations,
 )
+from onnx_portable_ops import lower_nan_predicates
 from onnx_shape_simplification import simplify_batch_reshapes
 
 TRAINING_ROOT = Path(__file__).resolve().parents[2] / "src/training/model_embeddings"
@@ -146,6 +147,7 @@ def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
     )
     graph = onnx.load(str(path), load_external_data=False)
     shape_simplification = simplify_batch_reshapes(graph)
+    portable_operators = lower_nan_predicates(graph)
     strip_debug_annotations(graph)
     if isinstance(model, RerankerExit):
         graph.metadata_props.add(
@@ -161,6 +163,7 @@ def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
         "example_output_shape": list(example.shape),
         "example_output_dtype": str(example.dtype),
         "shape_simplification": shape_simplification,
+        "portable_operators": portable_operators,
         "numerical_validation": "pending; ONNX checker is structural validation only",
     }
 

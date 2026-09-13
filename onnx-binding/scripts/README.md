@@ -4,6 +4,13 @@ Export an immutable, local checkpoint after task evaluation has selected and
 frozen it. Export parity checks numerical agreement; it does not establish
 accuracy, robustness, or useful context length.
 
+Exports retain all-masked attention protection using the standard ONNX
+predicate `Not(Equal(x, x))`. This is equivalent to `IsNaN(x)`, including NaNs,
+infinities, and signed zeros, and avoids requiring a dedicated provider kernel.
+The transformation preserves opsets and tensor storage, and applies only when
+the operator schemas prove compatible input types. Qualify the resulting graph
+on each target provider; a portable operator set alone does not prove GPU execution.
+
 ## Sequence and token classifiers
 
 `export_classifier.py` supports merged `ModernBertForSequenceClassification`
