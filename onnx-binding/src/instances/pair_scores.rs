@@ -20,7 +20,7 @@ pub fn load_pair_scorer(
 ) -> UnifiedResult<u64> {
     let options = fresh_options(options);
     let model = PairScorer::load(&options, selection)?;
-    prepare(Model::PairScorer(model), options)
+    prepare(Model::PairScorer(Box::new(model)), options)
 }
 
 pub fn score_pairs(handle: u64, pairs: Vec<TextPair>) -> UnifiedResult<PairScores> {

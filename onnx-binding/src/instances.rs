@@ -26,7 +26,7 @@ pub use pair_scores::{load_pair_scorer, score_pairs};
 pub use sequence::{classify, classify_windows, score, score_windows};
 
 enum Model {
-    PairScorer(PairScorer),
+    PairScorer(Box<PairScorer>),
     Sequence(MmBertSequenceClassifier),
     LabelScores(MmBertSequenceClassifier),
     Token(MmBertTokenClassifier),
