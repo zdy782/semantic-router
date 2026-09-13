@@ -2,7 +2,7 @@
 title: 训练并评测 Router 模型
 sidebar_label: 概览
 translation:
-  source_commit: "e56591a9cb24f073bf159927e87116ba6d278741"
+  source_commit: "f2d94d677fd96e548298f7bbb274015462888aae"
   source_file: "docs/training/training-overview.md"
   outdated: false
 ---
@@ -21,8 +21,8 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 
 | 你需要 | 从这里开始 | 输出 |
 | --- | --- | --- |
-| 高效比较查询和文档 | [Vela embedding 架构](./mmbert-32k-models#embedding-model-bi-encoder) | 每个输入一个规范化向量 |
-| 以更高准确率重打分短列表 | [Vela reranking 架构](./mmbert-32k-models#reranking-model-cross-encoder) | 每个查询-文档对的相关性分数 |
+| 高效比较查询和文档 | [Bi-encoder 架构](./mmbert-32k-models#embedding-model-bi-encoder) | 每个输入一个规范化向量 |
+| 以更高准确率重打分短列表 | [Cross-encoder 架构](./mmbert-32k-models#reranking-model-cross-encoder) | 每个查询-文档对未经校准的相关性 logit |
 | 将文本、图像和音频放入同一向量空间 | [多模态嵌入](./multimodal-embeddings) | 规范化的跨模态向量 |
 | 检测意图、越狱、反馈、模态、事实核查需求或 PII | [分类器模型](./classifier-models) | 类别、概率分布或 token 标签 |
 | 应用分层提示词安全策略 | [安全分类器](./mmbert-safety-classifier) | `safe`/`unsafe`，随后是危害类别 |
@@ -50,6 +50,10 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 基座编码器是训练依赖，不是路由信号。记录准确的基座 revision、tokenizer、训练数据版本和任务头初始化；同一名称或架构不能证明权重具有共同来源。
 
 Vela 1.0 任务模型共享已发布的 `Vela-1.0-Encoder-307M` 基座。新的 Vela 训练应固定该基座的不可变 revision，并保留 tokenizer 和配置。训练命令接受显式的 base ID 与 revision，应配套选择，避免沿用旧 mmBERT 配方的基座。候选模型以原任务的 mmBERT 模型和匹配数据进行对比，同时用当前 Vela 版本检查回归。
+
+继续训练 Embedding 或 Reranker 时，从已发布的 Vela 任务检查点初始化，并核对其共享基座来源。恢复完整编码器及所有已训练的表示头。开始新的优化实验会重置优化器；恢复中断的训练则还需恢复训练状态。[Vela 表示模型训练流程](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_embeddings/mmbert_32k#train-a-new-task-from-a-standard-base)分别支持这两种操作。
+
+检索监督可以结合教师表示锚点和逻辑批次内的关系。对每个支持的深度和维度显式施加监督，分别评测检索、相似度、多语言迁移和长文档能力。仅做梯度累积不会增加对比学习的负例。构建排序损失时，应区分未经相关性标注的候选和已审查的负例。
 
 ## Adapter 与合并模型 {#adapter-versus-merged-model}
 

@@ -75,6 +75,8 @@ PII 的重叠扫描、Hazard 的窗口策略与整段文本分类不同。应按
 
 ONNX 是 ORT provider 使用的可移植推理格式。AMD GPU 加速使用 ROCm MIGraphX execution provider，因此 CPU ONNX 会话不能作为 AMD GPU 验证。选择与部署匹配的计算图和表示，并核对实际 provider、精度及 fallback 证据。首次 GPU 编译时间与预热后的请求时延应分别记录。
 
+Embedding 和 Reranker 仓库包含共享外部权重的 FP32 ONNX 计算图。完整表示使用 `onnx/model.onnx`；缩减表示需要匹配已训练层数或层数与维度的计算图。下载器根据模型的编码器配置识别完整表示，因此显式选择完整层数和维度也可以使用主计算图。更新原生权重时，必须重新生成对应的 ONNX 产物再发布。
+
 各模型卡片列出支持的输入长度、用法及可比评测结果。公开对比以此前的 mmBERT 家族为基线，使用匹配数据；质量分数、最大可接受输入长度和推理性能衡量的是不同属性。
 
 ## 验证真实路由与重排 {#verify-live-routing-and-reranking}

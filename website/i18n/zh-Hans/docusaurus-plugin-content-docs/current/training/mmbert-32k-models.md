@@ -2,12 +2,14 @@
 title: mmBERT-32K 基础、嵌入与重排序
 sidebar_label: mmBERT-32K 模型
 translation:
-  source_commit: "e8c4109fd4151ad0c7c0163c8ead375bef882ddf"
+  source_commit: "f2d94d677fd96e548298f7bbb274015462888aae"
   source_file: "docs/training/mmbert-32k-models.md"
   outdated: false
 ---
 
 # mmBERT-32K 基础、嵌入与重排序 {#mmbert-32k-foundation-embedding-and-reranking}
+
+本页介绍此前发布的 mmBERT 模型及其原始训练配方。Vela 沿用 bi-encoder 和 cross-encoder 架构模式，但使用已发布的 Vela Encoder 基座。适配 Vela 时，请参阅[当前训练概览](./training-overview#record-the-base-and-task-lineage)和[模型目录](./model-catalog)，不要沿用下方命令中的旧基座或数据配方。
 
 三个模型构成一个渐进的文本检索家族：
 
