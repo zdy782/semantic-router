@@ -172,7 +172,7 @@ ck-rewrite-deps: harness-venv-install ## Install the CK graph rewriter test depe
 
 ck-rewrite-test: ck-rewrite-deps ## Run the CK flash-attention graph rewriter unit tests
 	@$(LOG_TARGET)
-	@cd $(CK_REWRITE_SCRIPTS_DIR) && "$(AGENT_PYTHON)" -m unittest test_rewrite_graph test_stable_pooling test_rewrite_blocked_attention
+	@cd $(CK_REWRITE_SCRIPTS_DIR) && "$(AGENT_PYTHON)" -m unittest test_rewrite_graph test_stable_pooling test_rewrite_blocked_attention test_canonicalize_attention_masks
 
 # Run every MULTIMODAL_MODEL_PATH-gated test against a local model copy:
 # the candle-binding Go tests (including the network-dependent image-encode

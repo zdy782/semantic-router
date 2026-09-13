@@ -148,6 +148,22 @@ rounding. Check the runtime profile to confirm that attention inside the loop
 executes on the requested GPU. A successful rewrite alone qualifies neither an
 execution provider nor a model artifact.
 
+## Simplify attention masks
+
+For recognized FP32 exports, optionally replace proved padding/window predicates
+with compact broadcast masks:
+
+```bash
+python3 scripts/canonicalize_attention_masks.py original/model.onnx broadcast/model.onnx
+```
+
+This keeps full-attention arithmetic, precision, inclusive windows, finite mask
+fills, and NaN guards unchanged. It rejects unknown predicates and consumers
+that observe mask shapes. Keep the output graph and its external weights together.
+The transform requires ONNX opset 15 or later and is not enabled automatically
+during export. Qualify numerical outputs and actual provider placement separately;
+a successful rewrite does not establish GPU correctness or performance.
+
 ## Load the custom op
 
 Owned Router deployments select `custom_ops_profile: ck_flash_attention` with
