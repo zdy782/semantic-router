@@ -18,6 +18,16 @@ Validation checks the configuration. Startup then loads or connects the models
 and checks the capabilities needed by enabled features. GPU kernel compilation
 can make the first startup slower than later requests.
 
+For local Docker deployments, `vllm-sr serve --startup-timeout 7200` allows
+up to 7200 seconds for readiness after containers start. The default is
+1800 seconds; the option accepts a positive integer. Select a budget using
+measured startup time for the configured models, input limits, and hardware.
+The CLI bounds each readiness check within that budget and allows up to five
+additional seconds to collect diagnostic logs after a timeout. A timeout
+leaves containers available for inspection; it does not cancel model loading
+or change request inference deadlines. Check `vllm-sr status` and
+`vllm-sr logs router` before deciding whether to stop the stack.
+
 | Problem | What to check |
 | --- | --- |
 | Model cannot load | Complete checkpoint or ONNX files, tokenizer, labels, and mounted paths |
