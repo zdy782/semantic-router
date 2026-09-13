@@ -3,6 +3,7 @@ package extproc
 import (
 	"container/list"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -69,6 +70,9 @@ func (r *OpenAIRouter) getRAGCache(query string, ragConfig *config.RAGPluginConf
 
 	cache := getRAGCacheInstance()
 	key := r.buildRAGCacheKey(query, ragConfig)
+	if key == "" {
+		return "", false
+	}
 
 	cache.mu.RLock()
 	el, exists := cache.cache[key]
@@ -106,6 +110,9 @@ func (r *OpenAIRouter) setRAGCache(query string, context string, ragConfig *conf
 
 	cache := getRAGCacheInstance()
 	key := r.buildRAGCacheKey(query, ragConfig)
+	if key == "" {
+		return
+	}
 
 	entry := &RAGCacheEntry{
 		Context:     context,
@@ -143,16 +150,48 @@ func (r *OpenAIRouter) evictLRUEntry(cache *RAGResultCache) {
 
 // buildRAGCacheKey builds a cache key from query and config.
 func (r *OpenAIRouter) buildRAGCacheKey(query string, ragConfig *config.RAGPluginConfig) string {
-	topK := 5
-	if ragConfig.TopK != nil {
-		topK = *ragConfig.TopK
+	identity, compatible := r.ragCacheRepresentation(ragConfig)
+	if !compatible {
+		return ""
 	}
-	threshold := "0.7"
-	if ragConfig.SimilarityThreshold != nil {
-		threshold = fmt.Sprintf("%.3f", *ragConfig.SimilarityThreshold)
+	// Include backend configuration: different vector-store IDs, file filters,
+	// and endpoints must never share retrieved text just because queries match.
+	key, err := json.Marshal(struct {
+		Query             string                  `json:"query"`
+		Config            *config.RAGPluginConfig `json:"config"`
+		EmbeddingIdentity string                  `json:"embedding_identity"`
+	}{query, ragConfig, identity})
+	if err != nil {
+		return ""
 	}
-
-	keyStr := fmt.Sprintf("%s:%s:%d:%s", ragConfig.Backend, query, topK, threshold)
-	hash := sha256.Sum256([]byte(keyStr))
+	hash := sha256.Sum256(key)
 	return fmt.Sprintf("%x", hash)
+}
+
+// A cached result cannot bypass model compatibility checks. An incompatible
+// hybrid child disables caching, while normal retrieval can still use its
+// configured fallback backend.
+func (r *OpenAIRouter) ragCacheRepresentation(cfg *config.RAGPluginConfig) (string, bool) {
+	switch cfg.Backend {
+	case "vectorstore":
+		store, err := cfg.VectorStoreBackendConfig()
+		manager := r.currentVectorStoreManager()
+		if err != nil || store == nil || manager == nil || manager.CheckEmbeddingCompatibility(store.VectorStoreID) != nil {
+			return "", false
+		}
+		return manager.EmbeddingIdentity(), true
+	case "hybrid":
+		hybrid, err := cfg.HybridBackendConfig()
+		if err != nil || hybrid == nil {
+			return "", false
+		}
+		primary, ok := r.ragCacheRepresentation(&config.RAGPluginConfig{Backend: hybrid.Primary, BackendConfig: hybrid.PrimaryConfig})
+		if !ok {
+			return "", false
+		}
+		fallback, ok := r.ragCacheRepresentation(&config.RAGPluginConfig{Backend: hybrid.Fallback, BackendConfig: hybrid.FallbackConfig})
+		return primary + ":" + fallback, ok
+	default:
+		return "", true
+	}
 }

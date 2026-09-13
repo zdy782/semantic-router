@@ -40,18 +40,20 @@ func (r *OpenAIRouter) retrieveFromVectorStore(traceCtx context.Context, ctx *Re
 	if embedder == nil {
 		return "", fmt.Errorf("embedder not initialized for vectorstore RAG")
 	}
+	manager := r.currentVectorStoreManager()
+	if manager == nil {
+		return "", fmt.Errorf("vector store manager not initialized")
+	}
+	if err = manager.CheckEmbeddingCompatibility(params.storeID); err != nil {
+		return "", err
+	}
 
 	queryEmbedding, err := embedder.Embed(traceCtx, params.query)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate query embedding: %w", err)
 	}
 
-	manager := r.currentVectorStoreManager()
-	if manager == nil {
-		return "", fmt.Errorf("vector store manager not initialized")
-	}
-
-	results, err := manager.Backend().Search(
+	results, err := manager.Search(
 		traceCtx,
 		params.storeID,
 		queryEmbedding,

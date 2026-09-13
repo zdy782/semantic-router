@@ -262,6 +262,21 @@ func (m *EmbeddingModel) EmbedAtLayer(text string, dimension, layer int) (Instan
 	})
 }
 
+// RuntimeDescriptor returns the captured content and representation identity of
+// this loaded instance as JSON. Zero selects its actual default layer/dimension.
+// It does not reload artifacts or consult a process-global model.
+func (m *EmbeddingModel) RuntimeDescriptor(layer, dimension int) (string, error) {
+	if m == nil {
+		return "", ErrInstanceClosed
+	}
+	if layer < 0 || dimension < 0 {
+		return "", &InstanceError{Code: "configuration", Message: "layer and dimension must be nonnegative"}
+	}
+	return useInstance(m.instance, func(h uint64) (string, error) {
+		return nativeInstanceEmbeddingDescriptor(h, layer, dimension)
+	})
+}
+
 func (m *SequenceClassifier) Clone() (*SequenceClassifier, error) {
 	i, err := m.instance.clone()
 	if err != nil {

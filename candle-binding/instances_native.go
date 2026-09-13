@@ -25,6 +25,7 @@ extern char* candle_instance_tokens(uint64_t, const char*);
 extern char* candle_instance_nli(uint64_t, const char*, const char*);
 extern char* candle_instance_hallucination(uint64_t, const char*, const char*, const char*, float);
 extern char* candle_instance_embedding(uint64_t, const char*, size_t, size_t);
+extern char* candle_instance_embedding_descriptor(uint64_t, size_t, size_t);
 extern char* candle_instance_image(uint64_t, const uint8_t*, size_t, size_t);
 extern char* candle_instance_audio(uint64_t, const float*, size_t, size_t, size_t, size_t);
 extern void candle_instance_free_string(char*);
@@ -119,6 +120,14 @@ func nativeInstanceClone(handle uint64) (uint64, error) {
 
 func nativeInstanceInfo(handle uint64) (InstanceInfo, error) {
 	return decodeInstanceResult[InstanceInfo](C.candle_instance_info(C.uint64_t(handle)))
+}
+
+func nativeInstanceEmbeddingDescriptor(handle uint64, layer, dimension int) (string, error) {
+	raw, err := decodeInstanceResult[json.RawMessage](C.candle_instance_embedding_descriptor(C.uint64_t(handle), C.size_t(layer), C.size_t(dimension)))
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func nativeInstanceBindHead(handle uint64, path, task string) (uint64, error) {

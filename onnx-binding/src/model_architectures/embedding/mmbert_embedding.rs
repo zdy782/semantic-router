@@ -20,7 +20,11 @@
 //! - **Cross-platform**: Works on Linux, Windows, macOS
 //! - **Optimized inference**: Graph optimizations, operator fusion
 
-use crate::core::instance_options::{InstanceOptions, Provider};
+use super::onnx_artifacts::capture_onnx;
+use super::runtime_identity::{
+    json_digest, tokenizer_digest, ArtifactDigest, ArtifactSnapshot, RuntimeIdentity,
+};
+use crate::core::instance_options::{InstanceOptions, Overflow, Provider};
 use crate::core::unified_error::{errors, UnifiedError, UnifiedResult};
 use crate::model_architectures::embedding::pooling::{
     l2_normalize, mean_pool_3d, truncate_dimension,
@@ -39,7 +43,7 @@ use tokenizers::Tokenizer;
 // ============================================================================
 
 /// mmBERT Embedding model configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MmBertEmbeddingConfig {
     pub vocab_size: usize,
     pub hidden_size: usize,
@@ -263,6 +267,12 @@ impl ExecutionProvider {
 // mmBERT Embedding Model (ONNX Runtime)
 // ============================================================================
 
+struct LoadedSession {
+    session: Session,
+    artifacts: Vec<ArtifactDigest>,
+    runtime: String,
+}
+
 /// mmBERT Embedding Model using ONNX Runtime
 ///
 /// This model supports:
@@ -273,7 +283,8 @@ impl ExecutionProvider {
 /// - Multilingual (1800+ languages)
 pub struct MmBertEmbeddingModel {
     /// ONNX Runtime session
-    session: Session,
+    session: LoadedSession,
+    identity: RuntimeIdentity,
     /// Tokenizer
     tokenizer: Arc<Tokenizer>,
     /// Model configuration
@@ -283,10 +294,12 @@ pub struct MmBertEmbeddingModel {
     /// Layer represented by the primary graph; that graph is loaded only once.
     primary_layer: usize,
     /// Additional loaded exit graphs, indexed by their actual layer.
-    layer_sessions: BTreeMap<usize, Session>,
+    layer_sessions: BTreeMap<usize, LoadedSession>,
     /// MIGraphX compiles a program for each shape. Fix its tensor shape to an
     /// explicit deployment budget without padding the tokenizer's real usage.
     execution_sequence_length: Option<usize>,
+    /// Only an explicit owned truncate policy permits tokenizer overflow.
+    reject_overflow: bool,
 }
 
 impl MmBertEmbeddingModel {
@@ -384,14 +397,11 @@ impl MmBertEmbeddingModel {
 
         // Create ONNX Runtime session with fallback across candidates.
         // We intentionally prefer GPU-optimized model variants first.
-        let mut selected_session: Option<Session> = None;
+        let mut selected_session: Option<LoadedSession> = None;
         let mut selected_path: Option<std::path::PathBuf> = None;
         let mut last_error: Option<String> = None;
         for onnx_path in onnx_candidates {
-            let loaded = match options {
-                Some(options) => options.create_session(&onnx_path),
-                None => Self::create_session(&onnx_path, use_cpu),
-            };
+            let loaded = Self::load_session(&onnx_path, use_cpu, options);
             match loaded {
                 Ok(session) => {
                     selected_path = Some(onnx_path);
@@ -433,14 +443,30 @@ impl MmBertEmbeddingModel {
             config.num_hidden_layers,
         )?;
 
+        let identity = RuntimeIdentity {
+            version: 1,
+            model_type: "mmbert",
+            runtime: session.runtime.clone(),
+            effective_config_sha256: json_digest(&config)
+                .map_err(|e| errors::model_load(&model_path_str, &e.to_string()))?,
+            tokenizer_sha256: tokenizer_digest(&tokenizer)
+                .map_err(|e| errors::model_load(&model_path_str, &e.to_string()))?,
+            artifacts: session.artifacts.clone(),
+            layer: config.num_hidden_layers,
+            dimension: config.hidden_size,
+            max_sequence_length: config.max_position_embeddings,
+            pooling_contract: "onnx-raw-hidden:attention-mask-mean-f32:truncate-before-l2:v1",
+        };
         Ok(Self {
             session,
+            identity,
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: model_path_str,
             primary_layer,
             layer_sessions,
             execution_sequence_length,
+            reject_overflow: options.is_none_or(|o| o.overflow == Overflow::Reject),
         })
     }
 
@@ -542,8 +568,83 @@ impl MmBertEmbeddingModel {
         Ok(results)
     }
 
-    /// Create an ONNX Runtime session with appropriate execution provider
-    fn create_session<P: AsRef<Path>>(onnx_path: P, use_cpu: bool) -> UnifiedResult<Session> {
+    /// Bind graph bytes and execution semantics to the session that loaded them.
+    fn load_session(
+        path: &Path,
+        use_cpu: bool,
+        options: Option<&InstanceOptions>,
+    ) -> UnifiedResult<LoadedSession> {
+        let Some(options) = options else {
+            return Self::create_session(path, use_cpu);
+        };
+        let error =
+            |e: anyhow::Error| errors::model_load(&path.display().to_string(), &e.to_string());
+        let snapshots = capture_onnx(path).map_err(error)?;
+        let session = options.create_session(path)?;
+        let evidence = options.evidence.lock();
+        let actual = evidence.last().ok_or_else(|| {
+            errors::model_load(
+                &path.display().to_string(),
+                "owned session did not record execution evidence",
+            )
+        })?;
+        let runtime = json_digest(&serde_json::json!({
+            "contract": "onnx-mmbert-owned-v1",
+            "runtime_build": actual.runtime_build,
+            "provider": actual.provider,
+            "device_id": actual.device_id,
+            "precision": actual.precision,
+            "cpu_fallback_disabled": actual.cpu_fallback_disabled,
+            "intra_threads": options.intra_threads,
+        }))
+        .map_err(error)?;
+        drop(evidence);
+        for snapshot in &snapshots {
+            snapshot.verify().map_err(error)?;
+        }
+        Ok(LoadedSession {
+            session,
+            runtime: format!("onnx-mmbert-owned-v1:{runtime}"),
+            artifacts: snapshots.into_iter().map(|s| s.digest).collect(),
+        })
+    }
+
+    /// Create an ONNX Runtime session with the legacy execution-provider policy.
+    fn create_session<P: AsRef<Path>>(onnx_path: P, use_cpu: bool) -> UnifiedResult<LoadedSession> {
+        let path = onnx_path.as_ref();
+        let error =
+            |e: anyhow::Error| errors::model_load(&path.display().to_string(), &e.to_string());
+        let mut snapshots = capture_onnx(path).map_err(error)?;
+        // This library is registered only on the ROCm path; include it only if
+        // that provider actually succeeds, not merely because it was requested.
+        let custom = if !use_cpu && cfg!(any(feature = "rocm", feature = "migraphx")) {
+            std::env::var("ORT_CK_FLASH_ATTN_LIB")
+                .ok()
+                .filter(|p| !p.is_empty())
+                .map(|p| ArtifactSnapshot::capture(Path::new(&p), "custom-operators"))
+        } else {
+            None
+        };
+        let (session, runtime) = Self::create_session_inner(path, use_cpu)?;
+        if runtime == "onnx-mmbert-rocm-v1" {
+            if let Some(custom) = custom {
+                snapshots.push(custom.map_err(error)?);
+            }
+        }
+        for snapshot in &snapshots {
+            snapshot.verify().map_err(error)?;
+        }
+        Ok(LoadedSession {
+            session,
+            runtime: runtime.to_string(),
+            artifacts: snapshots.into_iter().map(|s| s.digest).collect(),
+        })
+    }
+
+    fn create_session_inner<P: AsRef<Path>>(
+        onnx_path: P,
+        use_cpu: bool,
+    ) -> UnifiedResult<(Session, &'static str)> {
         let onnx_path_str = onnx_path.as_ref().display().to_string();
 
         // Build session with execution providers
@@ -587,7 +688,7 @@ impl MmBertEmbeddingModel {
                 {
                     Ok(session) => {
                         println!("INFO: Using ROCm execution provider (AMD GPU) — verified");
-                        return Ok(session);
+                        return Ok((session, "onnx-mmbert-rocm-v1"));
                     }
                     Err(e) => println!("WARN: ROCm EP failed: {}", e),
                 }
@@ -607,7 +708,7 @@ impl MmBertEmbeddingModel {
                 {
                     Ok(session) => {
                         println!("INFO: Using MIGraphX execution provider (AMD GPU) — verified");
-                        return Ok(session);
+                        return Ok((session, "onnx-mmbert-migraphx-fp16-v1"));
                     }
                     Err(e) => println!("WARN: MIGraphX EP failed: {}", e),
                 }
@@ -639,7 +740,7 @@ impl MmBertEmbeddingModel {
                 {
                     Ok(session) => {
                         println!("INFO: Using CUDA execution provider (NVIDIA GPU) — verified");
-                        return Ok(session);
+                        return Ok((session, "onnx-mmbert-cuda-v1"));
                     }
                     Err(e) => println!("WARN: CUDA EP failed: {}", e),
                 }
@@ -653,7 +754,7 @@ impl MmBertEmbeddingModel {
                 .map_err(|e: ort::Error| errors::model_load(&onnx_path_str, &e.to_string()))?
         };
 
-        Ok(session)
+        Ok((session, "onnx-mmbert-cpu-v1"))
     }
 
     /// Resolve the selected graph's layer once from the artifact contract.
@@ -731,7 +832,7 @@ impl MmBertEmbeddingModel {
         options: Option<&InstanceOptions>,
         primary_path: &Path,
         full_depth: usize,
-    ) -> UnifiedResult<(usize, BTreeMap<usize, Session>)> {
+    ) -> UnifiedResult<(usize, BTreeMap<usize, LoadedSession>)> {
         let mut sessions = BTreeMap::new();
         let canonical_primary = std::fs::canonicalize(primary_path)
             .map_err(|_| errors::file_not_found(&primary_path.display().to_string()))?;
@@ -768,10 +869,7 @@ impl MmBertEmbeddingModel {
                         "another declared layer aliases the selected primary graph",
                     ));
                 }
-                let loaded = match options {
-                    Some(options) => options.create_session(&path),
-                    None => Self::create_session(&path, use_cpu),
-                };
+                let loaded = Self::load_session(&path, use_cpu, options);
                 match loaded {
                     Ok(session) => {
                         sessions.insert(layer, session);
@@ -866,9 +964,7 @@ impl MmBertEmbeddingModel {
         }
 
         if let Some(layer) = target_layer {
-            if layer != self.config.num_hidden_layers
-                && !self.available_exit_layers().contains(&layer)
-            {
+            if !self.available_exit_layers().contains(&layer) {
                 return Err(errors::inference_error(
                     "target_layer",
                     &format!("layer {layer} is not loaded"),
@@ -876,7 +972,7 @@ impl MmBertEmbeddingModel {
             }
         }
         if let Some(dim) = target_dim {
-            if !self.matryoshka_config.validate_dimension(dim) || dim > self.config.hidden_size {
+            if dim == 0 || dim > self.config.hidden_size {
                 return Err(errors::inference_error(
                     "target_dim",
                     &format!("unsupported dimension {dim}"),
@@ -891,7 +987,8 @@ impl MmBertEmbeddingModel {
             .map_err(|e| errors::tokenization_error(&e.to_string()))?;
 
         if encodings.iter().any(|e| {
-            e.len() > self.config.max_position_embeddings || !e.get_overflowing().is_empty()
+            e.len() > self.config.max_position_embeddings
+                || (self.reject_overflow && !e.get_overflowing().is_empty())
         }) {
             return Err(errors::tokenization_error(
                 "input exceeds the embedding model context window",
@@ -944,6 +1041,43 @@ impl MmBertEmbeddingModel {
         Ok(normalized)
     }
 
+    /// Describe the same loaded graph selected by an actual embedding call.
+    pub(crate) fn runtime_descriptor(
+        &self,
+        layer: usize,
+        dimension: usize,
+    ) -> anyhow::Result<RuntimeIdentity> {
+        let effective_layer = if layer == 0 {
+            self.primary_layer
+        } else {
+            layer
+        };
+        let effective_dim = if dimension == 0 {
+            self.config.hidden_size
+        } else {
+            dimension
+        };
+        anyhow::ensure!(
+            self.available_exit_layers().contains(&effective_layer),
+            "mmbert layer is not loaded"
+        );
+        anyhow::ensure!(
+            effective_dim > 0 && effective_dim <= self.config.hidden_size,
+            "unsupported mmbert dimension"
+        );
+        let session = if effective_layer == self.primary_layer {
+            &self.session
+        } else {
+            self.layer_sessions
+                .get(&effective_layer)
+                .ok_or_else(|| anyhow::anyhow!("mmbert layer is not loaded"))?
+        };
+        let mut result = self.identity.for_exit(effective_layer, effective_dim);
+        result.artifacts = session.artifacts.clone();
+        result.runtime = session.runtime.clone();
+        Ok(result)
+    }
+
     /// Run inference on the ONNX model with optional layer selection
     fn run_inference_with_layer(
         &mut self,
@@ -951,9 +1085,16 @@ impl MmBertEmbeddingModel {
         input_ids: &Array2<i64>,
         attention_mask: &Array2<i64>,
     ) -> UnifiedResult<Array2<f32>> {
-        let session = target_layer
-            .and_then(|layer| self.layer_sessions.get_mut(&layer))
-            .unwrap_or(&mut self.session);
+        let loaded = if target_layer.is_none_or(|layer| layer == self.primary_layer) {
+            &mut self.session
+        } else {
+            self.layer_sessions
+                .get_mut(&target_layer.unwrap())
+                .ok_or_else(|| {
+                    errors::config_error("target_layer", "requested layer has no loaded session")
+                })?
+        };
+        let session = &mut loaded.session;
         let batch_size = input_ids.shape()[0];
         let seq_len = input_ids.shape()[1];
 
@@ -1063,11 +1204,13 @@ impl MmBertEmbeddingModel {
     pub fn finish_profiling(&mut self) -> UnifiedResult<Vec<String>> {
         let mut paths = vec![self
             .session
+            .session
             .end_profiling()
             .map_err(|e| errors::ort_error(&e.to_string()))?];
         for session in self.layer_sessions.values_mut() {
             paths.push(
                 session
+                    .session
                     .end_profiling()
                     .map_err(|e| errors::ort_error(&e.to_string()))?,
             );

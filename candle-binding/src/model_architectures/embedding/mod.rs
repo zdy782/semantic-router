@@ -104,3 +104,7 @@ mod dense_layers_test;
 mod gemma3_model_test;
 
 // Multi-modal embedding tests are inside multimodal_embedding.rs
+
+pub(crate) mod runtime_identity;
+#[cfg(test)]
+mod runtime_identity_test;

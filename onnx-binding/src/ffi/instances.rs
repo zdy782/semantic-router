@@ -143,6 +143,15 @@ pub extern "C" fn ort_instance_finish_profiling(handle: u64) -> InstanceResult {
     result(|| instances::finish_profiling(handle))
 }
 
+#[no_mangle]
+pub extern "C" fn ort_instance_embedding_descriptor(
+    handle: u64,
+    layer: usize,
+    dimension: usize,
+) -> InstanceResult {
+    result(|| instances::embedding_runtime_descriptor(handle, layer, dimension))
+}
+
 /// # Safety
 /// `input` must point to a live NUL-terminated UTF-8 string.
 #[no_mangle]

@@ -102,6 +102,26 @@ pub fn load_multimodal(options: InstanceOptions) -> UnifiedResult<u64> {
     prepare(Model::MultiModal(model), options)
 }
 
+/// Return the immutable identity captured by this instance's loaded model and
+/// selected graph. This is metadata access, not an inference or load operation.
+pub fn embedding_runtime_descriptor(
+    handle: u64,
+    layer: usize,
+    dimension: usize,
+) -> UnifiedResult<crate::model_architectures::embedding::runtime_identity::RuntimeIdentity> {
+    let instance = get(handle)?;
+    let model = instance.model.lock();
+    match &*model {
+        Model::Embedding(model) => model
+            .runtime_descriptor(layer, dimension)
+            .map_err(|error| errors::config_error("embedding_descriptor", &error.to_string())),
+        _ => Err(errors::config_error(
+            "embedding_descriptor",
+            "handle is not an mmbert embedding instance",
+        )),
+    }
+}
+
 fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
     let (tokenizer, task, model_limit, task_limit, labels, dimension) = match &model {
         Model::Sequence(m) => (

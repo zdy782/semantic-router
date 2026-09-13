@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	candle "github.com/vllm-project/semantic-router/candle-binding"
 	ort "github.com/vllm-project/semantic-router/onnx-binding/instance"
@@ -23,14 +24,18 @@ import (
 // EmbeddingProvider owns one binding reference to a shared physical model.
 // Calls hold the resource through admission and non-preemptible native work.
 type EmbeddingProvider struct {
-	info      embedding.ModelInfo
-	identity  string
-	resource  *binding.Resource
-	text      *binding.Resolved[embedding.TextRequest, tasks.EmbeddingResult]
-	recipe    string
-	backend   string
-	dimension int
-	options   embedding.Options
+	descriptorMu    sync.Mutex
+	descriptors     map[embedding.Options]string
+	contentIdentity bool
+	executionPolicy string
+	info            embedding.ModelInfo
+	identity        string
+	resource        *binding.Resource
+	text            *binding.Resolved[embedding.TextRequest, tasks.EmbeddingResult]
+	recipe          string
+	backend         string
+	dimension       int
+	options         embedding.Options
 }
 
 type embeddingEngine struct {
@@ -150,6 +155,7 @@ func (r *Runtime) Embedding(ctx context.Context, spec config.ResolvedModelBindin
 	budget, gate := resourceAdmission(spec)
 	var capability binding.Capability
 	var layers []int
+	contentIdentity := false
 	resource, err := r.Pool.Acquire(ctx, id, budget, gate, func(context.Context) (io.Closer, error) {
 		if spec.Deployment.Provider == "candle" {
 			model, loadErr := candle.LoadEmbeddingModel(options)
@@ -193,6 +199,7 @@ func (r *Runtime) Embedding(ctx context.Context, spec config.ResolvedModelBindin
 			capability.Embedding.Modalities = append([]string(nil), info.Modalities...)
 			if info.ModelType == "mmbert" || info.ModelType == "mmbert_embedding" {
 				layers = candleEmbeddingLayers(options.ModelPath)
+				contentIdentity = true
 			}
 		} else {
 			var info ort.Info
@@ -211,6 +218,7 @@ func (r *Runtime) Embedding(ctx context.Context, spec config.ResolvedModelBindin
 			}
 			if engine.ort != nil {
 				layers = append([]int(nil), info.AvailableLayers...)
+				contentIdentity = true
 			}
 			capability.Embedding = &binding.EmbeddingCapability{Layer: layer, Pooling: "graph_defined", Normalization: "l2", Modalities: []string{"text"}}
 			if engine.multi != nil {
@@ -266,6 +274,24 @@ func (r *Runtime) Embedding(ctx context.Context, spec config.ResolvedModelBindin
 	}
 	key, _ := id.Key()
 	provider := &EmbeddingProvider{identity: key, resource: resource, text: text, recipe: string(spec.Recipe), backend: spec.Deployment.Provider, options: embedding.Options{Dimension: dimension, Layer: layer}}
+	provider.contentIdentity = contentIdentity
+	provider.descriptors = make(map[embedding.Options]string)
+	policy, _ := json.Marshal(struct {
+		Precision string
+		MaxTokens int
+		Overflow  string
+	}{
+		capability.Precision, capability.Limits.EffectiveTokens(), string(capability.Limits.Overflow),
+	})
+	provider.executionPolicy = string(policy)
+	if contentIdentity {
+		identity, identityErr := provider.RepresentationIdentity(provider.options, "embedding-request-cache-v1")
+		if identityErr != nil {
+			_ = provider.Close()
+			return nil, identityErr
+		}
+		provider.identity = identity.Fingerprint
+	}
 	provider.text.Ready()
 	provider.dimension = capability.Embedding.Dimension
 	provider.info = embedding.ModelInfo{Layers: layers, Artifact: options.ModelPath, Backend: provider.backend, Dimension: provider.dimension, MaxTokens: capability.Limits.EffectiveTokens(), Pooling: capability.Embedding.Pooling, Normalization: capability.Embedding.Normalization, Modalities: append([]string(nil), capability.Embedding.Modalities...)}
@@ -435,8 +461,6 @@ func (r *Runtime) RemoteEmbedding(ctx context.Context, spec config.ResolvedModel
 	p.info = embedding.ModelInfo{Artifact: cfg.Model, Backend: p.backend, Dimension: p.dimension, Modalities: []string{"text"}}
 	return p, nil
 }
-
-func (p *EmbeddingProvider) CacheIdentity() string { return p.identity }
 
 func (p *EmbeddingProvider) EmbeddingInfo() embedding.ModelInfo {
 	info := p.info

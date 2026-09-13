@@ -163,6 +163,17 @@ pub unsafe extern "C" fn candle_instance_embedding(
     reply(|| get(handle)?.embedding(string(text)?, dimension, layer))
 }
 
+/// Describe the already-loaded embedding instance without running inference or
+/// reopening its artifacts. Free the response with candle_instance_free_string.
+#[no_mangle]
+pub extern "C" fn candle_instance_embedding_descriptor(
+    handle: u64,
+    layer: usize,
+    dimension: usize,
+) -> *mut c_char {
+    reply(|| get(handle)?.embedding_runtime_descriptor(layer, dimension))
+}
+
 /// Free a string returned by this module, including error responses.
 /// # Safety
 /// `ptr` is null or was returned by this module and has not yet been freed.

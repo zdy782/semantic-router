@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub enum IntermediateNormalization {
     // Match maintained HF intermediate hidden states by default.
     #[default]

@@ -51,6 +51,27 @@ pub(super) struct EmbeddingOutput {
 }
 
 impl Instance {
+    pub(super) fn embedding_runtime_descriptor(
+        &self,
+        layer: usize,
+        dimension: usize,
+    ) -> Result<crate::model_architectures::embedding::runtime_identity::RuntimeIdentity> {
+        ensure!(
+            self.info.task == "embedding",
+            "capability: wrong task handle"
+        );
+        let Model::Embedding(factory) = &self.model else {
+            bail!("capability: embedding content descriptor requires mmbert")
+        };
+        ensure!(
+            factory.get_mmbert_model().is_some(),
+            "capability: embedding content descriptor requires mmbert"
+        );
+        factory
+            .mmbert_runtime_descriptor(layer, dimension)
+            .map_err(|error| anyhow!("capability: {error}"))
+    }
+
     fn tokenizer(&self) -> Result<&Tokenizer> {
         self.tokenizer
             .as_ref()

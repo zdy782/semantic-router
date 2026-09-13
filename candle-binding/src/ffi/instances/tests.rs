@@ -292,6 +292,40 @@ fn embedding_instances_keep_independent_ownership_and_normalization() {
     assert_eq!(output, value(b.embedding("hello world", 0, 0).unwrap()));
 }
 
+#[test]
+fn owned_embedding_descriptor_uses_instance_and_existing_ffi_lifecycle() {
+    let dir = fixture(&["safe", "unsafe"], 0);
+    let mut opts = options(&dir);
+    opts.model_type = "mmbert".into();
+    let handle = insert(load(opts, "embedding").unwrap()).unwrap();
+    let clone = insert(get(handle).unwrap()).unwrap();
+    let read = |handle, layer, dimension| -> Value {
+        let response = transport::candle_instance_embedding_descriptor(handle, layer, dimension);
+        assert!(!response.is_null());
+        let output = unsafe {
+            serde_json::from_str(std::ffi::CStr::from_ptr(response).to_str().unwrap()).unwrap()
+        };
+        unsafe { transport::candle_instance_free_string(response) };
+        output
+    };
+    let original = read(handle, 0, 0);
+    assert_eq!(original["value"]["layer"], 1);
+    assert_eq!(original["value"]["dimension"], 4);
+    assert_eq!(original, read(clone, 1, 4));
+    assert_eq!(read(handle, 1, 2)["value"]["dimension"], 2);
+    assert!(read(handle, 2, 4)["error"].is_string());
+    assert!(read(handle, 1, 5)["error"].is_string());
+    std::fs::remove_file(dir.path().join("tokenizer.json")).unwrap();
+    assert_eq!(original, read(handle, 0, 0));
+    close(handle).unwrap();
+    assert!(read(handle, 0, 0)["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("closed:"));
+    assert_eq!(original, read(clone, 0, 0));
+    close(clone).unwrap();
+}
+
 mod generative_tests;
 
 #[test]

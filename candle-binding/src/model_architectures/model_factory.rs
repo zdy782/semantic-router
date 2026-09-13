@@ -4,6 +4,9 @@
 //! Traditional and LoRA models through a unified interface, enabling seamless
 //! switching between LoRACapable and TraditionalModel implementations.
 
+use crate::model_architectures::embedding::runtime_identity::{
+    json_digest, tokenizer_digest, ArtifactSnapshot, RuntimeIdentity,
+};
 use anyhow::{Error as E, Result};
 use candle_core::Device;
 use std::collections::HashMap;
@@ -112,6 +115,7 @@ pub struct ModelFactory {
     mmbert_tokenizer: Option<Tokenizer>,
     /// mmBERT model path
     mmbert_model_path: Option<String>,
+    mmbert_identity: Option<RuntimeIdentity>,
     /// Multi-modal embedding model
     multimodal_embedding_model: Option<MultiModalEmbeddingModel>,
     /// Multi-modal tokenizer (MiniLM-L6-v2 text tokenizer)
@@ -140,6 +144,7 @@ impl ModelFactory {
             mmbert_embedding_model: None,
             mmbert_tokenizer: None,
             mmbert_model_path: None,
+            mmbert_identity: None,
             multimodal_embedding_model: None,
             multimodal_tokenizer: None,
             multimodal_model_path: None,
@@ -260,6 +265,10 @@ impl ModelFactory {
     /// - 2D Matryoshka: dimension reduction (768→64) + layer reduction (22L→3L)
     /// - 1.6-3.1× faster than BGE-M3 due to Flash Attention 2 advantage
     pub fn register_mmbert_embedding_model(&mut self, model_path: &str) -> Result<()> {
+        let weights = ArtifactSnapshot::capture(
+            &std::path::Path::new(model_path).join("model.safetensors"),
+            "weights",
+        )?;
         // Load model
         let model = MmBertEmbeddingModel::load(model_path, &self.device)
             .map_err(|e| E::msg(format!("Failed to load mmBERT model: {:?}", e)))?;
@@ -268,6 +277,25 @@ impl ModelFactory {
         let tokenizer_path = format!("{}/tokenizer.json", model_path);
         let tokenizer = load_mmbert_tokenizer(&tokenizer_path)?;
 
+        weights.verify()?;
+        let cfg = model.config();
+        let runtime = match &self.device {
+            Device::Cpu => "candle-mmbert-f32-cpu-contiguous-softmax-v2",
+            Device::Cuda(_) => "candle-mmbert-f32-cuda-chunked-v1",
+            Device::Metal(_) => "candle-mmbert-f32-metal-chunked-v1",
+        };
+        self.mmbert_identity = Some(RuntimeIdentity {
+            version: 1,
+            model_type: "mmbert",
+            runtime: runtime.to_string(),
+            effective_config_sha256: json_digest(cfg)?,
+            tokenizer_sha256: tokenizer_digest(&tokenizer)?,
+            artifacts: vec![weights.digest],
+            layer: cfg.num_hidden_layers,
+            dimension: cfg.hidden_size,
+            max_sequence_length: cfg.max_position_embeddings,
+            pooling_contract: "attention-mask-mean-f32:truncate-before-l2:v1",
+        });
         self.mmbert_embedding_model = Some(model);
         self.mmbert_tokenizer = Some(tokenizer);
         self.mmbert_model_path = Some(model_path.to_string());
@@ -420,6 +448,30 @@ impl ModelFactory {
     /// Get mmBERT embedding model reference
     pub fn get_mmbert_model(&self) -> Option<&MmBertEmbeddingModel> {
         self.mmbert_embedding_model.as_ref()
+    }
+
+    /// Describe the successfully loaded model, not a later requested path.
+    pub(crate) fn mmbert_runtime_descriptor(
+        &self,
+        layer: usize,
+        dimension: usize,
+    ) -> Result<RuntimeIdentity> {
+        let identity = self
+            .mmbert_identity
+            .as_ref()
+            .ok_or_else(|| E::msg("mmbert model is not initialized"))?;
+        let layer = if layer == 0 { identity.layer } else { layer };
+        let dimension = if dimension == 0 {
+            identity.dimension
+        } else {
+            dimension
+        };
+        anyhow::ensure!(layer > 0 && layer <= identity.layer, "invalid mmbert layer");
+        anyhow::ensure!(
+            dimension > 0 && dimension <= identity.dimension,
+            "invalid mmbert dimension"
+        );
+        Ok(identity.for_exit(layer, dimension))
     }
 
     /// Get mmBERT tokenizer reference

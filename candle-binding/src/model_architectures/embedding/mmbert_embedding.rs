@@ -50,7 +50,7 @@ use std::sync::Arc;
 // ============================================================================
 
 /// mmBERT Embedding model configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MmBertEmbeddingConfig {
     pub vocab_size: usize,
     pub hidden_size: usize,
