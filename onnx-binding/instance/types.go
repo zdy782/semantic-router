@@ -73,6 +73,7 @@ type EmbeddingResult struct {
 // not an inference claim; CompletedInferences and the ORT profile prove execution.
 type SessionEvidence struct {
 	RuntimeBuild            string                    `json:"runtime_build"`
+	CompilerFlags           map[string]string         `json:"compiler_flags"`
 	Artifacts               []ArtifactDigest          `json:"artifacts"`
 	ExecutionMaxInputTokens int                       `json:"execution_max_input_tokens,omitempty"`
 	ExecutionInputs         []ExecutionInput          `json:"execution_inputs"`

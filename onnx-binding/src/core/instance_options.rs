@@ -14,6 +14,8 @@ use ort::{execution_providers::CPUExecutionProvider, session::Session};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
+    ffi::OsString,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -100,6 +102,8 @@ pub struct SessionEvidence {
     pub execution_max_input_tokens: Option<usize>,
     pub execution_inputs: Vec<ExecutionInput>,
     pub compilation_cache: Option<SharedCacheEvidence>,
+    /// Effective provider compiler controls captured once before preparation.
+    pub compiler_flags: BTreeMap<String, String>,
 }
 
 pub struct PreparedSession {
@@ -123,6 +127,12 @@ const MIGRAPHX_EXECUTION_OVERRIDES: [&str; 6] = [
 
 impl InstanceOptions {
     pub fn validate(&self) -> UnifiedResult<()> {
+        self.validate_configuration()?;
+        self.compiler_flags(std::env::vars_os())?;
+        self.validate_provider_available()
+    }
+
+    fn validate_configuration(&self) -> UnifiedResult<()> {
         if self.model_path.is_empty() || self.device_id < 0 {
             return Err(errors::config_error(
                 "instance",
@@ -180,18 +190,10 @@ impl InstanceOptions {
                 ));
             }
         }
-        if self.provider == Provider::Migraphx {
-            for name in MIGRAPHX_EXECUTION_OVERRIDES {
-                if std::env::var_os(name).is_some_and(|value| !value.is_empty()) {
-                    return Err(errors::config_error(
-                        "provider",
-                        &format!(
-                            "owned MIGraphX execution forbids nonempty {name}; configure precision per instance and use only typed compiled-program caching"
-                        ),
-                    ));
-                }
-            }
-        }
+        Ok(())
+    }
+
+    fn validate_provider_available(&self) -> UnifiedResult<()> {
         #[cfg(not(feature = "migraphx"))]
         if self.provider == Provider::Migraphx {
             return Err(errors::config_error(
@@ -209,14 +211,65 @@ impl InstanceOptions {
         Ok(())
     }
 
+    /// Process compiler controls are deployment inputs. Capture them once per
+    /// session; cache selection and representation evidence share these bytes.
+    /// Callers must keep the process environment stable during preparation.
+    pub(crate) fn compiler_flags(
+        &self,
+        environment: impl IntoIterator<Item = (OsString, OsString)>,
+    ) -> UnifiedResult<BTreeMap<String, String>> {
+        if self.provider != Provider::Migraphx {
+            return Ok(BTreeMap::new());
+        }
+        let mut flags: BTreeMap<String, String> = [
+            ("bf16", "false"),
+            ("fp8", "false"),
+            ("int8", "false"),
+            ("exhaustive_tune", "false"),
+            ("memory_limit", "usize_max"),
+            ("arena_extend_strategy", "0"),
+            ("cpu_fallback", "disabled"),
+            ("graph_optimization", "ort_default"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect();
+        for (name, value) in environment {
+            let Some(name) = name.to_str() else { continue };
+            if !name.starts_with("MIGRAPHX_") && !name.starts_with("ORT_MIGRAPHX_") {
+                continue;
+            }
+            if MIGRAPHX_EXECUTION_OVERRIDES.contains(&name) && !value.is_empty() {
+                return Err(errors::config_error(
+                    "provider",
+                    &format!("owned MIGraphX execution forbids nonempty {name}; configure precision per instance and use only typed compiled-program caching"),
+                ));
+            }
+            let value = value.to_str().ok_or_else(|| {
+                errors::config_error("provider", "compiler environment must be UTF-8")
+            })?;
+            flags.insert(format!("environment:{name}"), value.into());
+        }
+        flags.insert(
+            "intra_threads".into(),
+            self.intra_threads
+                .map_or("default".into(), |value| value.to_string()),
+        );
+        Ok(flags)
+    }
+
     /// Include this same file in the owning session's artifact snapshot before
     /// loading and verify it afterwards, alongside every graph/external tensor.
     pub fn custom_ops_library_path(&self) -> UnifiedResult<Option<PathBuf>> {
         self.validate()?;
-        Ok(match self.custom_ops_profile {
+        Ok(self.resolved_custom_ops_library())
+    }
+
+    fn resolved_custom_ops_library(&self) -> Option<PathBuf> {
+        match self.custom_ops_profile {
             CustomOpsProfile::None => None,
             CustomOpsProfile::CkFlashAttention => Some(PathBuf::from(CK_FLASH_ATTENTION_LIBRARY)),
-        })
+        }
     }
 
     pub fn effective_limit(&self, task_limit: usize) -> UnifiedResult<usize> {
@@ -317,12 +370,26 @@ impl InstanceOptions {
         path: &Path,
         inputs: &[ExecutionInput],
     ) -> UnifiedResult<PreparedSession> {
-        self.validate()?;
+        self.validate_configuration()?;
+        let mut compiler_flags = self.compiler_flags(std::env::vars_os())?;
+        if self.provider == Provider::Migraphx {
+            compiler_flags.insert(
+                "input_dimensions".into(),
+                if inputs.is_empty() {
+                    "graph_declared"
+                } else {
+                    "resolved_before_partitioning"
+                }
+                .into(),
+            );
+        }
+        self.validate_provider_available()?;
+        let custom_ops_library = self.resolved_custom_ops_library();
         let mut artifacts = capture_onnx(path)
             .map_err(|error| errors::model_load(&path.display().to_string(), &error.to_string()))?;
-        if let Some(library) = self.custom_ops_library_path()? {
+        if let Some(library) = &custom_ops_library {
             artifacts.push(
-                ArtifactSnapshot::capture(&library, "custom-ops").map_err(|error| {
+                ArtifactSnapshot::capture(library, "custom-ops").map_err(|error| {
                     errors::model_load(&library.display().to_string(), &error.to_string())
                 })?,
             );
@@ -351,7 +418,7 @@ impl InstanceOptions {
                 .iter()
                 .map(|item| item.digest.clone())
                 .collect::<Vec<_>>();
-            let mut identity = CompilationIdentity {
+            let identity = CompilationIdentity {
                 version: 1,
                 artifacts: artifacts.iter().map(|item| item.digest.clone()).collect(),
                 inputs: inputs.to_vec(),
@@ -363,43 +430,8 @@ impl InstanceOptions {
                 runtime_build: runtime_build_info(),
                 runtime_artifacts: runtime_digests.clone(),
                 gpu,
-                compiler_flags: [
-                    ("bf16", "false"),
-                    ("fp8", "false"),
-                    ("int8", "false"),
-                    ("exhaustive_tune", "false"),
-                    ("memory_limit", "usize_max"),
-                    ("arena_extend_strategy", "0"),
-                    ("cpu_fallback", "disabled"),
-                    ("graph_optimization", "ort_default"),
-                    ("input_dimensions", "resolved_before_partitioning"),
-                ]
-                .into_iter()
-                .map(|(key, value)| (key.into(), value.into()))
-                .collect(),
+                compiler_flags: compiler_flags.clone(),
             };
-            // MIGraphX also reads compiler controls from its environment. Bind
-            // every such control (including the image's MLIR-op policy) instead
-            // of silently sharing a program built with different flags.
-            for (name, value) in std::env::vars_os() {
-                let Some(name) = name.to_str() else { continue };
-                if name.starts_with("MIGRAPHX_") || name.starts_with("ORT_MIGRAPHX_") {
-                    let value = value.to_str().ok_or_else(|| {
-                        errors::config_error(
-                            "compilation_cache",
-                            "compiler environment must be UTF-8",
-                        )
-                    })?;
-                    identity
-                        .compiler_flags
-                        .insert(format!("environment:{name}"), value.into());
-                }
-            }
-            identity.compiler_flags.insert(
-                "intra_threads".into(),
-                self.intra_threads
-                    .map_or("default".into(), |value| value.to_string()),
-            );
             let mut snapshots = artifacts.clone();
             snapshots.extend(runtime);
             (
@@ -428,7 +460,6 @@ impl InstanceOptions {
         if let Some(threads) = self.intra_threads {
             builder = builder.with_intra_threads(threads).map_err(ort_error)?;
         }
-        let custom_ops_library = self.custom_ops_library_path()?;
         let custom_ops_sha256 = artifacts
             .iter()
             .find(|item| item.digest.role == "custom-ops")
@@ -558,6 +589,7 @@ impl InstanceOptions {
                 Vec::new()
             },
             compilation_cache: cache_lease.as_ref().map(|lease| lease.evidence.clone()),
+            compiler_flags,
         });
         Ok(PreparedSession {
             session,
@@ -674,6 +706,64 @@ fn runtime_build_info() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compiler_identity_is_frozen_without_requiring_a_cache() {
+        let options = InstanceOptions {
+            provider: Provider::Migraphx,
+            intra_threads: Some(8),
+            ..Default::default()
+        };
+        assert!(options.compilation_cache_dir.is_none());
+        let baseline = options.compiler_flags([]).unwrap();
+        let mut environment = vec![(
+            OsString::from("MIGRAPHX_SET_GEMM_PROVIDER"),
+            OsString::from("rocblas"),
+        )];
+        let frozen = options.compiler_flags(environment.clone()).unwrap();
+        assert_ne!(baseline, frozen);
+        environment[0].1 = "other".into();
+        assert_eq!(frozen["environment:MIGRAPHX_SET_GEMM_PROVIDER"], "rocblas");
+        // The same descriptor is copied into the cache, not recaptured from env.
+        let cached = InstanceOptions {
+            compilation_cache_dir: Some("elsewhere".into()),
+            ..options.clone()
+        };
+        assert_eq!(baseline, cached.compiler_flags([]).unwrap());
+        assert_eq!(
+            baseline,
+            options
+                .compiler_flags([("UNRELATED_SETTING".into(), "changed".into())])
+                .unwrap()
+        );
+        assert!(InstanceOptions {
+            provider: Provider::Cpu,
+            ..options
+        }
+        .compiler_flags(environment)
+        .unwrap()
+        .is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_compiler_control_is_rejected_but_unrelated_values_are_ignored() {
+        use std::os::unix::ffi::OsStringExt;
+        let options = InstanceOptions {
+            provider: Provider::Migraphx,
+            ..Default::default()
+        };
+        let invalid = OsString::from_vec(vec![0xff]);
+        assert!(options
+            .compiler_flags([("MIGRAPHX_SET_GEMM_PROVIDER".into(), invalid.clone())])
+            .is_err());
+        assert_eq!(
+            options.compiler_flags([]).unwrap(),
+            options
+                .compiler_flags([("UNRELATED_SETTING".into(), invalid)])
+                .unwrap()
+        );
+    }
 
     #[test]
     fn cpu_precision_and_device_are_explicit() {

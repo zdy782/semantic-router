@@ -23,7 +23,9 @@
 use super::runtime_identity::{
     json_digest, tokenizer_digest, ArtifactDigest, ArtifactSnapshot, RuntimeIdentity,
 };
-use crate::core::instance_options::{CustomOpsProfile, InstanceOptions, Overflow, Provider};
+use crate::core::instance_options::{
+    CustomOpsProfile, InstanceOptions, Overflow, Provider, SessionEvidence,
+};
 use crate::core::onnx_artifacts::capture_onnx;
 use crate::core::unified_error::{errors, UnifiedError, UnifiedResult};
 use crate::model_architectures::embedding::pooling::{
@@ -682,20 +684,7 @@ impl MmBertEmbeddingModel {
                 "owned session did not record execution evidence",
             )
         })?;
-        let runtime = json_digest(&serde_json::json!({
-            "contract": "onnx-mmbert-owned-v1",
-            "runtime_build": actual.runtime_build,
-            "provider": actual.provider,
-            "device_id": actual.device_id,
-            "precision": actual.precision,
-            "cpu_fallback_disabled": actual.cpu_fallback_disabled,
-            "custom_ops_profile": actual.custom_ops_profile,
-            "custom_ops_sha256": actual.custom_ops_sha256,
-            "intra_threads": options.intra_threads,
-            "execution_inputs": actual.execution_inputs,
-            "execution_max_input_tokens": actual.execution_max_input_tokens,
-        }))
-        .map_err(error)?;
+        let runtime = Self::owned_runtime_identity(actual, options.intra_threads).map_err(error)?;
         drop(evidence);
         for snapshot in &snapshots {
             snapshot.verify().map_err(error)?;
@@ -706,6 +695,26 @@ impl MmBertEmbeddingModel {
             runtime: format!("onnx-mmbert-owned-v1:{runtime}"),
             artifacts: snapshots.into_iter().map(|s| s.digest).collect(),
         })
+    }
+
+    fn owned_runtime_identity(
+        actual: &SessionEvidence,
+        intra_threads: Option<usize>,
+    ) -> anyhow::Result<String> {
+        json_digest(&serde_json::json!({
+            "contract": "onnx-mmbert-owned-v1",
+            "runtime_build": actual.runtime_build,
+            "compiler_flags": actual.compiler_flags,
+            "provider": actual.provider,
+            "device_id": actual.device_id,
+            "precision": actual.precision,
+            "cpu_fallback_disabled": actual.cpu_fallback_disabled,
+            "custom_ops_profile": actual.custom_ops_profile,
+            "custom_ops_sha256": actual.custom_ops_sha256,
+            "intra_threads": intra_threads,
+            "execution_inputs": actual.execution_inputs,
+            "execution_max_input_tokens": actual.execution_max_input_tokens,
+        }))
     }
 
     /// Create an ONNX Runtime session with the legacy execution-provider policy.
@@ -1330,6 +1339,50 @@ impl MmBertEmbeddingModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uncached_execution_identity_includes_frozen_compiler_controls() {
+        let options = InstanceOptions {
+            provider: Provider::Migraphx,
+            ..Default::default()
+        };
+        let mut evidence = SessionEvidence {
+            runtime_build: "fixed-runtime".into(),
+            graph: "model.onnx".into(),
+            provider: "MIGraphXExecutionProvider",
+            device_id: 0,
+            precision: crate::core::instance_options::Precision::Native,
+            cpu_fallback_disabled: true,
+            custom_ops_profile: CustomOpsProfile::None,
+            custom_ops_library: None,
+            custom_ops_sha256: None,
+            profile_prefix: None,
+            artifacts: vec![],
+            execution_max_input_tokens: Some(32768),
+            execution_inputs: vec![],
+            compilation_cache: None,
+            compiler_flags: options.compiler_flags([]).unwrap(),
+        };
+        let baseline = MmBertEmbeddingModel::owned_runtime_identity(&evidence, None).unwrap();
+        evidence.compiler_flags = options
+            .compiler_flags([("MIGRAPHX_SET_GEMM_PROVIDER".into(), "rocblas".into())])
+            .unwrap();
+        let rocblas = MmBertEmbeddingModel::owned_runtime_identity(&evidence, None).unwrap();
+        assert_ne!(baseline, rocblas);
+        evidence.graph = "relocated/model.onnx".into();
+        evidence.profile_prefix = Some("observation-only".into());
+        assert_eq!(
+            rocblas,
+            MmBertEmbeddingModel::owned_runtime_identity(&evidence, None).unwrap()
+        );
+        evidence.compiler_flags = options
+            .compiler_flags([("UNRELATED_SETTING".into(), "1".into())])
+            .unwrap();
+        assert_eq!(
+            baseline,
+            MmBertEmbeddingModel::owned_runtime_identity(&evidence, None).unwrap()
+        );
+    }
 
     #[test]
     fn owned_primary_selection_uses_typed_profile() {

@@ -139,7 +139,7 @@ func (r *Runtime) Relevance(ctx context.Context, spec config.ResolvedModelBindin
 				if hashErr != nil {
 					return hashErr
 				}
-				executionEvidence = append(executionEvidence, relevanceExecution{GraphFingerprint: graphHash, ExternalArtifactFingerprint: externalHash, Provider: session.Provider, Device: capability.Device, Precision: session.Precision, RuntimeBuild: session.RuntimeBuild, CustomOpsProfile: session.CustomOpsProfile, CustomOpsSHA256: session.CustomOpsSHA256, CPUFallbackDisabled: session.CPUFallbackDisabled})
+				executionEvidence = append(executionEvidence, ortRelevanceExecution(session, capability.Device, graphHash, externalHash))
 			}
 		default:
 			return fmt.Errorf("%w: unexpected pair scorer resource", binding.ErrCapability)
@@ -288,8 +288,19 @@ func (r *Runtime) ortRelevance(ctx context.Context, spec config.ResolvedModelBin
 // Candle exposes a math contract version, not an attested runtime build ID.
 type relevanceExecution struct {
 	GraphFingerprint, ExternalArtifactFingerprint string
+	CompilerFlags                                 map[string]string
 	MathContract                                  string
 	Provider, Device, Precision, RuntimeBuild     string
 	CustomOpsProfile, CustomOpsSHA256             string
 	CPUFallbackDisabled                           bool
+}
+
+func ortRelevanceExecution(session ort.SessionEvidence, device, graphHash, externalHash string) relevanceExecution {
+	return relevanceExecution{
+		GraphFingerprint: graphHash, ExternalArtifactFingerprint: externalHash,
+		Provider: session.Provider, Device: device, Precision: session.Precision,
+		RuntimeBuild: session.RuntimeBuild, CompilerFlags: session.CompilerFlags,
+		CustomOpsProfile: session.CustomOpsProfile, CustomOpsSHA256: session.CustomOpsSHA256,
+		CPUFallbackDisabled: session.CPUFallbackDisabled,
+	}
 }

@@ -49,6 +49,14 @@ func TestOwnedEmbeddingDescriptorPrimaryCloneAndNoReload(t *testing.T) {
 	if err != nil || info.CompletedInferences != 0 {
 		t.Fatalf("descriptor performed inference: %+v, %v", info, err)
 	}
+	if len(info.Sessions) != 2 {
+		t.Fatalf("missing loaded session evidence: %+v", info.Sessions)
+	}
+	for _, session := range info.Sessions {
+		if session.CompilationCache != nil || session.CompilerFlags == nil || len(session.CompilerFlags) != 0 {
+			t.Fatalf("CPU session must expose an empty compiler snapshot without a cache: %+v", session)
+		}
+	}
 	clone, err := model.Clone()
 	if err != nil {
 		t.Fatal(err)
