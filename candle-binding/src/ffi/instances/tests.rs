@@ -492,6 +492,14 @@ fn owned_headless_uses_declared_capacity_despite_training_metadata() {
     assert_eq!(encoder.info.max_input_tokens, 512);
     let mut opts = options(&dir);
     opts.max_input_tokens = 513;
+    assert_eq!(
+        load(opts.clone(), "backbone")
+            .unwrap()
+            .info
+            .max_input_tokens,
+        513
+    );
+    opts.max_input_tokens = 1025;
     assert!(load(opts, "backbone").is_err());
 }
 
@@ -538,4 +546,344 @@ fn owned_backbone_and_head_reject_unsupported_rope_scaling() {
             .to_string()
             .contains("unsupported ModernBERT RoPE scaling"));
     }
+}
+
+#[test]
+fn explicit_long_budget_reaches_direct_and_bound_heads() {
+    let dir = fixture(&["safe", "unsafe"], 1);
+    let path = dir.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["max_position_embeddings"] = json!(32768);
+    // A layer-free fixture isolates token admission/forwarding from attention
+    // cost. Maintained checkpoint attention and quality require separate tests.
+    config["num_hidden_layers"] = json!(0);
+    std::fs::write(&path, config.to_string()).unwrap();
+    let mut opts = options(&dir);
+    opts.overflow = "reject".into();
+    let legacy = load(opts.clone(), "sequence").unwrap();
+    assert_eq!(legacy.info.max_input_tokens, 512);
+    assert!(legacy.sequence(&"hello ".repeat(511)).is_err());
+    opts.max_input_tokens = 32768;
+    let direct = load(opts.clone(), "sequence").unwrap();
+    let backbone = load(opts.clone(), "backbone").unwrap();
+    let bound = bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").unwrap();
+    let text = "hello ".repeat(32766);
+    let expected = value(direct.sequence(&text).unwrap());
+    assert_eq!(expected["input"]["processed_tokens"], 32768);
+    assert_eq!(expected["input"]["truncated"], false);
+    assert_eq!(value(bound.sequence(&text).unwrap()), expected);
+    let overflow = format!("{text}hello");
+    for model in [&direct, &bound] {
+        assert!(model
+            .sequence(&overflow)
+            .err()
+            .unwrap()
+            .to_string()
+            .starts_with("input_limit:"));
+    }
+    let tokens = bind_head(&backbone, dir.path().to_str().unwrap(), "token").unwrap();
+    let token_output = value(tokens.tokens(&text).unwrap());
+    assert_eq!(token_output["input"]["processed_tokens"], 32768);
+    assert_eq!(token_output["spans"].as_array().unwrap().len(), 32766);
+    opts.max_input_tokens = 32769;
+    assert!(load(opts, "backbone").is_err());
+}
+
+#[test]
+fn direct_and_bound_heads_reject_incomplete_declared_artifacts() {
+    let dir = fixture(&["safe", "unsafe"], 1);
+    let source = fixture(&["safe", "unsafe"], 1);
+    let backbone = load(options(&source), "backbone").unwrap();
+    let path = dir.path().join("config.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["classifier_pooling"] = json!("unknown");
+    std::fs::write(&path, config.to_string()).unwrap();
+    assert!(load(options(&dir), "sequence").is_err());
+    assert!(bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").is_err());
+    config["classifier_pooling"] = json!("mean");
+    config["architectures"] = json!(["ModernBertForSequenceClassification"]);
+    std::fs::write(&path, config.to_string()).unwrap();
+    // A declared HF classifier cannot silently degrade to the old linear head.
+    assert!(load(options(&dir), "sequence").is_err());
+    assert!(bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").is_err());
+    let weights = dir.path().join("model.safetensors");
+    let mut tensors = candle_core::safetensors::load(&weights, &Device::Cpu).unwrap();
+    tensors.insert(
+        "head.norm.weight".into(),
+        Tensor::ones(4, DType::F32, &Device::Cpu).unwrap(),
+    );
+    candle_core::safetensors::save(&tensors, &weights).unwrap();
+    assert!(bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").is_err());
+    tensors.insert(
+        "head.dense.weight".into(),
+        Tensor::from_vec(
+            (0..16)
+                .map(|i| if i / 4 == i % 4 { 1.0f32 } else { 0.0 })
+                .collect(),
+            (4, 4),
+            &Device::Cpu,
+        )
+        .unwrap(),
+    );
+    candle_core::safetensors::save(&tensors, &weights).unwrap();
+    let direct = load(options(&dir), "sequence").unwrap();
+    let bound = bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").unwrap();
+    assert_eq!(
+        value(direct.sequence("hello world").unwrap()),
+        value(bound.sequence("hello world").unwrap())
+    );
+    config["norm_bias"] = json!(true);
+    std::fs::write(&path, config.to_string()).unwrap();
+    assert!(load(options(&dir), "sequence").is_err());
+    assert!(bind_head(&backbone, dir.path().to_str().unwrap(), "sequence").is_err());
+}
+
+#[test]
+fn owned_label_scores_and_windows_preserve_activation_and_lifetime() {
+    use std::ffi::{CStr, CString};
+    let categorical = fixture(&["safe", "unsafe"], 1);
+    let independent = fixture(&["first", "second"], 1);
+    update_fixture_config(&independent, |config| {
+        config["problem_type"] = json!("multi_label_classification")
+    });
+    assert!(load(options(&independent), "sequence").is_err());
+    assert!(load(options(&categorical), "label_scores").is_err());
+    let encoder = load(options(&categorical), "backbone").unwrap();
+    assert!(bind_head(&encoder, independent.path().to_str().unwrap(), "sequence").is_err());
+    let scores = bind_head(
+        &encoder,
+        independent.path().to_str().unwrap(),
+        "label_scores",
+    )
+    .unwrap();
+    let classes = bind_head(&encoder, categorical.path().to_str().unwrap(), "sequence").unwrap();
+    assert!(scores.sequence("hello").is_err());
+    assert!(classes.score("hello").is_err());
+    let h = insert(scores).unwrap();
+    let clone = insert(get(h).unwrap()).unwrap();
+    close(h).unwrap();
+    drop(encoder);
+    let text = CString::new("hello world hello world hello").unwrap();
+    let ptr = unsafe { transport::candle_instance_score_windows(clone, text.as_ptr(), 5, 1) };
+    let output: Value =
+        serde_json::from_str(unsafe { CStr::from_ptr(ptr) }.to_str().unwrap()).unwrap();
+    unsafe { transport::candle_instance_free_string(ptr) };
+    assert_eq!(output["value"]["labels"], json!(["first", "second"]));
+    assert_eq!(output["value"]["content_tokens"], 5);
+    assert_eq!(output["value"]["input"]["processed_tokens"], 7);
+    let windows = output["value"]["windows"].as_array().unwrap();
+    assert_eq!(windows.len(), 2);
+    assert_eq!(windows[0]["start"], 0);
+    assert_eq!(windows[0]["end"], 3);
+    assert_eq!(windows[1]["start"], 2);
+    assert_eq!(windows[1]["end"], 5);
+    assert!(
+        windows[0]["scores"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_f64().unwrap())
+            .sum::<f64>()
+            > 1.0
+    );
+    let distributions = value(
+        classes
+            .classify_windows(text.to_str().unwrap(), 5, 1)
+            .unwrap(),
+    );
+    for window in distributions["windows"].as_array().unwrap() {
+        assert!(
+            (window["probabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_f64().unwrap())
+                .sum::<f64>()
+                - 1.0)
+                .abs()
+                < 1e-5
+        );
+    }
+    assert!(classes
+        .classify_windows(&"hello ".repeat(511), 5, 1)
+        .is_err());
+    assert!(classes.classify_windows("hello", 2, 0).is_err());
+    close(clone).unwrap();
+    let ptr = unsafe { transport::candle_instance_score(clone, text.as_ptr()) };
+    let output: Value =
+        serde_json::from_str(unsafe { CStr::from_ptr(ptr) }.to_str().unwrap()).unwrap();
+    unsafe { transport::candle_instance_free_string(ptr) };
+    assert!(output["error"].as_str().unwrap().starts_with("closed:"));
+    classes.sequence("hello").unwrap();
+}
+
+fn reranker_fixture() -> TempDir {
+    let dir = fixture(&["unused"], 0);
+    let path = dir.path().join("config.json");
+    let mut raw: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    raw["architectures"] = json!(["ModernBertModel"]);
+    raw["num_hidden_layers"] = json!(2);
+    raw["representation_contract"] = json!({"version":1,"pooling":"cls","intermediate_normalization":"final_norm","final_normalization":"final_norm","head_dtype":"float32"});
+    std::fs::write(path, raw.to_string()).unwrap();
+    std::fs::write(dir.path().join("matryoshka_config.json"), json!({"layer_indices":[1,2],"dim_indices":[2,4],"hidden_size":4,"num_layers":2,"pooling_strategy":"cls","has_final_norm":true}).to_string()).unwrap();
+    let weights = dir.path().join("model.safetensors");
+    let old = candle_core::safetensors::load(&weights, &Device::Cpu).unwrap();
+    let mut tensors = HashMap::new();
+    for (name, tensor) in old {
+        if let Some(name) = name.strip_prefix("model.") {
+            if name.starts_with("layers.0.") {
+                tensors.insert(name.replacen("layers.0.", "layers.1.", 1), tensor.clone());
+            }
+            tensors.insert(name.to_owned(), tensor);
+        }
+    }
+    tensors.insert(
+        "layers.1.attn_norm.weight".into(),
+        Tensor::ones(4, DType::F32, &Device::Cpu).unwrap(),
+    );
+    candle_core::safetensors::save(&tensors, weights).unwrap();
+    let mut heads = HashMap::new();
+    for layer in [1, 2] {
+        for dimension in [2, 4] {
+            let prefix = format!("{layer}.{dimension}");
+            let width = dimension / 2;
+            heads.insert(
+                format!("{prefix}.0.weight"),
+                Tensor::zeros((width, dimension), DType::F32, &Device::Cpu).unwrap(),
+            );
+            heads.insert(
+                format!("{prefix}.0.bias"),
+                Tensor::ones(width, DType::F32, &Device::Cpu).unwrap(),
+            );
+            heads.insert(
+                format!("{prefix}.3.weight"),
+                Tensor::ones((1, width), DType::F32, &Device::Cpu).unwrap(),
+            );
+            heads.insert(
+                format!("{prefix}.3.bias"),
+                Tensor::new(&[layer as f32], &Device::Cpu).unwrap(),
+            );
+        }
+    }
+    candle_core::safetensors::save(&heads, dir.path().join("classification_heads.safetensors"))
+        .unwrap();
+    let mut tokenizer = Tokenizer::from_file(dir.path().join("tokenizer.json")).unwrap();
+    tokenizer.with_post_processor(Some(
+        TemplateProcessing::builder()
+            .try_single("[CLS] $A [SEP]")
+            .unwrap()
+            .try_pair("[CLS] $A [SEP] $B:1 [SEP]:1")
+            .unwrap()
+            .special_tokens(vec![("[CLS]", 2), ("[SEP]", 3)])
+            .build()
+            .unwrap(),
+    ));
+    tokenizer
+        .save(dir.path().join("tokenizer.json"), false)
+        .unwrap();
+    dir
+}
+
+#[test]
+fn owned_reranker_uses_trained_pair_head_and_exact_combined_budget() {
+    let dir = reranker_fixture();
+    let mut opts = options(&dir);
+    opts.overflow = "reject".into();
+    opts.max_input_tokens = 7;
+    let model = load_selected(
+        opts.clone(),
+        "pair_scores",
+        Some(PairScorerSelection {
+            layer: 1,
+            dimension: 2,
+        }),
+    )
+    .unwrap();
+    let pairs = json!([{"query":"hello world","document":"Paris France"}]);
+    let output = serde_json::to_value(
+        model
+            .score_pairs(serde_json::from_value(pairs.clone()).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let score = output["scores"][0].as_f64().unwrap();
+    assert!(
+        (score - 1.841344746).abs() < 1e-6,
+        "raw GELU+MLP logit {score}"
+    );
+    assert_eq!(output["inputs"][0]["input_tokens"], 7);
+    assert_eq!(output["inputs"][0]["processed_tokens"], 7);
+    assert_eq!(output["inputs"][0]["truncated"], false);
+    assert_eq!(
+        model.info.pair_scorer,
+        Some(PairScorerSelection {
+            layer: 1,
+            dimension: 2
+        })
+    );
+    let full = load_selected(
+        opts.clone(),
+        "pair_scores",
+        Some(PairScorerSelection::default()),
+    )
+    .unwrap();
+    assert_eq!(
+        full.info.pair_scorer,
+        Some(PairScorerSelection {
+            layer: 2,
+            dimension: 4
+        })
+    );
+    let output = serde_json::to_value(
+        full.score_pairs(serde_json::from_value(pairs).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    assert!((output["scores"][0].as_f64().unwrap() - 3.682689492).abs() < 1e-6);
+    let overflow = json!([{"query":"hello world","document":"Paris France hello"}]);
+    assert!(model
+        .score_pairs(serde_json::from_value(overflow).unwrap())
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("input_limit"));
+    assert!(load_selected(
+        opts.clone(),
+        "pair_scores",
+        Some(PairScorerSelection {
+            layer: 1,
+            dimension: 3
+        })
+    )
+    .is_err());
+    opts.overflow = "truncate".into();
+    assert!(load(opts, "pair_scores").is_err());
+    let first = insert(model).unwrap();
+    let peer = insert(get(first).unwrap()).unwrap();
+    close(first).unwrap();
+    assert!(get(peer)
+        .unwrap()
+        .score_pairs(serde_json::from_value(json!([{"query":"hello","document":"world"}])).unwrap())
+        .is_ok());
+    close(peer).unwrap();
+}
+
+#[test]
+fn owned_reranker_rejects_missing_norm_or_invalid_representation() {
+    let dir = reranker_fixture();
+    let mut opts = options(&dir);
+    opts.overflow = "reject".into();
+    let weights = dir.path().join("model.safetensors");
+    let mut tensors = candle_core::safetensors::load(&weights, &Device::Cpu).unwrap();
+    tensors.remove("layers.1.attn_norm.weight");
+    candle_core::safetensors::save(&tensors, weights).unwrap();
+    assert!(load(opts, "pair_scores").is_err());
+    let dir = reranker_fixture();
+    let mut opts = options(&dir);
+    opts.overflow = "reject".into();
+    let config = dir.path().join("config.json");
+    let mut raw: Value = serde_json::from_slice(&std::fs::read(&config).unwrap()).unwrap();
+    raw["representation_contract"]["pooling"] = json!("attention_mask_mean");
+    std::fs::write(config, raw.to_string()).unwrap();
+    assert!(load(opts, "pair_scores").is_err());
 }

@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,10 +19,16 @@ import (
 
 func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 	d := spec.Deployment.WithDefaults()
-	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow}
+	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow, CustomOpsProfile: d.CustomOpsProfile}
 	switch {
 	case d.Device == "cpu":
 		options.Provider = "cpu"
+	case strings.HasPrefix(d.Device, "rocm:"):
+		index, err := strconv.Atoi(strings.TrimPrefix(d.Device, "rocm:"))
+		if err != nil || index < 0 {
+			return options, fmt.Errorf("%w: invalid ROCm device index", binding.ErrCapability)
+		}
+		options.Provider, options.DeviceID = "rocm", index
 	case strings.HasPrefix(d.Device, "migraphx:"):
 		index, err := strconv.Atoi(strings.TrimPrefix(d.Device, "migraphx:"))
 		if err != nil || index < 0 {
@@ -29,7 +36,10 @@ func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 		}
 		options.Provider, options.DeviceID = "migraphx", index
 	default:
-		return options, fmt.Errorf("%w: ORT requires cpu or migraphx:index", binding.ErrCapability)
+		return options, fmt.Errorf("%w: ORT requires cpu, rocm:index or migraphx:index", binding.ErrCapability)
+	}
+	if options.CustomOpsProfile != "" && (options.Provider != "rocm" || options.CustomOpsProfile != "ck_flash_attention") {
+		return options, fmt.Errorf("%w: custom ops require the trusted ROCm CK profile", binding.ErrCapability)
 	}
 	if options.Precision != "native" && (options.Provider != "migraphx" || options.Precision != "fp16") {
 		return options, fmt.Errorf("%w: ORT supports native graph precision or explicit MIGraphX fp16 conversion", binding.ErrCapability)
@@ -100,6 +110,11 @@ func ortCapability(spec config.ResolvedModelBinding, info ort.Info) (binding.Cap
 		device := "cpu"
 		switch session.Provider {
 		case "CPUExecutionProvider":
+		case "ROCMExecutionProvider":
+			if !session.CPUFallbackDisabled {
+				return binding.Capability{}, fmt.Errorf("%w: ROCm session permits CPU fallback", binding.ErrCapability)
+			}
+			device = fmt.Sprintf("rocm:%d", session.DeviceID)
 		case "MIGraphXExecutionProvider":
 			if !session.CPUFallbackDisabled {
 				return binding.Capability{}, fmt.Errorf("%w: MIGraphX session permits CPU fallback", binding.ErrCapability)
@@ -107,6 +122,19 @@ func ortCapability(spec config.ResolvedModelBinding, info ort.Info) (binding.Cap
 			device = fmt.Sprintf("migraphx:%d", session.DeviceID)
 		default:
 			return binding.Capability{}, fmt.Errorf("%w: unrecognized ORT execution provider", binding.ErrCapability)
+		}
+		profile := session.CustomOpsProfile
+		if profile == "none" {
+			profile = ""
+		}
+		if profile != d.CustomOpsProfile {
+			return binding.Capability{}, fmt.Errorf("%w: actual ORT custom ops profile differs from deployment", binding.ErrCapability)
+		}
+		if profile == "ck_flash_attention" {
+			digest, err := hex.DecodeString(session.CustomOpsSHA256)
+			if err != nil || len(digest) != 32 || session.CustomOpsLibrary != "/usr/local/lib/libort_ck_flash_attn.so.1" {
+				return binding.Capability{}, fmt.Errorf("%w: CK session lacks trusted library content evidence", binding.ErrCapability)
+			}
 		}
 		if device != d.Device || session.Precision != d.Precision {
 			return binding.Capability{}, fmt.Errorf("%w: actual ORT execution differs from deployment", binding.ErrCapability)

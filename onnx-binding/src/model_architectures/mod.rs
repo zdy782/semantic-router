@@ -2,3 +2,5 @@
 
 pub mod classification;
 pub mod embedding;
+
+pub mod reranking;

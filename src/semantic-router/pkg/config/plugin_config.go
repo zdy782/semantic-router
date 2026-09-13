@@ -328,6 +328,7 @@ func (d *Decision) GetResponseCacheConfig() *ResponseCachePluginConfig {
 }
 
 // GetSemanticCacheConfig is retained for source compatibility.
+//
 // Deprecated: use GetResponseCacheConfig.
 func (d *Decision) GetSemanticCacheConfig() *SemanticCachePluginConfig {
 	return d.GetResponseCacheConfig()

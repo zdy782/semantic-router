@@ -3,28 +3,30 @@ package classification
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
-	candle "github.com/vllm-project/semantic-router/candle-binding"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/binding"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/tasks"
 )
 
 type fakeJailbreakWindowModel struct {
-	windows []candle.SequenceWindowScores
+	windows []tasks.LabelDistributionWindow
 	inputs  []string
-	options []candle.SequenceWindowOptions
+	options []tasks.TextWindowsRequest
 	err     error
 	closed  int
 }
 
-func (m *fakeJailbreakWindowModel) ClassifyWindows(text string, options candle.SequenceWindowOptions) ([]candle.SequenceWindowScores, error) {
+func (m *fakeJailbreakWindowModel) ClassifyWindows(text string, options tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
 	m.inputs = append(m.inputs, text)
 	m.options = append(m.options, options)
-	return m.windows, m.err
+	return tasks.WindowedLabelDistribution{Windows: m.windows}, m.err
 }
 
 func (m *fakeJailbreakWindowModel) Close() error { m.closed++; return nil }
@@ -47,15 +49,24 @@ func windowedGuardFixture(t *testing.T) (*windowedJailbreakBackend, *fakeJailbre
 	if err != nil {
 		t.Fatal(err)
 	}
-	model := &fakeJailbreakWindowModel{windows: []candle.SequenceWindowScores{
-		{Scores: []float32{.2, .7, .1}}, {Scores: []float32{.1, .3, .6}},
+	model := &fakeJailbreakWindowModel{windows: []tasks.LabelDistributionWindow{
+		{Probabilities: []float32{.2, .7, .1}}, {Probabilities: []float32{.1, .3, .6}},
 	}}
-	backend.open = func(options candle.SequenceModelOptions) (jailbreakWindowModel, error) {
-		if options.MaxSequenceLength != 32768 || !options.UseCPU || options.MultiLabel ||
-			!reflect.DeepEqual(options.Labels, []string{"benign", "jailbreak", "injection"}) {
-			t.Fatalf("incorrect native contract: %+v", options)
+	backend.prepare = func(ctx context.Context) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error) {
+		if backend.spec.Deployment.Input.MaxTokens != 32768 || backend.spec.Deployment.Device != "cpu" {
+			t.Fatalf("incorrect typed native contract: %+v", backend.spec)
 		}
-		return model, nil
+		resource, err := binding.NewPool().Acquire(ctx, binding.ResourceIdentity{Artifact: "fixture", Provider: "candle", Device: "cpu", Precision: "fp32"}, "", nil, func(context.Context) (io.Closer, error) { return model, nil })
+		if err != nil {
+			return nil, err
+		}
+		task, err := binding.Register(binding.NewRegistry(), config.RemoteClassifierContractLabelDistribution, func(tasks.TextWindowsRequest) error { return nil }, func(tasks.TextWindowsRequest, tasks.WindowedLabelDistribution) error { return nil })
+		if err != nil {
+			return nil, err
+		}
+		return task.Resolve(binding.Identity{Recipe: string(backend.spec.Recipe), Name: "prompt_guard", Deployment: "fixture", Contract: config.RemoteClassifierContractLabelDistribution, Adapter: "modernbert"}, binding.Capability{Contract: config.RemoteClassifierContractLabelDistribution, Provider: "candle", Device: "cpu", Precision: "fp32", Labels: append([]string(nil), backend.labels...)}, resource, func(_ context.Context, _ io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
+			return model.ClassifyWindows(input.Text, input)
+		})
 	}
 	if err := backend.Init(cfg.PromptGuard.ModelID, true, 3); err != nil {
 		t.Fatal(err)
@@ -69,7 +80,7 @@ func TestWindowedJailbreakPreservesOneRealDistribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(result.Probabilities, model.windows[1].Scores) {
+	if !reflect.DeepEqual(result.Probabilities, model.windows[1].Probabilities) {
 		t.Fatalf("mixed windows or chose the largest individual class: %+v", result)
 	}
 	risk := jailbreakRiskScore(classifier.JailbreakMapping, classifier.Config.PromptGuard.PositiveLabels, result)
@@ -77,7 +88,7 @@ func TestWindowedJailbreakPreservesOneRealDistribution(t *testing.T) {
 		t.Fatalf("incorrect combined positive risk: %v", risk)
 	}
 	result.Probabilities[0] = 1
-	if model.windows[1].Scores[0] != .1 {
+	if model.windows[1].Probabilities[0] != .1 {
 		t.Fatal("result aliases native scores")
 	}
 }
@@ -90,7 +101,7 @@ func TestWindowedJailbreakAPIReceivesFullInputAndNativeFailure(t *testing.T) {
 		t.Fatalf("scan: %+v, %v", scan, err)
 	}
 	if !reflect.DeepEqual(model.inputs, []string{input}) ||
-		!reflect.DeepEqual(model.options, []candle.SequenceWindowOptions{{Size: 128, Overlap: 63}}) {
+		!reflect.DeepEqual(model.options, []tasks.TextWindowsRequest{{Text: input, Size: 128, Overlap: 63}}) {
 		t.Fatal("input was split or retokenized before native inference")
 	}
 	if chunks := classifier.jailbreakModelInputs(""); len(chunks) != 0 {
@@ -105,7 +116,7 @@ func TestWindowedJailbreakAPIReceivesFullInputAndNativeFailure(t *testing.T) {
 func TestWindowedJailbreakRejectsIncompleteScoresAndHonorsLifecycle(t *testing.T) {
 	backend, model, _ := windowedGuardFixture(t)
 	for _, scores := range [][]float32{nil, {.5, .5}, {.2, .2, .2}, {.1, .2, float32(math.NaN())}} {
-		model.windows = []candle.SequenceWindowScores{{Scores: []float32{.1, .3, .6}}, {Scores: scores}}
+		model.windows = []tasks.LabelDistributionWindow{{Probabilities: []float32{.1, .3, .6}}, {Probabilities: scores}}
 		if _, err := backend.Classify(context.Background(), "request"); err == nil {
 			t.Fatal("accepted malformed window")
 		}
@@ -143,7 +154,7 @@ func TestWindowedJailbreakBinaryRiskBelowArgmaxAndRuleCache(t *testing.T) {
 	}
 	classifier.Config.PromptGuard.PositiveLabels = []string{"jailbreak"}
 	classifier.Config.PromptGuard.Threshold = .44471272826194763
-	model.windows = []candle.SequenceWindowScores{{Scores: []float32{.99, .01}}, {Scores: []float32{.55, .45}}}
+	model.windows = []tasks.LabelDistributionWindow{{Probabilities: []float32{.99, .01}}, {Probabilities: []float32{.55, .45}}}
 	detected, label, confidence, risk, err := classifier.CheckForJailbreakWithRisk(context.Background(), "request")
 	if err != nil || !detected || label != "benign" || confidence != .55 || risk != .45 {
 		t.Fatalf("positive risk was replaced with argmax confidence: %v %s %v %v %v", detected, label, confidence, risk, err)

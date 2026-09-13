@@ -6,30 +6,34 @@ import (
 	"math"
 	"sync"
 
-	candle "github.com/vllm-project/semantic-router/candle-binding"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/binding"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/tasks"
 )
 
-type jailbreakWindowModel interface {
-	ClassifyWindows(string, candle.SequenceWindowOptions) ([]candle.SequenceWindowScores, error)
-	Close() error
-}
-
-// Each recipe owns its handle; native tokenization preserves IDs and coverage.
+// The backend owns a typed task handle; the runtime owns shared native resources.
 type windowedJailbreakBackend struct {
 	mu       sync.RWMutex
-	model    jailbreakWindowModel
 	closed   bool
 	labels   []string
 	positive []int
-	maxInput int
-	window   candle.SequenceWindowOptions
-	open     func(candle.SequenceModelOptions) (jailbreakWindowModel, error)
+	spec     config.ResolvedModelBinding
+	window   tasks.TextWindowsRequest
+	handle   *binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution]
+	prepare  func(context.Context) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error)
 }
 
-func newWindowedJailbreakBackend(cfg config.PromptGuardConfig, mapping *JailbreakMapping) (*windowedJailbreakBackend, error) {
-	if err := cfg.ValidateWindow(); err != nil {
-		return nil, err
+func newWindowedJailbreakBackend(cfg config.PromptGuardConfig, mapping *JailbreakMapping, models ...*classifierModelRuntime) (*windowedJailbreakBackend, error) {
+	runtime := consumerModelRuntime(models)
+	spec := runtime.localSpec("prompt_guard", cfg.ModelID, "modernbert", config.RemoteClassifierContractLabelDistribution, cfg.UseCPU, cfg.MaxSequenceLength)
+	var windowErr error
+	if _, bound := runtime.plan.Lookup(runtime.recipe, "prompt_guard"); bound {
+		windowErr = cfg.ValidateBoundWindow(spec.Deployment)
+	} else {
+		windowErr = cfg.ValidateWindow()
+	}
+	if windowErr != nil {
+		return nil, windowErr
 	}
 	if cfg.Window == nil || mapping == nil || mapping.LabelCount() < 2 {
 		return nil, fmt.Errorf("windowed jailbreak model requires a window and complete class mapping")
@@ -50,56 +54,54 @@ func newWindowedJailbreakBackend(cfg config.PromptGuardConfig, mapping *Jailbrea
 		}
 		positive = append(positive, index)
 	}
+	window := tasks.TextWindowsRequest{Size: cfg.Window.Size, Overlap: cfg.Window.Overlap}
 	return &windowedJailbreakBackend{
-		labels: labels, positive: positive,
-		maxInput: (config.SequenceHeadModelConfig{MaxSequenceLength: cfg.MaxSequenceLength}).InputLimit(),
-		window:   candle.SequenceWindowOptions{Size: cfg.Window.Size, Overlap: cfg.Window.Overlap},
-		open: func(options candle.SequenceModelOptions) (jailbreakWindowModel, error) {
-			return candle.OpenSequenceModel(options)
+		labels: labels, positive: positive, spec: spec, window: window,
+		prepare: func(ctx context.Context) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error) {
+			return runtime.runtime.SequenceWindows(ctx, spec, window)
 		},
 	}, nil
 }
 
-func (c *windowedJailbreakBackend) Init(modelID string, useCPU bool, classes ...int) error {
+func (c *windowedJailbreakBackend) Init(_ string, _ bool, classes ...int) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return fmt.Errorf("windowed jailbreak model is closed")
+		return binding.ErrClosed
 	}
-	if modelID == "" || len(classes) != 1 || classes[0] != len(c.labels) {
-		return fmt.Errorf("windowed jailbreak initialization differs from its model contract")
+	if len(classes) != 1 || classes[0] != len(c.labels) {
+		return fmt.Errorf("windowed jailbreak initialization differs from its mapping")
 	}
-	if c.model != nil {
+	if c.handle != nil {
 		return nil
 	}
-	model, err := c.open(candle.SequenceModelOptions{
-		ModelPath: config.ResolveModelPath(modelID), UseCPU: useCPU,
-		MaxSequenceLength: c.maxInput, Labels: append([]string(nil), c.labels...),
-	})
+	handle, err := c.prepare(context.Background())
 	if err != nil {
-		return fmt.Errorf("load windowed jailbreak model: %w", err)
+		return err
 	}
-	c.model = model
+	if err := validateNativeLabelOrder(handle.Capability().Labels, c.labels, nil); err != nil {
+		_ = handle.Close()
+		return err
+	}
+	c.handle = handle
 	return nil
 }
 
 func (c *windowedJailbreakBackend) Classify(ctx context.Context, text string) (SequenceClassificationResult, error) {
-	if err := ctx.Err(); err != nil {
-		return SequenceClassificationResult{}, err
-	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.closed || c.model == nil {
-		return SequenceClassificationResult{}, fmt.Errorf("windowed jailbreak model is not initialized")
+	if c.closed || c.handle == nil {
+		return SequenceClassificationResult{}, binding.ErrClosed
 	}
-	windows, err := c.model.ClassifyWindows(text, c.window)
+	input := c.window
+	input.Text = text
+	output, err := c.handle.Call(ctx, string(c.spec.Recipe), input)
 	if err != nil {
 		return SequenceClassificationResult{}, err
 	}
-	if err := ctx.Err(); err != nil {
-		return SequenceClassificationResult{}, err
-	}
-	return c.riskiestWindow(windows)
+	result, err := c.riskiestWindow(output.Windows)
+	result.Input = output.Input
+	return result, err
 }
 
 func validateJailbreakWindowScores(scores []float32, classes int) error {
@@ -119,19 +121,19 @@ func validateJailbreakWindowScores(scores []float32, classes int) error {
 	return nil
 }
 
-func (c *windowedJailbreakBackend) riskiestWindow(windows []candle.SequenceWindowScores) (SequenceClassificationResult, error) {
+func (c *windowedJailbreakBackend) riskiestWindow(windows []tasks.LabelDistributionWindow) (SequenceClassificationResult, error) {
 	var selected []float32
 	best := float32(-1)
 	for _, window := range windows {
-		if err := validateJailbreakWindowScores(window.Scores, len(c.labels)); err != nil {
+		if err := validateJailbreakWindowScores(window.Probabilities, len(c.labels)); err != nil {
 			return SequenceClassificationResult{}, err
 		}
 		var risk float32
 		for _, index := range c.positive {
-			risk += window.Scores[index]
+			risk += window.Probabilities[index]
 		}
 		if risk > best {
-			best, selected = risk, window.Scores
+			best, selected = risk, window.Probabilities
 		}
 	}
 	if selected == nil {
@@ -145,12 +147,9 @@ func (c *windowedJailbreakBackend) riskiestWindow(windows []candle.SequenceWindo
 func (c *windowedJailbreakBackend) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
-		return nil
-	}
 	c.closed = true
-	if c.model == nil {
+	if c.handle == nil {
 		return nil
 	}
-	return c.model.Close()
+	return c.handle.Close()
 }

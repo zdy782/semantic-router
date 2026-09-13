@@ -30,6 +30,7 @@ import (
 type routerComponents struct {
 	embeddings            *embedding.Set
 	modelRuntime          *native.Runtime
+	rerankers             map[config.RecipeName]modelruntime.PairScorer
 	cfg                   *config.RouterConfig
 	categoryDescriptions  []string
 	classifier            *classification.Classifier
@@ -202,6 +203,11 @@ func buildRouterComponents(cfg *config.RouterConfig, pools ...*binding.Pool) (*r
 	}
 	components.embeddings = embeddings
 	components.resources.add(embeddings.Close)
+	components.rerankers, err = modelruntime.PrepareRerankers(context.Background(), cfg, components.modelRuntime)
+	if err != nil {
+		return nil, rollbackResources(components.resources, err)
+	}
+	components.resources.add(func() error { return modelruntime.CloseRerankers(components.rerankers) })
 	if cfg.Looper.IsEnabled() {
 		looperClient, clientErr := looper.NewConnectorClient(&cfg.Looper)
 		if clientErr != nil {
@@ -362,6 +368,7 @@ func (components *routerComponents) buildRouter() *OpenAIRouter {
 	router := &OpenAIRouter{
 		Config:                  components.cfg,
 		Embeddings:              components.embeddings,
+		rerankers:               components.rerankers,
 		CategoryDescriptions:    components.categoryDescriptions,
 		Classifier:              components.classifier,
 		RecipeClassifiers:       components.recipeClassifiers,

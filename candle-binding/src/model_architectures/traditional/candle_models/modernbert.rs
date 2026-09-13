@@ -70,15 +70,17 @@ impl RotaryEmbedding {
             .map(|i| 1f32 / rope_theta.powf(i as f64 / dim as f64) as f32)
             .collect();
         let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?.to_dtype(dtype)?;
+        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
         let max_seq_len = config.max_position_embeddings;
+        // RoPE positions and angles stay FP32 even for a low-precision model.
+        // Otherwise BF16 merges adjacent positions above 256 (FP16 above 2048).
         let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(dtype)?
+            .to_dtype(DType::F32)?
             .reshape((max_seq_len, 1))?;
         let freqs = t.matmul(&inv_freq)?;
         Ok(Self {
-            sin: freqs.sin()?,
-            cos: freqs.cos()?,
+            sin: freqs.sin()?.to_dtype(dtype)?,
+            cos: freqs.cos()?.to_dtype(dtype)?,
         })
     }
 
@@ -293,6 +295,7 @@ impl ModernBertLayer {
         config: &Config,
         rotary_emb: Arc<RotaryEmbedding>,
         uses_local_attention: bool,
+        layer_index: usize,
     ) -> Result<Self> {
         let attn = ModernBertAttention::load(
             vb.pp("attn"),
@@ -301,12 +304,18 @@ impl ModernBertLayer {
             cfg!(feature = "flash-attn"),
         )?;
         let mlp = ModernBertMLP::load(vb.pp("mlp"), config)?;
-        let attn_norm = layer_norm_no_bias(
-            config.hidden_size,
-            config.layer_norm_eps,
-            vb.pp("attn_norm"),
-        )
-        .ok();
+        let attn_norm = if layer_index == 0 {
+            if vb.contains_tensor("attn_norm.weight") || vb.contains_tensor("attn_norm.bias") {
+                candle_core::bail!("the first ModernBERT layer has no attention normalization");
+            }
+            None
+        } else {
+            Some(layer_norm_no_bias(
+                config.hidden_size,
+                config.layer_norm_eps,
+                vb.pp("attn_norm"),
+            )?)
+        };
         let mlp_norm =
             layer_norm_no_bias(config.hidden_size, config.layer_norm_eps, vb.pp("mlp_norm"))?;
         Ok(Self {
@@ -405,15 +414,20 @@ pub struct ModernBert {
 
 impl ModernBert {
     pub fn load(vb: VarBuilder, config: &Config) -> Result<Self> {
+        Self::load_backbone(vb.pp("model"), config)
+    }
+
+    /// Load the root tensor namespace exported by HF ModernBertModel.
+    pub fn load_backbone(vb: VarBuilder, config: &Config) -> Result<Self> {
         let word_embeddings = embedding(
             config.vocab_size,
             config.hidden_size,
-            vb.pp("model.embeddings.tok_embeddings"),
+            vb.pp("embeddings.tok_embeddings"),
         )?;
         let norm = layer_norm_no_bias(
             config.hidden_size,
             config.layer_norm_eps,
-            vb.pp("model.embeddings.norm"),
+            vb.pp("embeddings.norm"),
         )?;
         let global_rotary_emb = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
@@ -432,7 +446,7 @@ impl ModernBert {
         for layer_id in 0..config.num_hidden_layers {
             let layer_uses_local_attention = layer_id % config.global_attn_every_n_layers != 0;
             layers.push(ModernBertLayer::load(
-                vb.pp(format!("model.layers.{layer_id}")),
+                vb.pp(format!("layers.{layer_id}")),
                 config,
                 if layer_uses_local_attention {
                     local_rotary_emb.clone()
@@ -440,13 +454,14 @@ impl ModernBert {
                     global_rotary_emb.clone()
                 },
                 layer_uses_local_attention,
+                layer_id,
             )?);
         }
 
         let final_norm = layer_norm_no_bias(
             config.hidden_size,
             config.layer_norm_eps,
-            vb.pp("model.final_norm"),
+            vb.pp("final_norm"),
         )?;
 
         Ok(Self {
@@ -459,6 +474,15 @@ impl ModernBert {
     }
 
     pub fn forward(&self, xs: &Tensor, mask: &Tensor) -> Result<Tensor> {
+        self.forward_to_layer(xs, mask, self.layers.len())
+    }
+
+    /// Apply the final normalization at a selected encoder exit. Callers that
+    /// select an intermediate exit must require this representation in the artifact.
+    pub fn forward_to_layer(&self, xs: &Tensor, mask: &Tensor, layer: usize) -> Result<Tensor> {
+        if layer > self.layers.len() {
+            candle_core::bail!("encoder exit exceeds the loaded layers");
+        }
         // (b, 1, 1, seq) additive padding mask, broadcast over query positions. The
         // previous (b, 1, seq, seq) expansion and the (seq, seq) sliding-window band
         // were both O(seq^2); the window is now applied inside the kernel per block.
@@ -475,7 +499,7 @@ impl ModernBert {
         };
         let window = self.local_attention_size / 2;
         let mut xs = xs.apply(&self.word_embeddings)?.apply(&self.norm)?;
-        for layer in self.layers.iter() {
+        for layer in self.layers.iter().take(layer) {
             xs = layer.forward(&xs, &pad_mask, window, ATTN_QUERY_BLOCK, has_padding)?;
         }
         let xs = xs.apply(&self.final_norm)?;
@@ -606,6 +630,27 @@ mod tests {
             local_rope_theta: 160000.0,
             classifier_config: None,
         }
+    }
+
+    #[test]
+    fn low_precision_rope_preserves_adjacent_positions_at_32k() -> Result<()> {
+        let mut config = tiny_config();
+        config.max_position_embeddings = 32768;
+        for dtype in [DType::F32, DType::F16, DType::BF16] {
+            let cache = RotaryEmbedding::new(dtype, &config, 160000.0, &Device::Cpu)?;
+            let sin = cache.sin.to_dtype(DType::F32)?.to_vec2::<f32>()?;
+            let cos = cache.cos.to_dtype(DType::F32)?.to_vec2::<f32>()?;
+            let tolerance = if dtype == DType::BF16 { 0.004 } else { 0.0005 };
+            // The first frequency is exactly 1 radian per position. These
+            // values independently expose any early rounding of positions.
+            for position in [257, 2049, 8193, 16385, 32766, 32767] {
+                assert!((sin[position][0] - (position as f32).sin()).abs() < tolerance);
+                assert!((cos[position][0] - (position as f32).cos()).abs() < tolerance);
+            }
+            assert_ne!(sin[32766][0], sin[32767][0]);
+            assert_ne!(cos[32766][0], cos[32767][0]);
+        }
+        Ok(())
     }
 
     /// Build an attention block with deterministic random weights.

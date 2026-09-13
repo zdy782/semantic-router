@@ -115,42 +115,8 @@ func (r *Runtime) Sequence(ctx context.Context, spec config.ResolvedModelBinding
 	if spec.Deployment.Provider != "candle" {
 		return nil, fmt.Errorf("%w: sequence provider %q is unavailable", binding.ErrCapability, spec.Deployment.Provider)
 	}
-	resource, err := r.candleResource(ctx, spec, false)
+	resource, model, err := r.prepareCandleSequence(ctx, spec)
 	if err != nil {
-		return nil, err
-	}
-	var model *candle.SequenceClassifier
-	err = resource.Use(ctx, func(value io.Closer) error {
-		backbone := value.(*candleBackbone)
-		head := spec.Binding.Head
-		if head == "" && backbone.sequence != nil {
-			model, err = backbone.sequence.Clone()
-			return err
-		}
-		if head == "" {
-			head = spec.Deployment.Artifact
-		}
-		if backbone.encoder != nil {
-			model, err = backbone.encoder.BindSequenceHead(head)
-		} else if backbone.sequence != nil {
-			model, err = backbone.sequence.BindSequenceHead(head)
-		} else {
-			model, err = backbone.tokens.BindSequenceHead(head)
-		}
-		return err
-	})
-	if err != nil {
-		// Use may observe cancellation after Clone/BindHead completed.
-		// Ownership has not yet transferred to the resource in this branch.
-		if model != nil {
-			_ = model.Close()
-		}
-		_ = resource.Close()
-		return nil, err
-	}
-	if err = resource.Own(model); err != nil {
-		_ = model.Close()
-		_ = resource.Close()
 		return nil, err
 	}
 	info, err := model.Info()
@@ -249,7 +215,7 @@ func (r *Runtime) Tokens(ctx context.Context, spec config.ResolvedModelBinding) 
 }
 
 func candleCapability(spec config.ResolvedModelBinding, info candle.InstanceInfo) binding.Capability {
-	return binding.Capability{Contract: spec.Binding.Contract, Provider: "candle", Device: info.Device, Precision: info.Precision, Labels: info.Labels, Limits: binding.Limits{ModelTokens: info.ArchitecturalMaxTokens, TaskTokens: 512, DeploymentTokens: spec.Deployment.Input.MaxTokens, Overflow: info.Overflow}}
+	return binding.Capability{Contract: spec.Binding.Contract, Provider: "candle", Device: info.Device, Precision: info.Precision, Labels: info.Labels, Limits: binding.Limits{ModelTokens: info.ArchitecturalMaxTokens, TaskTokens: info.MaxInputTokens, DeploymentTokens: spec.Deployment.Input.MaxTokens, Overflow: info.Overflow}}
 }
 
 func nativeError(err error) error {
@@ -275,4 +241,46 @@ func candleInputUsage(input candle.InputMetadata) *tasks.InputUsage {
 		return nil
 	}
 	return &tasks.InputUsage{OriginalTokens: input.InputTokens, ProcessedTokens: input.ProcessedTokens, Truncated: input.Truncated}
+}
+
+func (r *Runtime) prepareCandleSequence(ctx context.Context, spec config.ResolvedModelBinding) (*binding.Resource, *candle.SequenceClassifier, error) {
+	resource, err := r.candleResource(ctx, spec, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	var model *candle.SequenceClassifier
+	err = resource.Use(ctx, func(value io.Closer) error {
+		backbone := value.(*candleBackbone)
+		head := spec.Binding.Head
+		if head == "" && backbone.sequence != nil {
+			model, err = backbone.sequence.Clone()
+			return err
+		}
+		if head == "" {
+			head = spec.Deployment.Artifact
+		}
+		if backbone.encoder != nil {
+			model, err = backbone.encoder.BindSequenceHead(head)
+		} else if backbone.sequence != nil {
+			model, err = backbone.sequence.BindSequenceHead(head)
+		} else {
+			model, err = backbone.tokens.BindSequenceHead(head)
+		}
+		return err
+	})
+	if err != nil {
+		// Use may observe cancellation after Clone/BindHead completed.
+		// Ownership has not yet transferred to the resource in this branch.
+		if model != nil {
+			_ = model.Close()
+		}
+		_ = resource.Close()
+		return nil, nil, err
+	}
+	if err = resource.Own(model); err != nil {
+		_ = model.Close()
+		_ = resource.Close()
+		return nil, nil, err
+	}
+	return resource, model, nil
 }

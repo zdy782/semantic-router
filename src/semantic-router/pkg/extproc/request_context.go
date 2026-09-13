@@ -55,8 +55,11 @@ type EnhancedHallucinationInfo struct {
 
 // RequestContext holds the context for processing a request.
 type RequestContext struct {
-	Headers   map[string]string
-	RequestID string
+	RAGRerankLatency    time.Duration
+	RAGRerankScores     []float32
+	RAGRerankerIdentity string
+	Headers             map[string]string
+	RequestID           string
 	// IngressBodyBytes records only transport size. Source bytes live in the
 	// bounded, ephemeral protocol envelope and are never general-purpose state.
 	IngressBodyBytes  int

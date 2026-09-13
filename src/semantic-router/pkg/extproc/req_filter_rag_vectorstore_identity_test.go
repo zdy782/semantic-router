@@ -35,8 +35,8 @@ func TestRAGVectorStoreRejectsHistoricalEmbeddingIdentity(t *testing.T) {
 	registry.SetVectorStoreRuntime(&routerruntime.VectorStoreRuntime{Manager: old, Embedder: forbiddenRAGIdentityEmbedder{t}})
 	router := &OpenAIRouter{RuntimeRegistry: registry}
 	rag := &config.RAGPluginConfig{Enabled: true, Backend: "vectorstore", CacheResults: true, BackendConfig: config.MustStructuredPayload(&config.VectorStoreRAGConfig{VectorStoreID: vs.ID})}
-	router.setRAGCache("source", "cached historical context", rag)
-	if cached, hit := router.getRAGCache("source", rag); !hit || cached != "cached historical context" {
+	router.setRAGCache(config.DefaultRecipeName, "source", "cached historical context", rag)
+	if cached, hit := router.getRAGCache(config.DefaultRecipeName, "source", rag); !hit || cached != "cached historical context" {
 		t.Fatal("compatible cache fixture missed")
 	}
 	other, err := old.CreateStore(ctx, vectorstore.CreateStoreRequest{Name: "another collection"})
@@ -45,15 +45,15 @@ func TestRAGVectorStoreRejectsHistoricalEmbeddingIdentity(t *testing.T) {
 	}
 	otherRAG := *rag
 	otherRAG.BackendConfig = config.MustStructuredPayload(&config.VectorStoreRAGConfig{VectorStoreID: other.ID})
-	if _, hit := router.getRAGCache("source", &otherRAG); hit {
+	if _, hit := router.getRAGCache(config.DefaultRecipeName, "source", &otherRAG); hit {
 		t.Fatal("RAG cache mixed different vector stores")
 	}
 	registry.SetVectorStoreRuntime(&routerruntime.VectorStoreRuntime{Manager: current, Embedder: forbiddenRAGIdentityEmbedder{t}})
-	if _, hit := router.getRAGCache("source", rag); hit {
+	if _, hit := router.getRAGCache(config.DefaultRecipeName, "source", rag); hit {
 		t.Fatal("cached RAG context bypassed model compatibility")
 	}
 	hybrid := &config.RAGPluginConfig{Backend: "hybrid", CacheResults: true, BackendConfig: config.MustStructuredPayload(&config.HybridRAGConfig{Primary: "vectorstore", PrimaryConfig: rag.BackendConfig})}
-	if key := router.buildRAGCacheKey("source", hybrid); key != "" {
+	if key := router.buildRAGCacheKey(config.DefaultRecipeName, "source", hybrid); key != "" {
 		t.Fatal("hybrid RAG can cache an incompatible child")
 	}
 	text, err := router.retrieveFromVectorStore(ctx, &RequestContext{UserContent: "source"}, rag)

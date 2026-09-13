@@ -97,11 +97,6 @@ func (c *MmBERT32KPIIInitializerImpl) Init(modelID string, useCPU bool, numClass
 	return nil
 }
 
-// createMmBERT32KPIIInitializer creates an mmBERT-32K PII initializer.
-func createMmBERT32KPIIInitializer() PIIInitializer {
-	return &MmBERT32KPIIInitializerImpl{}
-}
-
 type PIIInferenceImpl struct{}
 
 func (c *PIIInferenceImpl) ClassifyTokens(_ context.Context, text string) (tasks.TokenClassificationResult, error) {

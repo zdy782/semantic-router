@@ -83,9 +83,16 @@ func (i *modelInventory) addScope(cfg *config.RouterConfig, plan *config.ModelBi
 		"hallucination_detector":  cfg.NeedsLocalHallucinationModelsForRouting() || cfg.NeedsHallucinationDetectorForDefaultRuntime(),
 		"hallucination_explainer": cfg.NeedsLocalHallucinationNLIForAPI() || cfg.NeedsLocalHallucinationNLIForRouting() || cfg.NeedsLocalNLIForSemanticCache(),
 		"modality_detector":       isModalityClassifierEnabled(cfg), "embedding": needed[primary],
+		config.RAGRerankerConsumer: cfg.NeedsRAGReranker(),
 	}
 	for _, rule := range cfg.ClassifierRules {
 		active["classifier."+rule.Name] = true
+	}
+	for _, rule := range cfg.SafetyRules {
+		active["safety."+rule.Name] = true
+		if rule.Hazard != nil {
+			active["safety."+rule.Name+".hazard"] = true
+		}
 	}
 	required := ExtractRequiredFilesByModel(&scoped)
 	defaultProvider, _ := config.DefaultModelExecution(cfg.EmbeddingModels.UseCPU)
@@ -96,6 +103,27 @@ func (i *modelInventory) addScope(cfg *config.RouterConfig, plan *config.ModelBi
 	}
 	excludes := candleEmbeddingModelExcludePatterns(&scoped)
 	explicitPaths := map[string]bool{}
+	// Implicit Safety and Hazard modules use the same artifact contract as
+	// their typed owners. Explicit per-rule heads are added below from plan.
+	for _, hazard := range []bool{false, true} {
+		if !scoped.NeedsLocalSafetyHeadForRouting(hazard) {
+			continue
+		}
+		head, contract := scoped.SafetyModels.Safety, config.RemoteClassifierContractLabelDistribution
+		if hazard {
+			head, contract = scoped.SafetyModels.Hazard, config.RemoteClassifierContractLabelScores
+		}
+		provider, device := config.DefaultModelExecution(head.UseCPU)
+		spec := config.ResolvedModelBinding{
+			Recipe:     cfg.RoutingScope,
+			Binding:    config.ModelBinding{Adapter: "modernbert", Contract: contract},
+			Deployment: config.ModelDeployment{Provider: provider, Device: device, Artifact: head.ModelID},
+		}
+		if err := i.addDefaultDeployment(cfg, spec); err != nil {
+			return err
+		}
+		explicitPaths[config.ResolveModelPath(head.ModelID)] = true
+	}
 	if defaultProvider == "ort" && scoped.EmbeddingModels.EmbeddingBackend() == config.EmbeddingBackendCandle {
 		// Resolve implicit embeddings with the same provider artifact contract
 		// as explicit bindings. In particular, ROCm requires ONNX graphs and
@@ -109,7 +137,7 @@ func (i *modelInventory) addScope(cfg *config.RouterConfig, plan *config.ModelBi
 				Binding:    config.ModelBinding{Adapter: model, Contract: "embedding.v1"},
 				Deployment: config.ModelDeployment{Provider: defaultProvider, Artifact: *path},
 			}
-			if err := i.addDeployment(cfg, spec); err != nil {
+			if err := i.addDefaultDeployment(cfg, spec); err != nil {
 				return err
 			}
 			explicitPaths[config.ResolveModelPath(*path)] = true
@@ -141,7 +169,7 @@ func (i *modelInventory) addScope(cfg *config.RouterConfig, plan *config.ModelBi
 		if explicitPaths[config.ResolveModelPath(path)] {
 			continue
 		}
-		if err := i.add(ModelSpec{LocalPath: config.ResolveModelPath(path), RequiredFiles: append(slices.Clone(DefaultRequiredFiles), required[path]...), ExcludePatterns: excludes[config.ResolveModelPath(path)]}); err != nil {
+		if err := i.addDefault(ModelSpec{LocalPath: config.ResolveModelPath(path), RequiredFiles: append(slices.Clone(DefaultRequiredFiles), required[path]...), ExcludePatterns: excludes[config.ResolveModelPath(path)]}); err != nil {
 			return err
 		}
 	}
@@ -199,6 +227,10 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		// A registered Candle snapshot must contain native weights, even if an
 		// ONNX export already exists. Sharded safetensors remain valid.
 		groups = append(groups, []string{"*.safetensors", "*.safetensors.index.json", "pytorch_model*.bin"})
+		if spec.Binding.Contract == config.RelevanceScoresContract {
+			files = append(files, "classification_heads.safetensors", "matryoshka_config.json")
+			groups = [][]string{{"model.safetensors", "model.safetensors.index.json"}}
+		}
 		excludes = slices.Clone(onnxWeightExcludePatterns)
 		if spec.Binding.Contract == "embedding.v1" && spec.Binding.Adapter == "gemma" {
 			files = append(files, gemmaDenseWeightFiles...)
@@ -239,18 +271,48 @@ func (i *modelInventory) addFile(path, artifact, revision string) error {
 	return i.add(ModelSpec{LocalPath: root, Revision: revision, RequiredFiles: []string{file}, FilesOnly: true, CheckONNX: filepath.Ext(file) == ".onnx", Strict: true})
 }
 
-func (i *modelInventory) add(next ModelSpec) error {
-	next.LocalPath = config.ResolveModelPath(next.LocalPath)
-	repo := i.registry[next.LocalPath]
+// Defaults choose their registered release; explicit bindings and standalone
+// companions preserve the caller's revision intent, including an omitted pin.
+func (i *modelInventory) addDefaultDeployment(cfg *config.RouterConfig, spec config.ResolvedModelBinding) error {
+	path := config.ResolveModelPath(spec.Deployment.Artifact)
+	repo, err := i.registeredRepo(path)
+	if err != nil {
+		return err
+	}
+	spec.Deployment.Revision = modelRevision(path, repo)
+	return i.addDeployment(cfg, spec)
+}
+
+func (i *modelInventory) addDefault(spec ModelSpec) error {
+	path := config.ResolveModelPath(spec.LocalPath)
+	repo, err := i.registeredRepo(path)
+	if err != nil {
+		return err
+	}
+	spec.Revision = modelRevision(path, repo)
+	return i.add(spec)
+}
+
+func (i *modelInventory) registeredRepo(path string) (string, error) {
+	repo := i.registry[path]
 	if repo == "" {
 		for alias, candidate := range i.registry {
-			if config.ResolveModelPath(alias) == next.LocalPath {
+			if config.ResolveModelPath(alias) == path {
 				if repo != "" && repo != candidate {
-					return fmt.Errorf("registry aliases for %q disagree", next.LocalPath)
+					return "", fmt.Errorf("registry aliases for %q disagree", path)
 				}
 				repo = candidate
 			}
 		}
+	}
+	return repo, nil
+}
+
+func (i *modelInventory) add(next ModelSpec) error {
+	next.LocalPath = config.ResolveModelPath(next.LocalPath)
+	repo, err := i.registeredRepo(next.LocalPath)
+	if err != nil {
+		return err
 	}
 	if repo == "" {
 		return nil
@@ -279,9 +341,6 @@ func (i *modelInventory) add(next ModelSpec) error {
 		next.FilesOnly = previous.FilesOnly && next.FilesOnly
 		next.CheckONNX = previous.CheckONNX || next.CheckONNX
 		next.Strict = previous.Strict || next.Strict
-	}
-	if next.Revision == "" {
-		next.Revision = modelRevision(next.LocalPath, repo)
 	}
 	next.ExcludePatterns = modelDownloadExcludePatterns(next.LocalPath, repo, next.ExcludePatterns)
 	next.RequiredFiles = uniqueStrings(next.RequiredFiles)

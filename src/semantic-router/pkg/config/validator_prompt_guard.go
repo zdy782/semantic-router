@@ -11,7 +11,19 @@ var validPromptGuardProtocols = map[string]bool{
 // validatePromptGuardBackend validates the prompt_guard backend selection and
 // that the selected backend is actually wired up.
 func validatePromptGuardBackend(cfg *RouterConfig) error {
-	if err := validatePromptGuardBackendConfig(&cfg.PromptGuard); err != nil {
+	guard := cfg.PromptGuard
+	if binding, bound := cfg.ModelBindings["prompt_guard"]; bound && guard.Window != nil {
+		deployment, exists := cfg.ModelDeployments[binding.Deployment]
+		if !exists {
+			return fmt.Errorf("prompt_guard binding names an unknown deployment")
+		}
+		if err := guard.ValidateBoundWindow(deployment); err != nil {
+			return err
+		}
+		// Execution comes from the explicit binding, not a legacy variant.
+		guard.Window = nil
+	}
+	if err := validatePromptGuardBackendConfig(&guard); err != nil {
 		return err
 	}
 	return validatePromptGuardWiring(cfg)
@@ -63,6 +75,22 @@ func (cfg PromptGuardConfig) ValidateWindow() error {
 	if cfg.Backend != nil || cfg.Protocol != "" || cfg.Variant != PromptGuardVariantMmBERT32K {
 		return fmt.Errorf("prompt_guard.window requires the local mmbert32k variant")
 	}
+	return cfg.validateWindowParameters(cfg.MaxSequenceLength)
+}
+
+// ValidateBoundWindow checks consumer window policy against its explicit local
+// deployment. The loaded owned provider validates the actual architecture.
+func (cfg PromptGuardConfig) ValidateBoundWindow(deployment ModelDeployment) error {
+	if cfg.Window == nil {
+		return nil
+	}
+	if deployment.Provider != "candle" && deployment.Provider != "ort" {
+		return fmt.Errorf("prompt_guard.window requires a local deployment")
+	}
+	return cfg.validateWindowParameters(deployment.Input.MaxTokens)
+}
+
+func (cfg PromptGuardConfig) validateWindowParameters(maxTokens int) error {
 	seen := make(map[string]bool)
 	for _, label := range cfg.PositiveLabels {
 		if label == "" || seen[label] {
@@ -70,7 +98,7 @@ func (cfg PromptGuardConfig) ValidateWindow() error {
 		}
 		seen[label] = true
 	}
-	head := SequenceHeadModelConfig{MaxSequenceLength: cfg.MaxSequenceLength, Window: cfg.Window}
+	head := SequenceHeadModelConfig{MaxSequenceLength: maxTokens, Window: cfg.Window}
 	if err := head.ValidateWindow(); err != nil {
 		return fmt.Errorf("prompt_guard.%w", err)
 	}

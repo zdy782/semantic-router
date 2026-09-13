@@ -311,10 +311,8 @@ impl MmBertSequenceClassifier {
         let mut tokenizer =
             Tokenizer::from_file(Path::new(&options.model_path).join("tokenizer.json"))
                 .map_err(|e| errors::tokenization_error(&e.to_string()))?;
-        // The owned Core task retains its 512-token cap while sharing the
-        // upstream tokenizer's special-token and artifact-padding safeguards.
-        let max_sequence_length = options
-            .effective_limit(MAX_CLASSIFICATION_SEQ_LEN.min(config.max_position_embeddings))?;
+        let max_sequence_length =
+            classifier_context_length(config.max_position_embeddings, options.max_input_tokens)?;
         configure_classifier_tokenizer(&mut tokenizer, max_sequence_length)?;
         // Owned sessions select the standard graph deterministically. Legacy
         // environment-driven FA ranking must not change an instance's identity.
@@ -741,15 +739,21 @@ impl MmBertSequenceClassifier {
                 "token window is empty or exceeds the classifier budget",
             ));
         }
-        self.classify_inputs(
-            ids.iter().map(|&id| i64::from(id)).collect(),
-            vec![1; ids.len()],
-            1,
-            ids.len(),
-            multi_label,
-        )?
-        .pop()
-        .ok_or_else(|| errors::inference_error("classify_window", "model returned no result"))
+        let execution_len = self.execution_sequence_length.unwrap_or(ids.len());
+        if execution_len < ids.len() {
+            return Err(errors::tokenization_error(
+                "execution budget is smaller than token input",
+            ));
+        }
+        let mut input_ids = vec![i64::from(self.config.pad_token_id); execution_len];
+        let mut attention_mask = vec![0; execution_len];
+        for (position, &id) in ids.iter().enumerate() {
+            input_ids[position] = i64::from(id);
+            attention_mask[position] = 1;
+        }
+        self.classify_inputs(input_ids, attention_mask, 1, execution_len, multi_label)?
+            .pop()
+            .ok_or_else(|| errors::inference_error("classify_window", "model returned no result"))
     }
 
     fn classify_inputs(

@@ -19,7 +19,7 @@ func validateSafetySignalContracts(cfg *RouterConfig) error {
 		if err := validateClassifierSignalIdentity(classifier, i, seen); err != nil {
 			return fmt.Errorf("routing.signals.safety: %w", err)
 		}
-		if err := validateSafetyClassifier(cfg, classifier, cfg.SafetyModels.Safety); err != nil {
+		if err := validateSafetyClassifier(cfg, "safety."+rule.Name, classifier, cfg.SafetyModels.Safety); err != nil {
 			return fmt.Errorf("safety %q: %w", rule.Name, err)
 		}
 		if err := validateSafetyThreshold(rule.Threshold); err != nil {
@@ -38,7 +38,7 @@ func validateSafetySignalContracts(cfg *RouterConfig) error {
 			Name: rule.Name, Type: ClassifierSignalTypeSequenceClassifier,
 			Model: rule.Hazard.Model, Labels: rule.Hazard.Labels,
 		}
-		if err := validateSafetyClassifier(cfg, hazard, cfg.SafetyModels.Hazard); err != nil {
+		if err := validateSafetyClassifier(cfg, "safety."+rule.Name+".hazard", hazard, cfg.SafetyModels.Hazard); err != nil {
 			return fmt.Errorf("safety %q hazard: %w", rule.Name, err)
 		}
 		if err := validateSafetyThreshold(rule.Hazard.Threshold); err != nil {
@@ -51,11 +51,39 @@ func validateSafetySignalContracts(cfg *RouterConfig) error {
 	return nil
 }
 
-func validateSafetyClassifier(cfg *RouterConfig, rule ClassifierSignalRule, local SequenceHeadModelConfig) error {
+func validateSafetyClassifier(cfg *RouterConfig, consumer string, rule ClassifierSignalRule, local SequenceHeadModelConfig) error {
 	if err := validateClassifierLabels(rule); err != nil {
 		return err
 	}
-	if rule.Model != "" {
+	if decl, bound := cfg.ModelBindings[consumer]; bound {
+		deployment, exists := cfg.ModelDeployments[decl.Deployment]
+		if !exists {
+			return fmt.Errorf("unknown safety deployment %q", decl.Deployment)
+		}
+		deployment = deployment.WithDefaults()
+		if err := deployment.validate(cfg); err != nil {
+			return err
+		}
+		if err := validateTaskModelBinding(consumer, decl, deployment); err != nil {
+			return err
+		}
+		if err := validateSafetyModelBinding(cfg.SafetyRules, consumer, decl, deployment); err != nil {
+			return err
+		}
+		// Bindings replace only this recipe consumer. Keep inline label/policy
+		// declarations and validate the actual endpoint or local input budget.
+		if deployment.Provider == "http" {
+			if rule.Model == "" && local.Window != nil {
+				return fmt.Errorf("remote safety head cannot use local token windows")
+			}
+			rule.Model = deployment.ExternalModel
+			return validateSequenceClassifierSignal(cfg, rule)
+		}
+		local.ModelID, local.MaxSequenceLength = deployment.Artifact, deployment.Input.MaxTokens
+		if rule.Model != "" {
+			local.Window = nil
+		}
+	} else if rule.Model != "" {
 		return validateSequenceClassifierSignal(cfg, rule)
 	}
 	if local.ModelID == "" {

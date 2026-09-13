@@ -1,3 +1,4 @@
+use super::sequence::Distribution;
 use super::*;
 use crate::core::device::run_on_inference_pool;
 use crate::ffi::embedding::truncate_embedding_to_dimension;
@@ -8,15 +9,6 @@ pub(super) struct InputMetadata {
     pub(super) input_tokens: usize,
     pub(super) processed_tokens: usize,
     pub(super) truncated: bool,
-}
-
-#[derive(Serialize)]
-pub(super) struct Distribution {
-    class: usize,
-    confidence: f32,
-    probabilities: Vec<f32>,
-    labels: Vec<String>,
-    input: InputMetadata,
 }
 
 #[derive(Serialize)]
@@ -72,13 +64,13 @@ impl Instance {
             .map_err(|error| anyhow!("capability: {error}"))
     }
 
-    fn tokenizer(&self) -> Result<&Tokenizer> {
+    pub(super) fn tokenizer(&self) -> Result<&Tokenizer> {
         self.tokenizer
             .as_ref()
             .ok_or_else(|| anyhow!("capability: headless backbone has no task tokenizer"))
     }
 
-    fn count_tokens(&self, text: &str) -> Result<usize> {
+    pub(super) fn count_tokens(&self, text: &str) -> Result<usize> {
         Ok(self
             .tokenizer()?
             .encode(text, true)
@@ -86,7 +78,7 @@ impl Instance {
             .len())
     }
 
-    fn prepare_text<'a>(&self, text: &'a str) -> Result<(&'a str, InputMetadata)> {
+    pub(super) fn prepare_text<'a>(&self, text: &'a str) -> Result<(&'a str, InputMetadata)> {
         let count = self.count_tokens(text)?;
         let max = self.info.max_input_tokens;
         if count <= max {
@@ -140,47 +132,6 @@ impl Instance {
                 truncated: true,
             },
         ))
-    }
-
-    fn sequence_on_text(&self, text: &str, input: InputMetadata) -> Result<Distribution> {
-        let (class, confidence, probabilities) = match &self.model {
-            Model::Sequence(model) => model.classify_text_with_probabilities(text)?,
-            Model::Bert(model) => model.classify_text_with_probabilities(text)?,
-            Model::MergedBert(model) => model.classify_text_with_probabilities(text)?,
-            Model::Deberta(model) => model.classify_text_with_probabilities(text)?,
-            _ => bail!("capability: handle is not a sequence classifier"),
-        };
-        ensure!(
-            !probabilities.is_empty()
-                && probabilities
-                    .iter()
-                    .all(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0),
-            "result_invalid: invalid probability values"
-        );
-        ensure!(
-            (probabilities.iter().sum::<f32>() - 1.0).abs() <= 1e-4,
-            "result_invalid: probability distribution does not sum to one"
-        );
-        ensure!(
-            self.info.labels.len() == probabilities.len(),
-            "result_invalid: label distribution shape mismatch"
-        );
-        Ok(Distribution {
-            class,
-            confidence,
-            probabilities,
-            labels: self.info.labels.clone(),
-            input,
-        })
-    }
-
-    pub(super) fn sequence(&self, text: &str) -> Result<Distribution> {
-        ensure!(
-            self.info.task == "sequence",
-            "capability: wrong task handle"
-        );
-        let (text, input) = self.prepare_text(text)?;
-        self.sequence_on_text(text, input)
     }
 
     pub(super) fn nli(&self, premise: &str, hypothesis: &str) -> Result<Distribution> {

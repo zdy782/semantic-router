@@ -111,7 +111,7 @@ func TestVelaEmbeddingReleasePreservesCompiledRuntimeArtifacts(t *testing.T) {
 		}
 	}
 	want := []string{"config.json", "tokenizer.json"}
-	if compiledEmbeddingRuntime == "onnx" {
+	if provider, _ := config.DefaultModelExecution(true); provider == "ort" {
 		want = append(want, "onnx/layer-22/model.onnx", "onnx/layer-22/model.onnx.data", "onnx/layer-6/model.onnx", "onnx/layer-6/model.onnx.data")
 		if revisionArtifactExcluded("onnx/layer-6/model_fa_fp16.onnx", spec.ExcludePatterns) {
 			t.Fatal("AMD optimized graph was excluded")

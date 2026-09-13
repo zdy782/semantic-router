@@ -12,6 +12,7 @@ extern char* candle_instance_guard(uint64_t, const char*, const char*);
 extern char* candle_instance_generative(uint64_t, const char*, const char*, const char*, bool);
 extern char* candle_instance_load_backbone(const char*);
 extern char* candle_instance_load_sequence(const char*);
+extern char* candle_instance_load_label_scores(const char*);
 extern char* candle_instance_load_token(const char*);
 extern char* candle_instance_load_nli(const char*);
 extern char* candle_instance_load_hallucination(const char*);
@@ -95,6 +96,8 @@ func nativeInstanceLoad(options InstanceOptions, task string) (uint64, error) {
 		result = C.candle_instance_load_generative(args[0])
 	case "sequence":
 		result = C.candle_instance_load_sequence(args[0])
+	case "label_scores":
+		result = C.candle_instance_load_label_scores(args[0])
 	case "token":
 		result = C.candle_instance_load_token(args[0])
 	case "nli":

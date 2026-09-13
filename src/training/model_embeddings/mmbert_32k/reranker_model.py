@@ -10,6 +10,7 @@ from contextlib import nullcontext
 
 import numpy as np
 import torch
+from safetensors.torch import load_file, save_file
 from torch import nn
 from torch.nn import functional
 from transformers import AutoConfig, AutoModel
@@ -313,11 +314,17 @@ class Matryoshka2DReranker(nn.Module):
 
     def save_pretrained(self, save_path: str) -> None:
         """Save encoder weights, custom heads, and their ABI configuration."""
+        state = self.layer_heads.state_dict()
+        if any(tensor.dtype != torch.float32 for tensor in state.values()):
+            raise ValueError("Portable reranker heads must contain FP32 tensors")
         os.makedirs(save_path, exist_ok=True)
         self.encoder.save_pretrained(save_path)
-        torch.save(
-            self.layer_heads.state_dict(),
-            os.path.join(save_path, "classification_heads.pt"),
+        save_file(
+            {
+                name: tensor.detach().cpu().contiguous()
+                for name, tensor in state.items()
+            },
+            os.path.join(save_path, "classification_heads.safetensors"),
         )
         config = {
             "layer_indices": self.layer_indices,
@@ -336,9 +343,18 @@ class Matryoshka2DReranker(nn.Module):
     @classmethod
     def from_pretrained(cls, model_path: str, **kwargs):
         """Restore a checkpoint in evaluation mode; call train() to continue training."""
-        heads_path = os.path.join(model_path, "classification_heads.pt")
-        if not os.path.isfile(heads_path):
-            raise FileNotFoundError(f"Missing trained reranker heads: {heads_path}")
+        heads_path = os.path.join(model_path, "classification_heads.safetensors")
+        if os.path.lexists(heads_path):
+            # A present safe artifact is authoritative. Never hide corruption by
+            # falling back to an older pickle checkpoint in the same directory.
+            state = load_file(heads_path, device="cpu")
+            if any(tensor.dtype != torch.float32 for tensor in state.values()):
+                raise ValueError("Portable reranker heads must contain FP32 tensors")
+        else:
+            heads_path = os.path.join(model_path, "classification_heads.pt")
+            if not os.path.isfile(heads_path):
+                raise FileNotFoundError(f"Missing trained reranker heads: {heads_path}")
+            state = torch.load(heads_path, map_location="cpu", weights_only=True)
         config_path = os.path.join(model_path, "matryoshka_config.json")
         if os.path.exists(config_path):
             with open(config_path) as handle:
@@ -351,7 +367,6 @@ class Matryoshka2DReranker(nn.Module):
                 }
             )
         model = cls(model_path, **kwargs)
-        state = torch.load(heads_path, map_location="cpu", weights_only=True)
         model.layer_heads.load_state_dict(state, strict=True)
         logger.info("Loaded classification heads")
         return model.eval()

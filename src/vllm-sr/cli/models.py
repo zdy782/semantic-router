@@ -1255,6 +1255,13 @@ class MemoryPluginConfig(BaseModel):
     )
 
 
+class RAGRerankConfig(BaseModel):
+    """Select the number of neural-reranked vectorstore hits to inject."""
+
+    model_config = ConfigDict(extra="forbid")
+    top_k: Optional[int] = Field(default=None, ge=1)
+
+
 class RAGPluginConfig(BaseModel):
     """Configuration for RAG (Retrieval-Augmented Generation) plugin.
 
@@ -1268,6 +1275,19 @@ class RAGPluginConfig(BaseModel):
     - openai: OpenAI file_search with vector stores
     - hybrid: Multi-backend with fallback strategy
     """
+
+    rerank: Optional[RAGRerankConfig] = None
+
+    @model_validator(mode="after")
+    def validate_neural_rerank(self):
+        if self.enabled and self.rerank is not None:
+            if self.backend != "vectorstore":
+                raise ValueError(
+                    "Neural rerank requires the structured vectorstore backend"
+                )
+            if self.rerank.top_k is not None and self.rerank.top_k > (self.top_k or 5):
+                raise ValueError("rerank.top_k cannot exceed candidate top_k")
+        return self
 
     # Required: Enable RAG retrieval
     enabled: bool = Field(..., description="Enable RAG retrieval for this decision")
@@ -2202,6 +2222,14 @@ class Providers(BaseModel):
         return self.defaults.reasoning_effort
 
 
+class PairScorerSelection(BaseModel):
+    """An immutable trained exit; zero resolves to actual full depth/width."""
+
+    model_config = ConfigDict(extra="forbid")
+    layer: int = Field(default=0, ge=0)
+    dimension: int = Field(default=0, ge=0)
+
+
 class ModelBinding(BaseModel):
     """A recipe-owned use of a router model deployment."""
 
@@ -2212,6 +2240,7 @@ class ModelBinding(BaseModel):
     adapter: str
     head: Optional[str] = None
     mapping_path: Optional[str] = None
+    pair_scorer: Optional[PairScorerSelection] = None
 
 
 def _validate_unbound_classifier_selectors(profile):

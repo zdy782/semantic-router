@@ -6,6 +6,7 @@ runtime applies FP32 masked mean, dimension truncation, then L2 normalization.
 Reranker graphs return one [batch, 1] logit from an independent trained head.
 The source must declare representation_contract; no old contract is guessed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,6 +42,7 @@ from mmbert_32k.representation_outputs import PhysicalPrefixEncoder  # noqa: E40
 from mmbert_32k.reranker_model import Matryoshka2DReranker  # noqa: E402
 
 MIN_CONTEXT_TOKENS = 2
+PAIR_SCORER_METADATA_KEY = "semantic_router.pair_scorer"
 
 
 class RerankerExit(nn.Module):
@@ -49,10 +51,63 @@ class RerankerExit(nn.Module):
     def __init__(self, encoder, head, dimension: int):
         super().__init__()
         self.encoder, self.head, self.dimension = encoder, head.float(), dimension
+        self.pair_scorer_contract()
+
+    def pair_scorer_contract(self) -> dict:
+        """Bind metadata to the actual physical prefix and selected head."""
+        if not isinstance(self.encoder, PhysicalPrefixEncoder):
+            raise ValueError("Reranker metadata requires a physical encoder prefix")
+        backbone = self.encoder.encoder
+        layer = len(backbone.layers)
+        if layer < 1 or layer != backbone.config.num_hidden_layers:
+            raise ValueError("Reranker physical depth differs from its configuration")
+        linear = [
+            module for module in self.head.modules() if isinstance(module, nn.Linear)
+        ]
+        if (
+            type(self.dimension) is not int
+            or not 1 <= self.dimension <= backbone.config.hidden_size
+            or not linear
+            or linear[0].in_features != self.dimension
+            or linear[-1].out_features != 1
+        ):
+            raise ValueError("Reranker dimension must match the actual scalar head")
+        return {
+            "version": 1,
+            "layer": layer,
+            "dimension": self.dimension,
+            "score_type": "relevance_logit",
+        }
 
     def forward(self, input_ids, attention_mask):
         hidden = self.encoder(input_ids, attention_mask)
         return self.head(hidden[:, 0, : self.dimension].float())
+
+
+def validate_graph_metadata(graph, reference) -> None:
+    """Validate existing semantic metadata without relabeling the artifact."""
+    entries = [
+        item.value
+        for item in graph.metadata_props
+        if item.key == PAIR_SCORER_METADATA_KEY
+    ]
+    if not isinstance(reference, RerankerExit):
+        if entries:
+            raise ValueError("Embedding graph must not declare pair scorer metadata")
+        return
+    expected = reference.pair_scorer_contract()
+    if len(entries) != 1:
+        raise ValueError(
+            "Reranker graph requires exactly one pair scorer metadata entry"
+        )
+    try:
+        actual = json.loads(entries[0])
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid pair scorer metadata JSON") from error
+    if actual != expected or any(
+        type(actual[key]) is not type(value) for key, value in expected.items()
+    ):
+        raise ValueError("Pair scorer metadata differs from the actual selected exit")
 
 
 def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
@@ -87,6 +142,12 @@ def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
     )
     graph = onnx.load(str(path), load_external_data=False)
     strip_debug_annotations(graph)
+    if isinstance(model, RerankerExit):
+        graph.metadata_props.add(
+            key=PAIR_SCORER_METADATA_KEY,
+            value=json.dumps(model.pair_scorer_contract(), sort_keys=True),
+        )
+    validate_graph_metadata(graph, model)
     onnx.save_model(graph, str(path))
     onnx.checker.check_model(str(path))
     return {
@@ -102,6 +163,7 @@ def verify_graph(reference, config, path, *, lengths, dimensions, task, precisio
     """Compare portable graphs with native FP32 weights, including padded batches."""
     import onnxruntime as ort  # noqa: PLC0415 -- optional validation dependency
 
+    validate_graph_metadata(onnx.load(str(path), load_external_data=False), reference)
     options = ort.SessionOptions()
     options.intra_op_num_threads = 8
     session = ort.InferenceSession(
@@ -366,6 +428,7 @@ def main():
             relative_path = str(path.relative_to(output))
             if path.exists() and (args.resume or args.verify_only):
                 graph = onnx.load(str(path), load_external_data=False)
+                validate_graph_metadata(graph, reference)
                 onnx.checker.check_model(str(path))
                 result = {
                     "graph_sha256": sha256(path),

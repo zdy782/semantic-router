@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -649,14 +650,19 @@ func assertTutorialSidebarTaxonomy(t *testing.T, root string) {
 func assertTutorialFilesContainRequiredSections(t *testing.T, root string) {
 	t.Helper()
 	tutorialRoot := filepath.Join(root, repoRel("website", "docs", "tutorials"))
-	err := filepath.Walk(tutorialRoot, func(path string, info os.FileInfo, walkErr error) error {
+	files, openErr := os.OpenRoot(tutorialRoot)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer files.Close()
+	err := fs.WalkDir(files.FS(), ".", func(path string, info fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
-		contentBytes, err := os.ReadFile(path)
+		contentBytes, err := files.ReadFile(path)
 		if err != nil {
 			return err
 		}
@@ -696,14 +702,19 @@ func assertMarkdownTreeDoesNotContainAny(t *testing.T, root string, forbidden []
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return
 	}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+	files, openErr := os.OpenRoot(root)
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer files.Close()
+	err := fs.WalkDir(files.FS(), ".", func(path string, info fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if info.IsDir() || filepath.Ext(path) != ".md" {
 			return nil
 		}
-		contentBytes, err := os.ReadFile(path)
+		contentBytes, err := files.ReadFile(path)
 		if err != nil {
 			return err
 		}

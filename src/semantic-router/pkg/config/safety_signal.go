@@ -72,31 +72,34 @@ func (c SequenceHeadModelConfig) InputLimit() int {
 	return c.MaxSequenceLength
 }
 
-// NeedsLocalSafetyHeadForRouting accounts for recipe reachability and external
-// head overrides. The two artifacts are provisioned independently.
+// NeedsLocalSafetyHeadForRouting reports whether the implicit module artifact
+// is needed. Explicit recipe deployments are provisioned from their bindings.
+// The two module artifacts are provisioned independently.
 func (c *RouterConfig) NeedsLocalSafetyHeadForRouting(hazard bool) bool {
 	if c == nil {
 		return false
 	}
-	needsHead := func(signals Signals, decisions []Decision, projections Projections) bool {
+	needsHead := func(signals Signals, decisions []Decision, projections Projections, bindings map[string]ModelBinding) bool {
 		if !decisionsUseSignalType(decisions, projections, SignalTypeSafety) {
 			return false
 		}
 		for _, rule := range signals.SafetyRules {
-			if !hazard && rule.Model == "" {
+			_, binaryBound := bindings["safety."+rule.Name]
+			_, hazardBound := bindings["safety."+rule.Name+".hazard"]
+			if !hazard && rule.Model == "" && !binaryBound {
 				return true
 			}
-			if hazard && rule.Hazard != nil && rule.Hazard.Model == "" {
+			if hazard && rule.Hazard != nil && rule.Hazard.Model == "" && !hazardBound {
 				return true
 			}
 		}
 		return false
 	}
 	if c.RoutingScope != "" {
-		return needsHead(c.Signals, c.Decisions, c.Projections)
+		return needsHead(c.Signals, c.Decisions, c.Projections, c.ModelBindings)
 	}
 	for _, recipe := range c.ReachableRoutingRecipes() {
-		if recipe != nil && needsHead(recipe.Profile.Signals, recipe.Profile.Decisions, recipe.Profile.Projections) {
+		if recipe != nil && needsHead(recipe.Profile.Signals, recipe.Profile.Decisions, recipe.Profile.Projections, recipe.Profile.ModelBindings) {
 			return true
 		}
 	}

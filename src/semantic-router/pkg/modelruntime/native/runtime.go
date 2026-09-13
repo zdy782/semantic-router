@@ -28,14 +28,17 @@ import (
 // Runtime owns one generation's preparation metadata. Pool can be shared with
 // the preceding generation; each returned task owns an independent reference.
 type Runtime struct {
-	Pool      *binding.Pool
-	registry  *binding.Registry
-	sequence  *binding.Task[string, tasks.LabelDistribution]
-	tokens    *binding.Task[string, tasks.TokenClassificationResult]
-	grounded  *binding.Task[tasks.GroundedTextRequest, tasks.TokenClassificationResult]
-	pair      *binding.Task[tasks.TextPairRequest, tasks.LabelDistribution]
-	mu        sync.Mutex
-	artifacts map[string]string
+	Pool            *binding.Pool
+	registry        *binding.Registry
+	sequence        *binding.Task[string, tasks.LabelDistribution]
+	scores          *binding.Task[string, tasks.LabelScores]
+	sequenceWindows *binding.Task[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution]
+	scoreWindows    *binding.Task[tasks.TextWindowsRequest, tasks.WindowedLabelScores]
+	tokens          *binding.Task[string, tasks.TokenClassificationResult]
+	grounded        *binding.Task[tasks.GroundedTextRequest, tasks.TokenClassificationResult]
+	pair            *binding.Task[tasks.TextPairRequest, tasks.LabelDistribution]
+	mu              sync.Mutex
+	artifacts       map[string]string
 }
 
 func New(pool *binding.Pool) *Runtime {
@@ -44,6 +47,9 @@ func New(pool *binding.Pool) *Runtime {
 	}
 	registry := binding.NewRegistry(diagnostics.Observe)
 	sequence, _ := binding.Register(registry, config.RemoteClassifierContractLabelDistribution, validateText, validateDistribution)
+	scores, _ := binding.Register(registry, config.RemoteClassifierContractLabelScores, validateText, func(_ string, result tasks.LabelScores) error { return tasks.ValidateLabelScores(result.Scores) })
+	sequenceWindows, _ := binding.RegisterTask(registry, "windowed_label_distribution.v1", config.RemoteClassifierContractLabelDistribution, validateWindowInput, validateWindowDistribution)
+	scoreWindows, _ := binding.RegisterTask(registry, "windowed_label_scores.v1", config.RemoteClassifierContractLabelScores, validateWindowInput, validateWindowScores)
 	tokens, _ := binding.Register(registry, config.RemoteClassifierContractTokenSpans, validateText, validateSpans)
 	grounded, _ := binding.RegisterTask(registry, "grounded_text.v1", config.RemoteClassifierContractTokenSpans, func(input tasks.GroundedTextRequest) error {
 		if err := validateText(input.Context); err != nil {
@@ -61,7 +67,7 @@ func New(pool *binding.Pool) *Runtime {
 	}, func(_ tasks.TextPairRequest, output tasks.LabelDistribution) error {
 		return validateDistribution("", output)
 	})
-	return &Runtime{Pool: pool, registry: registry, sequence: sequence, tokens: tokens, grounded: grounded, pair: pair, artifacts: make(map[string]string)}
+	return &Runtime{Pool: pool, registry: registry, sequence: sequence, scores: scores, sequenceWindows: sequenceWindows, scoreWindows: scoreWindows, tokens: tokens, grounded: grounded, pair: pair, artifacts: make(map[string]string)}
 }
 
 func validateText(text string) error {

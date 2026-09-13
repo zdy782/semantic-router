@@ -50,8 +50,8 @@ func (p *EmbeddingProvider) RepresentationIdentity(options embedding.Options, in
 			return embedding.ContentIdentity{}, err
 		}
 		var descriptor embedding.RuntimeDescriptor
-		if err := json.Unmarshal([]byte(raw), &descriptor); err != nil {
-			return embedding.ContentIdentity{}, err
+		if decodeErr := json.Unmarshal([]byte(raw), &descriptor); decodeErr != nil {
+			return embedding.ContentIdentity{}, decodeErr
 		}
 		descriptor.ExecutionPolicy = p.executionPolicy
 		encoded, err := json.Marshal(descriptor)

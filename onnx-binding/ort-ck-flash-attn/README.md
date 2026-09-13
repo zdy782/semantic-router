@@ -28,6 +28,21 @@ Change `GPU_TARGETS` when compiling for a supported architecture other than
 the default `gfx942`. The shared library is written to
 `build/libort_ck_flash_attn.so`.
 
+The build pins the ORT 1.22.1 C header and checks its SHA256, including when
+using an existing header directory. `custom_op_contract` is a host-only test
+of validation, failure returns, and concurrent registration; `fa_vs_sdpa`
+requires a GPU. Both Router ROCm images build the library from source and
+install `/usr/local/lib/libort_ck_flash_attn.so.1`.
+
+The custom operator requires FP16 Q/K/V with shape `[B,H,S,D]`, matching
+batch/head dimensions, and D of 32, 64, or 128. An optional nonempty bias must
+be `[B,1|H,1|Sq,Sk]`; empty FP16 bias tensors mean no bias. Tensor element
+counts must fit signed int32 dispatch indexing. `scale` must be positive and
+finite, and both window attributes must be explicit integers: `-1` means
+unlimited. Missing attributes, invalid tensors, ORT API failures, and HIP
+launch errors return an error to the session. Registration shares an immutable
+operator/domain for the lifetime managed by ORT's library loader.
+
 ## Rewrite a model
 
 The rewriter requires the `numpy` and `onnx` Python packages:
@@ -135,7 +150,13 @@ execution provider nor a model artifact.
 
 ## Load the custom op
 
-The Semantic Router ONNX binding reads `ORT_CK_FLASH_ATTN_LIB`:
+Owned Router deployments select `custom_ops_profile: ck_flash_attention` with
+the ORT ROCm provider and native graph precision. They load the fixed installed
+library path and include its SHA256 in session identity. The profile does not
+convert model weights or certify a model's numerical accuracy. CPU EP fallback
+is disabled by default; provider listings alone do not prove GPU execution.
+
+The legacy binding's environment-based registration remains separate:
 
 ```bash
 export ORT_CK_FLASH_ATTN_LIB="$PWD/build/libort_ck_flash_attn.so"
@@ -151,7 +172,7 @@ options.register_custom_ops_library("build/libort_ck_flash_attn.so")
 session = ort.InferenceSession(
     "model_fa_fp16.onnx",
     options,
-    providers=["ROCmExecutionProvider"],
+    providers=["ROCMExecutionProvider"],
 )
 ```
 

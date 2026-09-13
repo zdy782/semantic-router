@@ -116,7 +116,7 @@ func buildJailbreakDependencies(cfg *config.RouterConfig, jailbreakMapping *Jail
 			// No reachable model consumer loaded a mapping for this recipe.
 			return nil, nil, nil
 		}
-		backend, err := newWindowedJailbreakBackend(cfg.PromptGuard, jailbreakMapping)
+		backend, err := newWindowedJailbreakBackend(cfg.PromptGuard, jailbreakMapping, models...)
 		return backend, backend, err
 	}
 	if len(models) > 0 && cfg.PromptGuard.Protocol == "" && cfg.PromptGuard.Backend == nil {

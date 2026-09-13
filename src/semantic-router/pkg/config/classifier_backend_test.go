@@ -132,9 +132,6 @@ func TestValidateCategoryModelBackend(t *testing.T) {
 		{name: "invalid endpoint protocol", mutate: func(cfg *RouterConfig) {
 			cfg.ExternalModels[0].ModelEndpoint.Protocol = "ftp"
 		}, want: "http or https"},
-		{name: "missing external model name", mutate: func(cfg *RouterConfig) {
-			cfg.ExternalModels[0].ModelName = ""
-		}, want: "llm_model_name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,8 +247,8 @@ global:
           variant: modernbert
           use_mmbert_32k: true
 `)
-	if _, err := ParseYAMLBytes(conflictingOverride); err == nil || !strings.Contains(err.Error(), "conflicts") {
-		t.Fatalf("expected explicit canonical/legacy conflict, got %v", err)
+	if _, parseErr := ParseYAMLBytes(conflictingOverride); parseErr == nil || !strings.Contains(parseErr.Error(), "conflicts") {
+		t.Fatalf("expected explicit canonical/legacy conflict, got %v", parseErr)
 	}
 
 	agreeingOverride := []byte(`
@@ -609,5 +606,18 @@ func TestIsPIIClassifierEnabledAcceptsRemoteBackend(t *testing.T) {
 	cfg.PIIModel.Backend = nil
 	if cfg.IsPIIClassifierEnabled() {
 		t.Fatal("PII config with neither model_id nor backend reported enabled")
+	}
+}
+
+func TestFixedHTTPClassifierDoesNotRequireAnUnusedModelSelector(t *testing.T) {
+	cfg := categoryBackendTestConfig(&RemoteClassifierBackend{Protocol: RemoteClassifierProtocolHTTPClassify, Model: "named-category"})
+	cfg.ExternalModels[0].ModelName = ""
+	if err := ValidateCategoryModelBackend(cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ExternalModels[0].ModelRole = ModelRoleGuardrail
+	backend := &RemoteClassifierBackend{Protocol: RemoteClassifierProtocolHTTPChat, Model: "named-category", Contract: RemoteClassifierContractLabelDecision}
+	if _, err := ResolveRemoteClassifierBackend(cfg, backend, ModelRoleGuardrail, RemoteClassifierContractLabelDecision); err == nil {
+		t.Fatal("chat request accepted without its model selector")
 	}
 }

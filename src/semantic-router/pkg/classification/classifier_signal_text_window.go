@@ -236,6 +236,11 @@ func (c *Classifier) hasLongContextClassifier(signalType string) bool {
 	if c == nil || c.Config == nil {
 		return false
 	}
+	consumer := classifierInputConsumer(signalType)
+	if binding, exists := c.Config.ModelBindings[consumer]; exists {
+		deployment, exists := c.Config.ModelDeployments[binding.Deployment]
+		return exists && deployment.Provider != "http" && deployment.Input.MaxTokens > 512
+	}
 	switch signalType {
 	case config.SignalTypeEmbedding:
 		return c.Config.EmbeddingConfig.FullContext
@@ -288,4 +293,22 @@ func (c *Classifier) jailbreakModelInputs(text string) []string {
 		return []string{text}
 	}
 	return c.jailbreakInputs(text)
+}
+
+func classifierInputConsumer(signalType string) string {
+	switch signalType {
+	case config.SignalTypeDomain:
+		return "domain_classifier"
+	case config.SignalTypeFactCheck:
+		return "fact_check_classifier"
+	case config.SignalTypeUserFeedback:
+		return "feedback_detector"
+	case config.SignalTypePII:
+		return "pii_classifier"
+	case config.SignalTypeJailbreak:
+		return "prompt_guard"
+	case config.SignalTypeModality:
+		return "modality_detector"
+	}
+	return ""
 }

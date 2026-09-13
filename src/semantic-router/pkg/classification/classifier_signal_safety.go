@@ -19,30 +19,6 @@ type safetyDetector struct {
 	hazardKey string
 }
 
-// A recipe owns one instance per model contract, even when several rules use
-// different thresholds over that head. Cleanup is safe through every consumer.
-type sharedSafetyHead struct {
-	labelClassifier
-	closeOnce sync.Once
-	closeErr  error
-}
-
-func (s *sharedSafetyHead) Close() error {
-	s.closeOnce.Do(func() {
-		if closer, ok := s.labelClassifier.(interface{ Close() error }); ok {
-			s.closeErr = closer.Close()
-		}
-	})
-	return s.closeErr
-}
-
-func (s *sharedSafetyHead) Initialize() error {
-	if initializer, ok := s.labelClassifier.(interface{ Initialize() error }); ok {
-		return initializer.Initialize()
-	}
-	return nil
-}
-
 func (s *safetyDetector) Close() error {
 	var failures []error
 	for _, classifier := range []labelClassifier{s.binary, s.hazard} {
@@ -57,19 +33,22 @@ func (s *safetyDetector) Close() error {
 // the prepared full-distribution classifier interface.
 func (b *classifierOptionBuilder) buildSafetyClassifiersOption() (option, error) {
 	models := make(map[string]*safetyDetector, len(b.cfg.SafetyRules))
-	heads := make(map[string]*sharedSafetyHead)
-	prepare := func(consumer, model string, labels []string, multiLabel bool) (labelClassifier, string, error) {
-		key := b.safetyModelKey(model, labels, multiLabel)
-		if existing := heads[key]; existing != nil {
-			return existing, key, nil
-		}
-		prepared, err := b.prepareSafetyClassifier(consumer, model, labels, multiLabel)
+	runtime := b.models
+	if runtime == nil {
+		var err error
+		runtime, err = newClassifierModelRuntime(b.cfg, nil)
 		if err != nil {
-			return nil, key, err
+			return nil, err
 		}
-		shared := &sharedSafetyHead{labelClassifier: prepared}
-		heads[key] = shared
-		return shared, key, nil
+	}
+	prepare := func(consumer, model string, labels []string, multiLabel bool) (labelClassifier, string, error) {
+		spec, window, err := b.safetySpec(runtime, consumer, model, multiLabel)
+		if err != nil {
+			return nil, "", err
+		}
+		key := safetyModelKey(spec, window, labels)
+		prepared, err := b.prepareSafetyClassifier(runtime, spec, window, labels, multiLabel)
+		return prepared, key, err
 	}
 	for _, rule := range b.cfg.SafetyRules {
 		detector := &safetyDetector{}
@@ -89,38 +68,63 @@ func (b *classifierOptionBuilder) buildSafetyClassifiersOption() (option, error)
 	return func(c *Classifier) { c.safetyClassifiers = models }, nil
 }
 
-func (b *classifierOptionBuilder) prepareSafetyClassifier(consumer, model string, labels []string, multiLabel bool) (labelClassifier, error) {
-	if model == "" {
-		local := b.cfg.SafetyModels.Safety
-		if multiLabel {
-			local = b.cfg.SafetyModels.Hazard
+func (b *classifierOptionBuilder) safetySpec(models *classifierModelRuntime, consumer, model string, multiLabel bool) (config.ResolvedModelBinding, *config.SequenceHeadWindowConfig, error) {
+	local := b.cfg.SafetyModels.Safety
+	contract := config.RemoteClassifierContractLabelDistribution
+	if multiLabel {
+		local = b.cfg.SafetyModels.Hazard
+		contract = config.RemoteClassifierContractLabelScores
+	}
+	var spec config.ResolvedModelBinding
+	if model != "" {
+		spec = models.remoteSpec(consumer, &config.RemoteClassifierBackend{Model: model, Protocol: config.RemoteClassifierProtocolHTTPClassify, Contract: contract})
+	} else {
+		spec = models.localSpec(consumer, local.ModelID, "modernbert", contract, local.UseCPU, local.MaxSequenceLength)
+		if _, declared := models.plan.Lookup(models.recipe, consumer); !declared {
+			deployment := "safety"
+			if multiLabel {
+				deployment = "hazard"
+			}
+			spec.Binding.Deployment = deployment
+			spec.Admission = b.cfg.ModelAdmission[deployment]
 		}
-		return newNativeSafetyClassifier(local, labels, multiLabel)
 	}
-	rule := config.ClassifierSignalRule{Name: consumer, Type: config.ClassifierSignalTypeSequenceClassifier, Model: model, Labels: labels}
-	classifier, err := newSequenceLabelClassifier(rule, b.cfg.FindExternalModelByName(model))
-	if err == nil && multiLabel {
-		classifier.(*sequenceLabelClassifier).backend.multiLabel = true
+	if spec.Binding.Contract != contract {
+		return spec, nil, fmt.Errorf("safety head has incompatible result contract")
 	}
-	return classifier, err
+	var window *config.SequenceHeadWindowConfig
+	if model == "" && local.Window != nil {
+		copy := *local.Window
+		window = &copy
+	}
+	if spec.Deployment.Provider == "http" && window != nil {
+		return spec, nil, fmt.Errorf("remote safety head cannot use local token windows")
+	}
+	return spec, window, nil
 }
 
-func (b *classifierOptionBuilder) safetyModelKey(model string, labels []string, multiLabel bool) string {
-	local := config.SequenceHeadModelConfig{}
-	if model == "" {
-		local = b.cfg.SafetyModels.Safety
-		if multiLabel {
-			local = b.cfg.SafetyModels.Hazard
+func (b *classifierOptionBuilder) prepareSafetyClassifier(models *classifierModelRuntime, spec config.ResolvedModelBinding, window *config.SequenceHeadWindowConfig, labels []string, multiLabel bool) (labelClassifier, error) {
+	if spec.Deployment.Provider == "http" {
+		external, err := config.ResolveRemoteClassifierBackend(b.cfg, &config.RemoteClassifierBackend{Model: spec.Deployment.ExternalModel, Protocol: spec.Binding.Adapter, Contract: spec.Binding.Contract}, config.ModelRoleClassification, spec.Binding.Contract)
+		if err != nil {
+			return nil, err
 		}
+		return prepareRemoteSafetyClassifier(models, spec, external, labels, multiLabel)
 	}
-	// Identical model/label contracts can share one call within this request.
-	// Consumer identity and the configured thresholds remain separate.
+	return newOwnedSafetyClassifier(models, spec, labels, multiLabel, window), nil
+}
+
+func safetyModelKey(spec config.ResolvedModelBinding, window *config.SequenceHeadWindowConfig, labels []string) string {
+	// Share request results only for the same effective execution and vector
+	// contract; each consumer still owns a separate typed binding handle.
+	computation := spec.Binding
+	computation.Deployment = "" // Catalog/consumer names do not change a forward pass.
 	key, _ := json.Marshal(struct {
-		Model      string
-		Local      config.SequenceHeadModelConfig
+		Deployment config.ModelDeployment
+		Binding    config.ModelBinding
+		Window     *config.SequenceHeadWindowConfig
 		Labels     []string
-		MultiLabel bool
-	}{model, local, labels, multiLabel})
+	}{spec.Deployment.WithDefaults(), computation, window, labels})
 	return string(key)
 }
 

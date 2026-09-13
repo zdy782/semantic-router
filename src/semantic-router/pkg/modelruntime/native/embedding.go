@@ -281,7 +281,7 @@ func (r *Runtime) Embedding(ctx context.Context, spec config.ResolvedModelBindin
 		MaxTokens int
 		Overflow  string
 	}{
-		capability.Precision, capability.Limits.EffectiveTokens(), string(capability.Limits.Overflow),
+		capability.Precision, capability.Limits.EffectiveTokens(), capability.Limits.Overflow,
 	})
 	provider.executionPolicy = string(policy)
 	if contentIdentity {

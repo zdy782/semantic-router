@@ -3,79 +3,104 @@ package classification
 import (
 	"context"
 	"errors"
-	"sync"
+	"io"
 	"sync/atomic"
 	"testing"
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/admission"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/binding"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/modelruntime/tasks"
 )
 
 type safetyClosingHead struct{ closed atomic.Int32 }
 
-func (s *safetyClosingHead) Classify(context.Context, string) (labelClassification, error) {
-	return labelClassification{}, nil
-}
 func (s *safetyClosingHead) Close() error { s.closed.Add(1); return nil }
 
-func TestSafetySharedModelOwnership(t *testing.T) {
-	base := &safetyClosingHead{}
-	shared := &sharedSafetyHead{labelClassifier: base}
-	first := &safetyDetector{binary: shared}
-	second := &safetyDetector{binary: shared}
-	var workers sync.WaitGroup
-	for range 10 {
-		workers.Add(1)
-		go func() { defer workers.Done(); _ = first.Close(); _ = second.Close() }()
+func TestSafetyTypedBindingsSharePhysicalOwnershipAndAdmission(t *testing.T) {
+	pool := binding.NewPool()
+	physical := &safetyClosingHead{}
+	gate := admission.NewSemaphore(1, 0, 0, admission.Overflow("shed"))
+	calls := 0
+	loads := 0
+	task, registerErr := binding.Register(binding.NewRegistry(), config.RemoteClassifierContractLabelScores, func(string) error { return nil }, func(_ string, out tasks.LabelScores) error { return tasks.ValidateLabelScores(out.Scores) })
+	if registerErr != nil {
+		t.Fatal(registerErr)
 	}
-	workers.Wait()
-	if base.closed.Load() != 1 {
-		t.Fatalf("model closed %d times", base.closed.Load())
+	prepare := func(name string) func(context.Context) (*binding.Resolved[string, tasks.LabelScores], error) {
+		return func(ctx context.Context) (*binding.Resolved[string, tasks.LabelScores], error) {
+			resource, err := pool.Acquire(ctx, binding.ResourceIdentity{Artifact: "same-artifact", Provider: "candle", Device: "cpu", Precision: "fp32"}, "one", gate, func(context.Context) (io.Closer, error) { loads++; return physical, nil })
+			if err != nil {
+				return nil, err
+			}
+			return task.Resolve(binding.Identity{Recipe: "default", Name: name, Deployment: "hazard", Contract: config.RemoteClassifierContractLabelScores, Adapter: "modernbert"}, binding.Capability{Contract: config.RemoteClassifierContractLabelScores, Provider: "candle", Device: "cpu", Precision: "fp32", Labels: []string{"a", "b"}}, resource, func(context.Context, io.Closer, string) (tasks.LabelScores, error) {
+				calls++
+				return tasks.LabelScores{Scores: []float32{.8, .9}}, nil
+			})
+		}
 	}
-}
-
-func TestSafetyAdmissionRejectsBeforeNativeInference(t *testing.T) {
-	cfg := &config.RouterConfig{}
-	cfg.SafetyModels.Safety.ModelID = t.TempDir()
-	cfg.SafetyRules = []config.SafetyRule{{Name: "risk", Threshold: 0.5}}
-	cfg.ModelAdmission = map[string]config.AdmissionConfig{
-		"safety": {MaxConcurrency: 1, OnOverflow: "shed"},
+	makeHead := func(name string) *ownedLabelTask[string, tasks.LabelScores] {
+		return &ownedLabelTask[string, tasks.LabelScores]{labels: []string{"a", "b"}, recipe: "default", prepare: prepare(name), input: func(s string) string { return s }, convert: func(out tasks.LabelScores) (labelClassification, error) {
+			scores, e := namedLabelScores([]string{"a", "b"}, out.Scores)
+			return labelClassification{Scores: scores}, e
+		}}
 	}
-	option, err := newClassifierOptionBuilder(cfg, nil).buildSafetyClassifiersOption()
+	first, second := makeHead("first"), makeHead("second")
+	for _, head := range []*ownedLabelTask[string, tasks.LabelScores]{first, second} {
+		if err := head.Initialize(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if loads != 1 {
+		t.Fatalf("loaded identical artifact %d times", loads)
+	}
+	release, err := gate.Acquire(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Classifier{Config: cfg}
-	option(c)
-	c.applyAdmissionGates()
-	ticket, err := c.admissionRegistry.For("safety").Acquire(context.Background())
-	if err != nil {
+	if _, err := first.Classify(context.Background(), "x"); !errors.Is(err, admission.ErrQueueFull) || calls != 0 {
+		t.Fatalf("admission missed: %v calls=%d", err, calls)
+	}
+	release()
+	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	defer ticket()
-	_, err = c.safetyClassifiers["risk"].binary.Classify(context.Background(), "unscored text")
-	if !errors.Is(err, admission.ErrQueueFull) {
-		t.Fatalf("safety ignored its full deployment gate: %v", err)
+	if physical.closed.Load() != 0 {
+		t.Fatal("first task closed sibling physical resource")
+	}
+	if _, err := second.Classify(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Classify(context.Background(), "x"); !errors.Is(err, binding.ErrClosed) {
+		t.Fatalf("closed task remained usable: %v", err)
+	}
+	_ = second.Close()
+	_ = second.Close()
+	if physical.closed.Load() != 1 {
+		t.Fatal("physical resource did not close once")
 	}
 }
 
-func TestSafetyBuildDefersNativeInitializationAndSharesRules(t *testing.T) {
+func TestSafetyBuildDefersNativeInitializationWithDistinctConsumerHandles(t *testing.T) {
 	cfg := &config.RouterConfig{}
 	cfg.SafetyModels = config.SafetyModelsConfig{Safety: config.SequenceHeadModelConfig{ModelID: t.TempDir(), UseCPU: true, MaxSequenceLength: 32768}}
-	cfg.SafetyRules = []config.SafetyRule{{Name: "a", Threshold: 0.4}, {Name: "b", Threshold: 0.8}}
+	cfg.SafetyRules = []config.SafetyRule{{Name: "a", Threshold: .4}, {Name: "b", Threshold: .8}}
 	builder := newClassifierOptionBuilder(cfg, nil)
-	option, err := builder.buildSafetyClassifiersOption()
+	apply, err := builder.buildSafetyClassifiersOption()
 	if err != nil {
 		t.Fatalf("build loaded missing weights: %v", err)
 	}
 	classifier := &Classifier{Config: cfg}
-	option(classifier)
+	apply(classifier)
 	a, b := classifier.safetyClassifiers["a"], classifier.safetyClassifiers["b"]
-	if a.binary != b.binary {
-		t.Fatal("identical local heads are loaded per rule")
+	if a.binary == b.binary {
+		t.Fatal("consumers share a typed task identity")
+	}
+	if a.binaryKey != b.binaryKey {
+		t.Fatal("same effective computation cannot share request results")
 	}
 	if err := classifier.initializeSafetyClassifiers(); err == nil {
-		t.Fatal("runtime initialization accepted missing weights")
+		t.Fatal("initialization accepted missing weights")
 	}
 	if err := classifier.Close(); err != nil {
 		t.Fatal(err)

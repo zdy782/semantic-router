@@ -113,8 +113,8 @@ func (r *OpenAIRouter) selectWithSelector(
 		)
 		return selected, string(method), nil
 	}
-	if err := selection.ValidateSelectionResult(selCtx, result); err != nil {
-		logging.Warnf("[ModelSelection] Invalid selection result: %v, using default candidate", err)
+	if validationErr := selection.ValidateSelectionResult(selCtx, result); validationErr != nil {
+		logging.Warnf("[ModelSelection] Invalid selection result: %v, using default candidate", validationErr)
 		selected := r.recordSelectionFallback(
 			method,
 			selectionFallbackInvalidResult,

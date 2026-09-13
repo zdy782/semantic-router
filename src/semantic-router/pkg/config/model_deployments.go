@@ -11,18 +11,19 @@ import (
 // inference service. Artifact aliases and module policy remain in the catalog;
 // recipe bindings select the adapter and head separately from execution.
 type ModelDeployment struct {
-	Artifact      string           `yaml:"artifact,omitempty" json:"artifact,omitempty"`
-	Revision      string           `yaml:"revision,omitempty" json:"revision,omitempty"`
-	ExternalModel string           `yaml:"external_model,omitempty" json:"external_model,omitempty"`
-	Provider      string           `yaml:"provider" json:"provider"`
-	Device        string           `yaml:"device,omitempty" json:"device,omitempty"`
-	Precision     string           `yaml:"precision,omitempty" json:"precision,omitempty"`
-	Input         ModelInputBudget `yaml:"input,omitempty" json:"input,omitempty"`
+	Artifact         string           `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Revision         string           `yaml:"revision,omitempty" json:"revision,omitempty"`
+	ExternalModel    string           `yaml:"external_model,omitempty" json:"external_model,omitempty"`
+	Provider         string           `yaml:"provider" json:"provider"`
+	Device           string           `yaml:"device,omitempty" json:"device,omitempty"`
+	Precision        string           `yaml:"precision,omitempty" json:"precision,omitempty"`
+	CustomOpsProfile string           `yaml:"custom_ops_profile,omitempty" json:"custom_ops_profile,omitempty"`
+	Input            ModelInputBudget `yaml:"input,omitempty" json:"input,omitempty"`
 }
 
 // ModelInputBudget is a deployment restriction, not an advertised model
 // capability. The provider additionally enforces its actual task/tokenizer
-// limit. No setting here enables long-context classification.
+// limit. An explicit larger budget requires a checkpoint with that capacity.
 type ModelInputBudget struct {
 	MaxTokens int    `yaml:"max_tokens,omitempty" json:"max_tokens,omitempty"`
 	Overflow  string `yaml:"overflow,omitempty" json:"overflow,omitempty"`
@@ -31,11 +32,12 @@ type ModelInputBudget struct {
 // ModelBinding is a recipe-local use of a deployment. Head and MappingPath
 // describe task interpretation and never imply physical resource compatibility.
 type ModelBinding struct {
-	Deployment  string `yaml:"deployment" json:"deployment"`
-	Contract    string `yaml:"contract" json:"contract"`
-	Adapter     string `yaml:"adapter" json:"adapter"`
-	Head        string `yaml:"head,omitempty" json:"head,omitempty"`
-	MappingPath string `yaml:"mapping_path,omitempty" json:"mapping_path,omitempty"`
+	Deployment  string               `yaml:"deployment" json:"deployment"`
+	Contract    string               `yaml:"contract" json:"contract"`
+	Adapter     string               `yaml:"adapter" json:"adapter"`
+	Head        string               `yaml:"head,omitempty" json:"head,omitempty"`
+	MappingPath string               `yaml:"mapping_path,omitempty" json:"mapping_path,omitempty"`
+	PairScorer  *PairScorerSelection `yaml:"pair_scorer,omitempty" json:"pair_scorer,omitempty"`
 }
 
 // ResolvedModelBinding is immutable preparation input, containing no engine
@@ -64,6 +66,9 @@ func (p *ModelBindingPlan) Lookup(recipe RecipeName, name string) (ResolvedModel
 }
 
 func (d ModelDeployment) WithDefaults() ModelDeployment {
+	if d.CustomOpsProfile == "none" {
+		d.CustomOpsProfile = ""
+	}
 	if d.Provider != "http" {
 		if d.Device == "" {
 			d.Device = "cpu"
@@ -93,7 +98,7 @@ func (d ModelDeployment) validate(cfg *RouterConfig) error {
 			if err != nil || index < 0 {
 				return fmt.Errorf("device index must be a non-negative integer")
 			}
-			if (d.Provider == "ort" && parts[0] != "migraphx") || (d.Provider == "candle" && parts[0] != "cuda" && parts[0] != "metal") {
+			if (d.Provider == "ort" && parts[0] != "migraphx" && parts[0] != "rocm") || (d.Provider == "candle" && parts[0] != "cuda" && parts[0] != "metal") {
 				return fmt.Errorf("device %q is incompatible with provider %q", d.Device, d.Provider)
 			}
 		}
@@ -112,6 +117,9 @@ func (d ModelDeployment) validate(cfg *RouterConfig) error {
 		}
 	default:
 		return fmt.Errorf("unsupported provider %q", d.Provider)
+	}
+	if d.CustomOpsProfile != "" && (d.CustomOpsProfile != "ck_flash_attention" || d.Provider != "ort" || !strings.HasPrefix(d.Device, "rocm:")) {
+		return fmt.Errorf("custom_ops_profile requires ck_flash_attention on an ORT rocm:index deployment")
 	}
 	if d.Input.MaxTokens < 0 {
 		return fmt.Errorf("input.max_tokens must not be negative")
@@ -166,6 +174,11 @@ func CompileModelBindings(cfg *RouterConfig) (*ModelBindingPlan, error) {
 					return nil, fmt.Errorf("recipes[%s].routing.model_bindings.%s: %w", recipe.Name, name, err)
 				}
 			}
+			if strings.HasPrefix(name, "safety.") {
+				if err := validateSafetyModelBinding(recipe.Profile.Signals.SafetyRules, name, decl, deployment); err != nil {
+					return nil, fmt.Errorf("recipes[%s].routing.model_bindings.%s: %w", recipe.Name, name, err)
+				}
+			}
 			bindings[name] = ResolvedModelBinding{Recipe: recipe.Name, Name: name, Binding: decl, Deployment: deployment, Admission: cfg.ModelAdmission[decl.Deployment]}
 		}
 		plan.recipes[recipe.Name] = bindings
@@ -175,6 +188,9 @@ func CompileModelBindings(cfg *RouterConfig) (*ModelBindingPlan, error) {
 
 func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDeployment) error {
 	want := ""
+	if decl.PairScorer != nil && name != RAGRerankerConsumer {
+		return fmt.Errorf("pair_scorer selection is only supported by rag.reranker")
+	}
 	switch name {
 	case "prompt_guard":
 		want = RemoteClassifierContractLabelDistribution
@@ -191,6 +207,11 @@ func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDe
 		want = "text_pair_distribution.v1"
 	case "embedding":
 		want = "embedding.v1"
+	case RAGRerankerConsumer:
+		want = RelevanceScoresContract
+		if err := validateRerankerBinding(decl, deployment); err != nil {
+			return err
+		}
 	case "complexity":
 		if decl.Contract == RemoteClassifierContractLabelDistribution {
 			want = RemoteClassifierContractLabelDistribution
@@ -198,6 +219,14 @@ func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDe
 		}
 		want = RemoteClassifierContractScore
 	default:
+		if strings.HasPrefix(name, "safety.") {
+			// The matching rule disambiguates names containing ".hazard".
+			want = decl.Contract
+			if want != RemoteClassifierContractLabelDistribution && want != RemoteClassifierContractLabelScores {
+				return fmt.Errorf("safety binding requires a categorical or independent label contract")
+			}
+			break
+		}
 		if !strings.HasPrefix(name, "classifier.") {
 			return fmt.Errorf("unknown task consumer %q", name)
 		}
@@ -229,9 +258,8 @@ func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDe
 	if deployment.Provider == "ort" && (name == "hallucination_detector" || name == "hallucination_explainer") {
 		return fmt.Errorf("%s has no ORT task adapter", name)
 	}
-	if name != "embedding" && deployment.Provider != "http" && deployment.Input.MaxTokens > 512 {
-		return fmt.Errorf("classification task supports at most 512 tokens; input.max_tokens is a deployment budget")
-	}
+	// Artifact-specific capacity is checked by the loaded provider. Config
+	// cannot infer a checkpoint limit from its adapter name or a fixed 512 cap.
 	return nil
 }
 

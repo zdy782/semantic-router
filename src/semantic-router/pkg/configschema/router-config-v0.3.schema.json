@@ -870,11 +870,11 @@
     },
     "CanonicalPromptGuardModule": {
       "properties": {
-        "backend": {
-          "$ref": "#/$defs/RemoteClassifierBackend"
-        },
         "max_sequence_length": {
           "type": "integer"
+        },
+        "backend": {
+          "$ref": "#/$defs/RemoteClassifierBackend"
         },
         "window": {
           "$ref": "#/$defs/SequenceHeadWindowConfig"
@@ -3885,6 +3885,9 @@
         },
         "mapping_path": {
           "type": "string"
+        },
+        "pair_scorer": {
+          "$ref": "#/$defs/PairScorerSelection"
         }
       },
       "additionalProperties": false,
@@ -3908,6 +3911,9 @@
           "type": "string"
         },
         "precision": {
+          "type": "string"
+        },
+        "custom_ops_profile": {
           "type": "string"
         },
         "input": {
@@ -4329,6 +4335,18 @@
         },
         "description": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "PairScorerSelection": {
+      "properties": {
+        "layer": {
+          "type": "integer"
+        },
+        "dimension": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
@@ -4777,6 +4795,9 @@
         "injection_mode": {
           "type": "string"
         },
+        "rerank": {
+          "$ref": "#/$defs/RAGRerankConfig"
+        },
         "backend_config": {
           "additionalProperties": true,
           "type": "object"
@@ -4792,6 +4813,15 @@
         },
         "min_confidence_threshold": {
           "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RAGRerankConfig": {
+      "properties": {
+        "top_k": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,

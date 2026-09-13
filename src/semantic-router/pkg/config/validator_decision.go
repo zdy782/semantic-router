@@ -450,6 +450,11 @@ func validateDecisionRAGAndMemoryPlugins(cfg *RouterConfig, decision *Decision) 
 		if err := ragCfg.Validate(); err != nil {
 			return fmt.Errorf("decision '%s': RAG plugin: %w", decision.Name, err)
 		}
+		if ragCfg.Enabled && ragCfg.Rerank != nil {
+			if _, ok := cfg.ModelBindings[RAGRerankerConsumer]; !ok {
+				return fmt.Errorf("decision %q: rerank requires recipe-local model_bindings.%s", decision.Name, RAGRerankerConsumer)
+			}
+		}
 	}
 
 	cacheCfg := decision.GetResponseCacheConfig()

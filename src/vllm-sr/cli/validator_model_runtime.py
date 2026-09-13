@@ -3,7 +3,6 @@
 from cli.models import UserConfig
 from cli.validation_error import ValidationError
 
-CLASSIFICATION_MAX_TOKENS = 512
 DEVICE_SELECTOR_PARTS = 2
 
 
@@ -33,6 +32,21 @@ def validate_model_runtime_references(config: UserConfig) -> list[ValidationErro
         (f"recipes.{recipe.name}.routing", recipe.routing) for recipe in config.recipes
     ]
     for prefix, profile in profiles:
+        for decision in profile.decisions:
+            for plugin in decision.plugins or []:
+                data = plugin.configuration
+                if (
+                    plugin.type.value == "rag"
+                    and data.get("enabled")
+                    and data.get("rerank") is not None
+                    and "rag.reranker" not in profile.model_bindings
+                ):
+                    errors.append(
+                        ValidationError(
+                            "Neural rerank requires recipe-local model_bindings.rag.reranker",
+                            field=f"{prefix}.decisions.{decision.name}.plugins",
+                        )
+                    )
         for consumer, binding in profile.model_bindings.items():
             if binding.deployment not in deployments:
                 errors.append(
@@ -66,7 +80,33 @@ def _binding_error(consumer, binding, deployment, profile=None):
         "hallucination_explainer": "text_pair_distribution.v1",
         "embedding": "embedding.v1",
         "complexity": "score.v1",
+        "rag.reranker": "relevance_scores.v1",
     }
+    if binding.pair_scorer is not None and consumer != "rag.reranker":
+        return "pair_scorer selection is only supported by rag.reranker"
+    if consumer == "rag.reranker":
+        if provider == "http" or binding.adapter != "vela_reranker":
+            return "Reranker requires a local vela_reranker adapter"
+        if binding.mapping_path or (provider == "candle" and binding.head):
+            return (
+                "Reranker has no label mapping or separate Candle classification head"
+            )
+        if ((deployment.get("input") or {}).get("overflow") or "reject") != "reject":
+            return "Reranker requires reject overflow for complete tokenizer pairs"
+    if consumer.startswith("safety."):
+        matches = []
+        for rule in profile.signals.safety if profile else []:
+            if consumer == f"safety.{rule.name}":
+                matches.append("label_distribution.v1")
+            if rule.hazard and consumer == f"safety.{rule.name}.hazard":
+                matches.append("label_scores.v1")
+        if len(matches) != 1:
+            return "Safety binding must identify exactly one head in the same recipe"
+        contracts[consumer] = matches[0]
+        if binding.mapping_path:
+            return "Safety labels define the mapping; mapping_path is not supported"
+        if provider == "http" and binding.adapter != "http_classify":
+            return "Safety HTTP head requires http_classify adapter"
     if consumer.startswith("classifier."):
         contracts[consumer] = "label_distribution.v1"
         name = consumer.removeprefix("classifier.")
@@ -135,12 +175,6 @@ def _binding_error(consumer, binding, deployment, profile=None):
         "hallucination_explainer",
     }:
         return f"{consumer} has no ORT task adapter"
-    if (
-        consumer != "embedding"
-        and provider != "http"
-        and budget.get("max_tokens", 0) > CLASSIFICATION_MAX_TOKENS
-    ):
-        return "Classification task supports at most 512 tokens; input.max_tokens is a deployment budget"
     return None
 
 
@@ -173,7 +207,7 @@ def _deployment_error(name, deployment, external_names):
         device = deployment.get("device") or "cpu"
         if device != "cpu":
             parts = device.split(":")
-            allowed = {"migraphx"} if provider == "ort" else {"cuda", "metal"}
+            allowed = {"migraphx", "rocm"} if provider == "ort" else {"cuda", "metal"}
             if (
                 len(parts) != DEVICE_SELECTOR_PARTS
                 or parts[0] not in allowed
@@ -196,6 +230,13 @@ def _deployment_error(name, deployment, external_names):
             return f"Unknown external model '{deployment['external_model']}'"
     else:
         return f"Unsupported provider '{provider}'"
+    profile = deployment.get("custom_ops_profile") or "none"
+    if profile != "none" and (
+        profile != "ck_flash_attention"
+        or provider != "ort"
+        or not (deployment.get("device") or "cpu").startswith("rocm:")
+    ):
+        return "custom_ops_profile requires ck_flash_attention on an ORT rocm:index deployment"
     budget = deployment.get("input") or {}
     if budget.get("max_tokens", 0) < 0:
         return "input.max_tokens must not be negative"

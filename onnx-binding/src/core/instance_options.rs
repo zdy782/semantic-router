@@ -7,6 +7,7 @@ use crate::core::unified_error::{errors, UnifiedResult};
 use ort::{execution_providers::CPUExecutionProvider, session::Session};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -22,7 +23,19 @@ pub enum Provider {
     #[default]
     Cpu,
     Migraphx,
+    Rocm,
 }
+
+/// An installed, trusted custom-op implementation; never a caller-supplied path.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomOpsProfile {
+    #[default]
+    None,
+    CkFlashAttention,
+}
+
+const CK_FLASH_ATTENTION_LIBRARY: &str = "/usr/local/lib/libort_ck_flash_attn.so.1";
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -50,6 +63,10 @@ pub struct InstanceOptions {
     pub provider: Provider,
     pub device_id: i32,
     pub precision: Precision,
+    pub custom_ops_profile: CustomOpsProfile,
+    /// Permit ORT's CPU EP explicitly. Profiling is required; this does not
+    /// promise that the CPU nodes are limited to shape/control operations.
+    pub allow_cpu_fallback: bool,
     pub max_input_tokens: Option<usize>,
     pub overflow: Overflow,
     pub intra_threads: Option<usize>,
@@ -66,6 +83,9 @@ pub struct SessionEvidence {
     pub device_id: i32,
     pub precision: Precision,
     pub cpu_fallback_disabled: bool,
+    pub custom_ops_profile: CustomOpsProfile,
+    pub custom_ops_library: Option<String>,
+    pub custom_ops_sha256: Option<String>,
     pub profile_prefix: Option<String>,
 }
 
@@ -103,6 +123,26 @@ impl InstanceOptions {
                 "token and thread budgets must be positive",
             ));
         }
+        if self.provider == Provider::Rocm && self.precision != Precision::Native {
+            return Err(errors::config_error(
+                "precision",
+                "ROCm preserves the selected graph's native types; fp16 conversion is MIGraphX-only",
+            ));
+        }
+        if self.custom_ops_profile != CustomOpsProfile::None && self.provider != Provider::Rocm {
+            return Err(errors::config_error(
+                "custom_ops_profile",
+                "ck_flash_attention requires the ROCm execution provider",
+            ));
+        }
+        if self.allow_cpu_fallback
+            && (self.provider != Provider::Rocm || self.profile_prefix.is_none())
+        {
+            return Err(errors::config_error(
+                "allow_cpu_fallback",
+                "explicit CPU fallback requires ROCm and an ORT profile prefix; node placement must be audited",
+            ));
+        }
         if self.profile_prefix.as_deref() == Some("") {
             return Err(errors::config_error(
                 "profile_prefix",
@@ -128,7 +168,24 @@ impl InstanceOptions {
                 "MIGraphX support was not compiled; CPU fallback is forbidden",
             ));
         }
+        #[cfg(not(feature = "rocm"))]
+        if self.provider == Provider::Rocm {
+            return Err(errors::config_error(
+                "provider",
+                "ROCm support was not compiled; CPU fallback is forbidden",
+            ));
+        }
         Ok(())
+    }
+
+    /// Include this same file in the owning session's artifact snapshot before
+    /// loading and verify it afterwards, alongside every graph/external tensor.
+    pub fn custom_ops_library_path(&self) -> UnifiedResult<Option<PathBuf>> {
+        self.validate()?;
+        Ok(match self.custom_ops_profile {
+            CustomOpsProfile::None => None,
+            CustomOpsProfile::CkFlashAttention => Some(PathBuf::from(CK_FLASH_ATTENTION_LIBRARY)),
+        })
     }
 
     pub fn effective_limit(&self, task_limit: usize) -> UnifiedResult<usize> {
@@ -189,6 +246,22 @@ impl InstanceOptions {
         if let Some(threads) = self.intra_threads {
             builder = builder.with_intra_threads(threads).map_err(ort_error)?;
         }
+        let custom_ops_library = self.custom_ops_library_path()?;
+        let custom_ops_sha256 = custom_ops_library
+            .as_ref()
+            .map(|library| {
+                let bytes = std::fs::read(library).map_err(|error| {
+                    errors::model_load(&library.display().to_string(), &error.to_string())
+                })?;
+                Ok::<_, crate::core::unified_error::UnifiedError>(format!(
+                    "{:x}",
+                    Sha256::digest(bytes)
+                ))
+            })
+            .transpose()?;
+        if let Some(library) = &custom_ops_library {
+            builder = builder.with_operator_library(library).map_err(ort_error)?;
+        }
         let provider_name = match self.provider {
             Provider::Cpu => {
                 builder = builder
@@ -215,6 +288,28 @@ impl InstanceOptions {
                 #[cfg(feature = "migraphx")]
                 "MIGraphXExecutionProvider"
             }
+            Provider::Rocm => {
+                #[cfg(feature = "rocm")]
+                {
+                    builder = builder
+                        .with_config_entry(
+                            "session.disable_cpu_ep_fallback",
+                            if self.allow_cpu_fallback { "0" } else { "1" },
+                        )
+                        .map_err(ort_error)?
+                        .with_execution_providers([
+                            ort::execution_providers::ROCmExecutionProvider::default()
+                                .with_device_id(self.device_id)
+                                .build()
+                                .error_on_failure(),
+                        ])
+                        .map_err(ort_error)?;
+                }
+                #[cfg(not(feature = "rocm"))]
+                return Err(errors::config_error("provider", "ROCm is unavailable"));
+                #[cfg(feature = "rocm")]
+                "ROCMExecutionProvider"
+            }
         };
         static PROFILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
         let profile_prefix = self.profile_prefix.as_ref().map(|prefix| {
@@ -235,7 +330,11 @@ impl InstanceOptions {
             provider: provider_name,
             device_id: self.device_id,
             precision: self.precision,
-            cpu_fallback_disabled: self.provider == Provider::Migraphx,
+            cpu_fallback_disabled: self.provider == Provider::Migraphx
+                || (self.provider == Provider::Rocm && !self.allow_cpu_fallback),
+            custom_ops_profile: self.custom_ops_profile,
+            custom_ops_library: custom_ops_library.map(|path| path.display().to_string()),
+            custom_ops_sha256,
             profile_prefix,
         });
         Ok(session)
@@ -356,6 +455,89 @@ mod tests {
             ..Default::default()
         };
         assert!(options.effective_limit(512).is_err());
+    }
+
+    #[test]
+    fn custom_ops_profiles_are_named_and_provider_specific() {
+        assert!(serde_json::from_str::<InstanceOptions>(
+            r#"{"model_path":"unused","custom_ops_profile":"/tmp/untrusted.so"}"#,
+        )
+        .is_err());
+        for provider in [Provider::Cpu, Provider::Migraphx] {
+            let options = InstanceOptions {
+                model_path: "unused".into(),
+                provider,
+                custom_ops_profile: CustomOpsProfile::CkFlashAttention,
+                ..Default::default()
+            };
+            assert!(options
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("requires the ROCm"));
+        }
+    }
+
+    #[test]
+    fn rocm_conversion_and_cpu_fallback_cannot_be_implicit() {
+        let mut options = InstanceOptions {
+            model_path: "unused".into(),
+            provider: Provider::Rocm,
+            precision: Precision::Fp16,
+            ..Default::default()
+        };
+        assert!(options
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("native types"));
+        options.precision = Precision::Native;
+        options.allow_cpu_fallback = true;
+        assert!(options
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("profile prefix"));
+        options.profile_prefix = Some(String::new());
+        assert!(options.validate().is_err());
+        options.profile_prefix = Some("placement-proof".into());
+        options.provider = Provider::Cpu;
+        assert!(options
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("requires ROCm"));
+    }
+
+    #[cfg(not(feature = "rocm"))]
+    #[test]
+    fn unavailable_rocm_never_falls_back_to_cpu() {
+        let options = InstanceOptions {
+            model_path: "unused".into(),
+            provider: Provider::Rocm,
+            ..Default::default()
+        };
+        assert!(options
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("CPU fallback is forbidden"));
+    }
+
+    #[cfg(feature = "rocm")]
+    #[test]
+    fn rocm_profile_resolves_only_the_installed_library() {
+        let options = InstanceOptions {
+            model_path: "unused".into(),
+            provider: Provider::Rocm,
+            custom_ops_profile: CustomOpsProfile::CkFlashAttention,
+            ..Default::default()
+        };
+        assert_eq!(
+            options.custom_ops_library_path().unwrap(),
+            Some(PathBuf::from(CK_FLASH_ATTENTION_LIBRARY))
+        );
+        assert!(!options.allow_cpu_fallback);
     }
 
     #[test]

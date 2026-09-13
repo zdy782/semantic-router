@@ -299,11 +299,33 @@ pub struct FixedModernBertTokenClassifier {
 }
 
 impl FixedModernBertHead {
-    fn load_optional(
+    fn load_for_artifact(
         vb: candle_nn::VarBuilder,
         config: &Config,
+        artifact_config: &str,
     ) -> Result<Option<Self>, candle_core::Error> {
-        if vb.contains_tensor("dense.weight") || vb.contains_tensor("norm.weight") {
+        let raw: serde_json::Value =
+            serde_json::from_str(artifact_config).map_err(candle_core::Error::wrap)?;
+        let requires_head = raw["architectures"]
+            .as_array()
+            .is_some_and(|architectures| {
+                architectures.iter().any(|name| {
+                    matches!(
+                        name.as_str(),
+                        Some(
+                            "ModernBertForSequenceClassification"
+                                | "ModernBertForTokenClassification"
+                        )
+                    )
+                })
+            });
+        // Legacy linear-only artifacts may omit this block. A declared HF task
+        // head or a partially present head must load every required tensor.
+        if requires_head
+            || ["dense.weight", "dense.bias", "norm.weight", "norm.bias"]
+                .iter()
+                .any(|name| vb.contains_tensor(name))
+        {
             Self::load(vb, config).map(Some)
         } else {
             Ok(None)
@@ -638,6 +660,22 @@ impl TraditionalModernBertClassifier {
     pub(super) fn parse_model_config(config_str: &str) -> Result<Config, candle_core::Error> {
         let raw: serde_json::Value =
             serde_json::from_str(config_str).map_err(candle_core::Error::wrap)?;
+        for field in ["attention_bias", "mlp_bias", "norm_bias", "classifier_bias"] {
+            if raw
+                .get(field)
+                .is_some_and(|value| value.as_bool() != Some(false))
+            {
+                candle_core::bail!("unsupported ModernBERT {field}; this adapter requires false");
+            }
+        }
+        for field in ["hidden_activation", "classifier_activation"] {
+            if raw
+                .get(field)
+                .is_some_and(|value| value.as_str() != Some("gelu"))
+            {
+                candle_core::bail!("unsupported ModernBERT {field}; this adapter requires gelu");
+            }
+        }
         // This implementation supports theta-based RoPE, not arbitrary scaling
         // algorithms. Do not silently discard YaRN frequency/attention factors.
         let check_rope = |params: &serde_json::Value| -> Result<(), candle_core::Error> {
@@ -894,7 +932,8 @@ impl TraditionalModernBertClassifier {
             return Err(candle_core::Error::from(unified_err));
         };
         // 7. Load optional head layer
-        let head = FixedModernBertHead::load_optional(model_vb.pp("head"), &config)?;
+        let head =
+            FixedModernBertHead::load_for_artifact(model_vb.pp("head"), &config, &config_str)?;
 
         // 8. Load classifier with dynamic class count
         let classifier = FixedModernBertClassifier::load_with_classes(
@@ -1031,6 +1070,10 @@ impl TraditionalModernBertClassifier {
 
         // 3. Load number of classes from classifier config.json
         let num_classes = Self::load_modernbert_num_classes(classifier_path)?;
+        let classifier_config_path = format!("{}/config.json", classifier_path);
+        let classifier_config_str =
+            std::fs::read_to_string(&classifier_config_path).map_err(candle_core::Error::wrap)?;
+        let classifier_pooling = Self::parse_classifier_pooling(&classifier_config_str)?;
 
         // 4. Load tokenizer from base model
         let tokenizer_path = format!("{}/tokenizer.json", base_model_path);
@@ -1121,7 +1164,11 @@ impl TraditionalModernBertClassifier {
         };
 
         // Try to load head from classifier (if exists)
-        let head = FixedModernBertHead::load_optional(classifier_vb.pp("head"), &config)?;
+        let head = FixedModernBertHead::load_for_artifact(
+            classifier_vb.pp("head"),
+            &config,
+            &classifier_config_str,
+        )?;
 
         // 8. Load classifier weights from classifier path
         let classifier = FixedModernBertClassifier::load_with_classes(
@@ -1147,27 +1194,6 @@ impl TraditionalModernBertClassifier {
             max_sequence_length,
         )
         .map_err(candle_core::Error::wrap)?;
-
-        // 11. Determine classifier pooling from classifier config
-        let classifier_config_path = format!("{}/config.json", classifier_path);
-        let classifier_config_str = std::fs::read_to_string(&classifier_config_path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
-
-        let classifier_pooling = if let Some(config_json) = &classifier_config_str {
-            if config_json
-                .get("classifier_pooling")
-                .and_then(|v| v.as_str())
-                .map(|s| s == "mean")
-                .unwrap_or(false)
-            {
-                ClassifierPooling::MEAN
-            } else {
-                ClassifierPooling::CLS
-            }
-        } else {
-            ClassifierPooling::MEAN // Default to MEAN
-        };
 
         Ok(Self {
             model: Arc::new(model),
@@ -1612,7 +1638,7 @@ impl TraditionalModernBertTokenClassifier {
         let model = ModernBert::load(vb.clone(), &config)?;
 
         // Load head (optional) - following old architecture pattern
-        let head = FixedModernBertHead::load_optional(vb.pp("head"), &config)?;
+        let head = FixedModernBertHead::load_for_artifact(vb.pp("head"), &config, &config_str)?;
 
         // Get number of classes from config.json id2label field (single source of truth)
         // For models that don't include id2label in config.json,
@@ -1832,7 +1858,7 @@ mod head_contract_tests {
         let mut weights = HashMap::new();
         weights.insert("dense.weight".into(), Tensor::eye(4, DType::F32, &device)?);
         let partial = VarBuilder::from_tensors(weights.clone(), DType::F32, &device);
-        assert!(FixedModernBertHead::load_optional(partial, &config).is_err());
+        assert!(FixedModernBertHead::load_for_artifact(partial, &config, "{}").is_err());
         weights.insert("norm.weight".into(), Tensor::ones(4, DType::F32, &device)?);
         let head = FixedModernBertHead::load(
             VarBuilder::from_tensors(weights, DType::F32, &device),
@@ -1850,3 +1876,5 @@ mod head_contract_tests {
         Ok(())
     }
 }
+
+pub mod reranker;

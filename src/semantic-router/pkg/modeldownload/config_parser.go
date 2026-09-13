@@ -30,7 +30,7 @@ func extractFromValue(v reflect.Value, paths *[]string, seen map[string]bool) {
 	}
 
 	// Dereference pointers
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return
 		}
@@ -182,7 +182,7 @@ func collectRequiredFilesByModel(v reflect.Value, requiredFilesByModel map[strin
 		return
 	}
 
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return
 		}

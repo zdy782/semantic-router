@@ -12,6 +12,7 @@ def validate_safety_contracts(config: UserConfig) -> list[ValidationError]:
     models = _external_models(config)
     catalog = (config.global_ or {}).get("model_catalog") or {}
     local_heads = (catalog.get("modules") or {}).get("safety") or {}
+    deployments = catalog.get("deployments") or {}
     system = catalog.get("system") or {}
     system_keys = schema_document()["$defs"]["CanonicalSystemModels"]["properties"]
     for profile, routing in iter_routing_profiles(config):
@@ -28,12 +29,41 @@ def validate_safety_contracts(config: UserConfig) -> list[ValidationError]:
                         f"{prefix}.signals.safety.{rule.name}.hazard.model",
                     )
                 )
-            for name, kind, field in heads:
+            for declared_name, kind, field in heads:
+                name = declared_name
+                local = local_heads.get(kind) or {}
+                consumer = f"safety.{rule.name}" + (
+                    ".hazard" if kind == "hazard" else ""
+                )
+                binding = routing.model_bindings.get(consumer)
+                if binding:
+                    deployment = deployments.get(binding.deployment)
+                    if not deployment:
+                        continue  # The shared binding validator reports this reference.
+                    if deployment.get("provider") == "http":
+                        if not name and local.get("window") is not None:
+                            errors.append(
+                                ValidationError(
+                                    "Remote safety head cannot use local token windows",
+                                    field=field,
+                                )
+                            )
+                        name = deployment.get("external_model")
+                    else:
+                        local = {
+                            **local,
+                            "model_id": deployment.get("artifact"),
+                            "max_sequence_length": (deployment.get("input") or {}).get(
+                                "max_tokens", 0
+                            ),
+                        }
+                        if name:
+                            local.pop("window", None)
+                        name = None
                 if not name:
                     # Omitted heads use the built-in module. Validate explicit
                     # deployment overrides here; artifact/label compatibility
                     # is checked by the native loader at runtime initialization.
-                    local = local_heads.get(kind) or {}
                     limit = local.get("max_sequence_length", 0)
                     if (
                         not isinstance(limit, int)
@@ -46,6 +76,25 @@ def validate_safety_contracts(config: UserConfig) -> list[ValidationError]:
                                 field=f"global.model_catalog.modules.safety.{kind}.max_sequence_length",
                             )
                         )
+                    elif local.get("window") is not None:
+                        window = local["window"]
+                        size, overlap = window.get("size", 0), window.get("overlap", 0)
+                        if (
+                            not isinstance(size, int)
+                            or isinstance(size, bool)
+                            or size <= 0
+                            or size > (limit or 512)
+                            or not isinstance(overlap, int)
+                            or isinstance(overlap, bool)
+                            or overlap < 0
+                            or overlap >= size
+                        ):
+                            errors.append(
+                                ValidationError(
+                                    "Safety window must fit the effective input budget with nonnegative overlap smaller than size",
+                                    field=field,
+                                )
+                            )
                     ref = local.get("model_ref", kind)
                     if not local.get("model_id") and ref and ref not in system_keys:
                         errors.append(

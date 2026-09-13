@@ -170,7 +170,6 @@ func (c *Classifier) applyAdmissionGates() {
 			deployment: admissionDeploymentPIIClassifier,
 		}
 	}
-	c.applySafetyAdmissionGates(registry)
 }
 
 // Owned handles admit at the physical resource so aliases cannot multiply its budget.

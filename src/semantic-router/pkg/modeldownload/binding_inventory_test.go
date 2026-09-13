@@ -218,17 +218,9 @@ func TestExplicitDeploymentDownloadFailsClosed(t *testing.T) {
 
 func writeHFSnapshot(t *testing.T, dir, revision string, extraFiles ...string) {
 	t.Helper()
+	spec := ModelSpec{LocalPath: dir, Revision: revision}
 	for _, name := range append([]string{"config.json", "tokenizer.json", "model.safetensors"}, extraFiles...) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		metadata := filepath.Join(dir, ".cache", "huggingface", "download", name+".metadata")
-		if err := os.MkdirAll(filepath.Dir(metadata), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(metadata, []byte(revision+"\nfixture-etag\n4102444800.0\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		writeHFRevisionArtifact(t, spec, name, "fixture", true)
 	}
 }
 
@@ -292,9 +284,7 @@ func TestReloadReusesUnversionedCompanionFromLiveSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	writeHFSnapshot(t, dir, revision, "labels.json")
 	mapping := filepath.Join(dir, "labels.json")
-	if err := os.WriteFile(mapping, []byte(`{"0":"billing"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHFRevisionArtifact(t, ModelSpec{LocalPath: dir, Revision: revision}, "labels.json", `{"0":"billing"}`, false)
 	current := deploymentConfig("candle", dir)
 	current.ModelDeployments["new"] = config.ModelDeployment{Provider: "candle", Artifact: dir, Revision: revision}
 	binding := current.ModelBindings["domain_classifier"]
@@ -341,9 +331,7 @@ func TestReloadCompanionGraphRequiresExternalTensorFiles(t *testing.T) {
 	writeHFSnapshot(t, dir, revision, "model.onnx", "actual-weights.bin")
 	entry := append(protoBytes(1, []byte("location")), protoBytes(2, []byte("actual-weights.bin"))...)
 	graph := protoBytes(7, protoBytes(5, protoBytes(13, entry)))
-	if err := os.WriteFile(filepath.Join(dir, "model.onnx"), graph, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeHFRevisionArtifact(t, ModelSpec{LocalPath: dir, Revision: revision}, "model.onnx", string(graph), true)
 	current := deploymentConfig("ort", dir)
 	current.ModelDeployments["new"] = config.ModelDeployment{Provider: "ort", Artifact: dir, Revision: revision}
 	binding := current.ModelBindings["domain_classifier"]

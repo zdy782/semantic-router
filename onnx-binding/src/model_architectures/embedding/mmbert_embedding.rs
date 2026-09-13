@@ -579,7 +579,10 @@ impl MmBertEmbeddingModel {
         };
         let error =
             |e: anyhow::Error| errors::model_load(&path.display().to_string(), &e.to_string());
-        let snapshots = capture_onnx(path).map_err(error)?;
+        let mut snapshots = capture_onnx(path).map_err(error)?;
+        if let Some(library) = options.custom_ops_library_path()? {
+            snapshots.push(ArtifactSnapshot::capture(&library, "custom-operators").map_err(error)?);
+        }
         let session = options.create_session(path)?;
         let evidence = options.evidence.lock();
         let actual = evidence.last().ok_or_else(|| {
@@ -595,6 +598,8 @@ impl MmBertEmbeddingModel {
             "device_id": actual.device_id,
             "precision": actual.precision,
             "cpu_fallback_disabled": actual.cpu_fallback_disabled,
+            "custom_ops_profile": actual.custom_ops_profile,
+            "custom_ops_sha256": actual.custom_ops_sha256,
             "intra_threads": options.intra_threads,
         }))
         .map_err(error)?;

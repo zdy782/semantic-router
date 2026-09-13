@@ -71,11 +71,11 @@ func TestCompileModelBindingsRejectsInvalidPreparation(t *testing.T) {
 			d.Device = "migraphx:0"
 			cfg.ModelDeployments["shared-encoder"] = d
 		}, "incompatible"},
-		{"too long", func(cfg *RouterConfig) {
+		{"negative budget", func(cfg *RouterConfig) {
 			d := cfg.ModelDeployments["shared-encoder"]
-			d.Input.MaxTokens = 32768
+			d.Input.MaxTokens = -1
 			cfg.ModelDeployments["shared-encoder"] = d
-		}, "at most 512"},
+		}, "must not be negative"},
 		{"wrong contract", func(cfg *RouterConfig) {
 			b := cfg.Recipes[0].Profile.ModelBindings["domain_classifier"]
 			b.Contract = RemoteClassifierContractScore

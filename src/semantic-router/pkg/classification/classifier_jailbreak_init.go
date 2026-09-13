@@ -100,11 +100,6 @@ func (c *MmBERT32KJailbreakInitializerImpl) Init(modelID string, useCPU bool, nu
 	return nil
 }
 
-// createMmBERT32KJailbreakInitializer creates an mmBERT-32K jailbreak initializer.
-func createMmBERT32KJailbreakInitializer() JailbreakInitializer {
-	return &MmBERT32KJailbreakInitializerImpl{}
-}
-
 // deriveArgmax returns the index and score of the highest-probability class
 // in a complete distribution. It is the single place argmax/confidence is
 // computed for jailbreak classification, so every SequenceClassifierBackend

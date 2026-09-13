@@ -58,7 +58,7 @@ func getRAGCacheInstance() *RAGResultCache {
 // getRAGCache retrieves a cached RAG result if available and not expired.
 // Cache hits use RLock only; the LRU position is updated lazily on the next
 // write to avoid promoting a write lock on every read.
-func (r *OpenAIRouter) getRAGCache(query string, ragConfig *config.RAGPluginConfig) (string, bool) {
+func (r *OpenAIRouter) getRAGCache(recipe config.RecipeName, query string, ragConfig *config.RAGPluginConfig) (string, bool) {
 	if !ragConfig.CacheResults {
 		return "", false
 	}
@@ -69,7 +69,7 @@ func (r *OpenAIRouter) getRAGCache(query string, ragConfig *config.RAGPluginConf
 	}
 
 	cache := getRAGCacheInstance()
-	key := r.buildRAGCacheKey(query, ragConfig)
+	key := r.buildRAGCacheKey(recipe, query, ragConfig)
 	if key == "" {
 		return "", false
 	}
@@ -103,13 +103,13 @@ func (r *OpenAIRouter) getRAGCache(query string, ragConfig *config.RAGPluginConf
 }
 
 // setRAGCache stores a RAG result. Evicts the LRU entry when the cache is full.
-func (r *OpenAIRouter) setRAGCache(query string, context string, ragConfig *config.RAGPluginConfig) {
+func (r *OpenAIRouter) setRAGCache(recipe config.RecipeName, query string, context string, ragConfig *config.RAGPluginConfig) {
 	if !ragConfig.CacheResults || context == "" {
 		return
 	}
 
 	cache := getRAGCacheInstance()
-	key := r.buildRAGCacheKey(query, ragConfig)
+	key := r.buildRAGCacheKey(recipe, query, ragConfig)
 	if key == "" {
 		return
 	}
@@ -149,18 +149,28 @@ func (r *OpenAIRouter) evictLRUEntry(cache *RAGResultCache) {
 }
 
 // buildRAGCacheKey builds a cache key from query and config.
-func (r *OpenAIRouter) buildRAGCacheKey(query string, ragConfig *config.RAGPluginConfig) string {
+func (r *OpenAIRouter) buildRAGCacheKey(recipe config.RecipeName, query string, ragConfig *config.RAGPluginConfig) string {
 	identity, compatible := r.ragCacheRepresentation(ragConfig)
 	if !compatible {
 		return ""
 	}
+	rerankerIdentity := ""
+	if ragConfig.Rerank != nil {
+		scorer := r.rerankers[recipe]
+		if scorer == nil || scorer.CacheIdentity() == "" {
+			return ""
+		}
+		rerankerIdentity = scorer.CacheIdentity()
+	}
 	// Include backend configuration: different vector-store IDs, file filters,
 	// and endpoints must never share retrieved text just because queries match.
 	key, err := json.Marshal(struct {
+		Recipe            config.RecipeName       `json:"recipe"`
+		RerankerIdentity  string                  `json:"reranker_identity,omitempty"`
 		Query             string                  `json:"query"`
 		Config            *config.RAGPluginConfig `json:"config"`
 		EmbeddingIdentity string                  `json:"embedding_identity"`
-	}{query, ragConfig, identity})
+	}{recipe, rerankerIdentity, query, ragConfig, identity})
 	if err != nil {
 		return ""
 	}

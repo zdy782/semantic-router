@@ -11,8 +11,9 @@ import (
 // ModelPath must be a prepared local artifact directory. Device defaults to cpu;
 // accelerator selection is explicit and fails instead of falling back to CPU.
 // Encoder and embedding loaders execute float32. Existing generative accelerator
-// loaders use bfloat16. Encoder classification is limited to 512 tokens including
-// special tokens; MaxInputTokens can reduce that budget.
+// loaders use bfloat16. Classification defaults to 512 tokens including special
+// tokens. ModernBERT adapters accept an explicit budget up to checkpoint capacity;
+// unsupported adapter budgets fail preparation.
 type InstanceOptions struct {
 	ModelPath           string            `json:"model_path"`
 	ModelType           string            `json:"model_type,omitempty"`
@@ -35,16 +36,17 @@ type InstanceAdapter struct {
 // inferred from a checkpoint's name. ResourceID identifies the actual owned
 // backbone. Explicit head bindings and clones retain the same ResourceID.
 type InstanceInfo struct {
-	ResourceID             uint64   `json:"resource_id"`
-	Task                   string   `json:"task"`
-	ModelType              string   `json:"model_type"`
-	Device                 string   `json:"device"`
-	Precision              string   `json:"precision"`
-	ArchitecturalMaxTokens int      `json:"architectural_max_tokens"`
-	MaxInputTokens         int      `json:"max_input_tokens"`
-	Overflow               string   `json:"overflow"`
-	Labels                 []string `json:"labels"`
-	Modalities             []string `json:"modalities"`
+	PairScorer             *PairScorerSelection `json:"pair_scorer,omitempty"`
+	ResourceID             uint64               `json:"resource_id"`
+	Task                   string               `json:"task"`
+	ModelType              string               `json:"model_type"`
+	Device                 string               `json:"device"`
+	Precision              string               `json:"precision"`
+	ArchitecturalMaxTokens int                  `json:"architectural_max_tokens"`
+	MaxInputTokens         int                  `json:"max_input_tokens"`
+	Overflow               string               `json:"overflow"`
+	Labels                 []string             `json:"labels"`
+	Modalities             []string             `json:"modalities"`
 }
 
 // InputMetadata reports the complete input and what the task actually processed.

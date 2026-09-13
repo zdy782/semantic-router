@@ -91,3 +91,25 @@ func TestOpenVINORejectsBudgetsItCannotEnforce(t *testing.T) {
 		}
 	}
 }
+
+func TestExplicitBindingInputPolicyUsesSelectedRecipeDeployment(t *testing.T) {
+	cfg := &config.RouterConfig{}
+	cfg.CategoryModel.UseMmBERT32K = true
+	cfg.CategoryModel.MaxSequenceLength = 32768
+	cfg.ModelBindings = map[string]config.ModelBinding{"domain_classifier": {Deployment: "selected"}}
+	cfg.ModelDeployments = map[string]config.ModelDeployment{"other": {Provider: "candle", Input: config.ModelInputBudget{MaxTokens: 32768}}}
+	c := &Classifier{Config: cfg}
+	for _, tc := range []struct {
+		provider string
+		limit    int
+		want     bool
+	}{{"candle", 0, false}, {"candle", 512, false}, {"ort", 32768, true}, {"http", 32768, false}} {
+		cfg.ModelDeployments["selected"] = config.ModelDeployment{Provider: tc.provider, Input: config.ModelInputBudget{MaxTokens: tc.limit}}
+		if got := c.hasLongContextClassifier(config.SignalTypeDomain); got != tc.want {
+			t.Fatalf("%+v got full-context=%v", tc, got)
+		}
+	}
+	if c.hasLongContextClassifier(config.SignalTypeEmbedding) {
+		t.Fatal("classifier budget changed embedding input policy")
+	}
+}

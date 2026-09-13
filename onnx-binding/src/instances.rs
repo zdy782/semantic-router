@@ -19,8 +19,16 @@ use std::{
 };
 use tokenizers::Tokenizer;
 
+mod pair_scores;
+mod sequence;
+use crate::model_architectures::reranking::{PairScorer, PairScorerSelection};
+pub use pair_scores::{load_pair_scorer, score_pairs};
+pub use sequence::{classify, classify_windows, score, score_windows};
+
 enum Model {
+    PairScorer(PairScorer),
     Sequence(MmBertSequenceClassifier),
+    LabelScores(MmBertSequenceClassifier),
     Token(MmBertTokenClassifier),
     Embedding(MmBertEmbeddingModel),
     MultiModal(MultiModalEmbeddingModel),
@@ -38,6 +46,7 @@ struct Instance {
     dimension: usize,
     available_layers: Vec<usize>,
     completed: AtomicU64,
+    pair_scorer: Option<PairScorerSelection>,
 }
 
 static INSTANCES: OnceLock<RwLock<HashMap<u64, Arc<Instance>>>> = OnceLock::new();
@@ -82,9 +91,16 @@ fn fresh_options(mut options: InstanceOptions) -> InstanceOptions {
 }
 
 pub fn load_sequence(options: InstanceOptions) -> UnifiedResult<u64> {
+    sequence::validate_artifact(&options.model_path, false)?;
     let options = fresh_options(options);
     let model = MmBertSequenceClassifier::load_with_options(&options)?;
     prepare(Model::Sequence(model), options)
+}
+pub fn load_label_scores(options: InstanceOptions) -> UnifiedResult<u64> {
+    sequence::validate_artifact(&options.model_path, true)?;
+    let options = fresh_options(options);
+    let model = MmBertSequenceClassifier::load_with_options(&options)?;
+    prepare(Model::LabelScores(model), options)
 }
 pub fn load_token(options: InstanceOptions) -> UnifiedResult<u64> {
     let options = fresh_options(options);
@@ -123,12 +139,28 @@ pub fn embedding_runtime_descriptor(
 }
 
 fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
+    let pair_scorer = match &model {
+        Model::PairScorer(m) => Some(m.selection()),
+        _ => None,
+    };
     let (tokenizer, task, model_limit, task_limit, labels, dimension) = match &model {
-        Model::Sequence(m) => (
+        Model::PairScorer(m) => (
             m.tokenizer(),
-            "sequence_classification",
+            "pair_scores",
+            m.capacity(),
+            m.capacity(),
+            vec![],
+            0,
+        ),
+        Model::Sequence(m) | Model::LabelScores(m) => (
+            m.tokenizer(),
+            if matches!(&model, Model::LabelScores(_)) {
+                "label_scores"
+            } else {
+                "sequence_classification"
+            },
             m.config().max_position_embeddings,
-            512.min(m.config().max_position_embeddings),
+            m.config().max_position_embeddings,
             (0..m.config().num_labels)
                 .map(|n| m.config().get_label(n as i32))
                 .collect(),
@@ -138,7 +170,7 @@ fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
             m.tokenizer(),
             "token_classification",
             m.config().max_position_embeddings,
-            512.min(m.config().max_position_embeddings),
+            m.config().max_position_embeddings,
             (0..m.config().num_labels)
                 .map(|n| m.config().get_label(n as i32))
                 .collect(),
@@ -166,7 +198,15 @@ fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
         .with_truncation(None)
         .map_err(|e| errors::tokenization_error(&e.to_string()))?;
     tokenizer.with_padding(None);
-    let effective_limit = options.effective_limit(task_limit)?;
+    let effective_limit = if matches!(
+        &model,
+        Model::Sequence(_) | Model::LabelScores(_) | Model::Token(_)
+    ) && options.max_input_tokens.is_none()
+    {
+        task_limit.min(512)
+    } else {
+        options.effective_limit(task_limit)?
+    };
     let available_layers = match &model {
         Model::Embedding(model) => model.available_exit_layers(),
         _ => vec![],
@@ -183,6 +223,7 @@ fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
         dimension,
         available_layers,
         completed: AtomicU64::new(0),
+        pair_scorer,
     })))
 }
 
@@ -246,6 +287,8 @@ pub struct InstanceInfo {
     pub sessions: Vec<SessionEvidence>,
     /// Counts successfully completed real native inference calls, not loads.
     pub completed_inferences: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pair_scorer: Option<PairScorerSelection>,
 }
 
 pub fn info(handle: u64) -> UnifiedResult<InstanceInfo> {
@@ -262,46 +305,7 @@ pub fn info(handle: u64) -> UnifiedResult<InstanceInfo> {
         available_layers: instance.available_layers.clone(),
         sessions,
         completed_inferences: instance.completed.load(Ordering::Relaxed),
-    })
-}
-
-#[derive(Debug, Serialize)]
-pub struct Distribution {
-    pub label: String,
-    pub class_id: i32,
-    pub confidence: f32,
-    pub labels: Vec<String>,
-    pub probabilities: Vec<f32>,
-    pub input: InputUsage,
-}
-
-pub fn classify(handle: u64, text: &str) -> UnifiedResult<Distribution> {
-    let instance = get(handle)?;
-    let input = instance.input(text)?;
-    let mut model = instance.model.lock();
-    let Model::Sequence(model) = &mut *model else {
-        return Err(instance.wrong_task("sequence_classification"));
-    };
-    let result = model.classify(text)?;
-    if result.probabilities.len() != instance.labels.len()
-        || result
-            .probabilities
-            .iter()
-            .any(|p| !p.is_finite() || !(0.0..=1.0).contains(p))
-    {
-        return Err(errors::inference_error(
-            "distribution",
-            "model returned invalid label probabilities",
-        ));
-    }
-    instance.completed();
-    Ok(Distribution {
-        label: result.label,
-        class_id: result.class_id,
-        confidence: result.confidence,
-        labels: instance.labels.clone(),
-        probabilities: result.probabilities,
-        input,
+        pair_scorer: instance.pair_scorer,
     })
 }
 
@@ -521,7 +525,8 @@ pub fn finish_profiling(handle: u64) -> UnifiedResult<Vec<String>> {
     }
     let mut model = instance.model.lock();
     match &mut *model {
-        Model::Sequence(m) => m.finish_profiling(),
+        Model::PairScorer(model) => Ok(vec![model.finish_profiling()?]),
+        Model::Sequence(m) | Model::LabelScores(m) => m.finish_profiling(),
         Model::Token(m) => m.finish_profiling(),
         Model::Embedding(m) => m.finish_profiling(),
         Model::MultiModal(m) => m.finish_profiling(),

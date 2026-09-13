@@ -134,9 +134,11 @@ func TestPinnedRevisionNeedsPrimaryWeights(t *testing.T) {
 // A separately registered mapping is an artifact, not an encoder snapshot.
 // Its bytes and pinned metadata remain required without inventing weights.
 func TestPinnedFilesOnlyArtifactVerifiesContentWithoutWeights(t *testing.T) {
-	spec := ModelSpec{LocalPath: t.TempDir(), RepoID: "example/mappings",
+	spec := ModelSpec{
+		LocalPath: t.TempDir(), RepoID: "example/mappings",
 		Revision:      "0123456789abcdef0123456789abcdef01234567",
-		RequiredFiles: []string{"domain.json"}, FilesOnly: true, Strict: true}
+		RequiredFiles: []string{"domain.json"}, FilesOnly: true, Strict: true,
+	}
 	writeHFRevisionArtifact(t, spec, "domain.json", `{"0":"general"}`, false)
 	if err := recordDownloadedModelRevision(spec); err != nil {
 		t.Fatalf("verified mapping artifact rejected: %v", err)
