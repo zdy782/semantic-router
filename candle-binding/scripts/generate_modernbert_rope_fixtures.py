@@ -59,6 +59,16 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_shared(path, value):
+    """Store one reference only when both official versions agree exactly."""
+    encoded = json.dumps(value, indent=2, allow_nan=False) + "\n"
+    if path.exists():
+        if path.read_text(encoding="utf-8") != encoded:
+            raise ValueError(f"Official reference versions disagree: {path.name}")
+    else:
+        path.write_text(encoded, encoding="utf-8")
+
+
 def cache_goldens(mode):
     cases = []
     for theta, recipe in RECIPES:
@@ -171,7 +181,7 @@ def main():
         }
     config._attn_implementation = "sdpa"
     model = ModernBertModel(config).float().eval()
-    weights = output / "model.safetensors"
+    weights = output / "weights.safetensors.fixture"
     if args.mode == "tf4":
         save_file(
             {name: tensor.contiguous() for name, tensor in model.state_dict().items()},
@@ -199,14 +209,14 @@ def main():
                 "masked_mean": pooled.tolist(),
             }
         )
-    write_json(
-        variant / "tiny-output.json",
+    write_shared(
+        output / "tiny-output.json",
         {
             "cases": cases,
             "compared_positions": "valid tokens and their masked mean; padded query hidden states are outside this assertion",
         },
     )
-    write_json(variant / "rope.json", {"cases": cache_goldens(args.mode)})
+    write_shared(output / "rope.json", {"cases": cache_goldens(args.mode)})
     source = Path(inspect.getsourcefile(ModernBertRotaryEmbedding))
 
     utility = Path(inspect.getsourcefile(rope_utils))
@@ -224,7 +234,11 @@ def main():
                 utility.name: digest(utility),
             },
             "weights_sha256": digest(weights),
-            "files": {path.name: digest(path) for path in variant.iterdir()},
+            "files": {
+                "config.json": digest(variant / "config.json"),
+                "../rope.json": digest(output / "rope.json"),
+                "../tiny-output.json": digest(output / "tiny-output.json"),
+            },
             "configuration_path": (
                 "direct official TF4 constructor"
                 if args.mode == "tf4"

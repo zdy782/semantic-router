@@ -147,6 +147,11 @@ fn read_fixture(mode: &str, name: &str) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+fn read_reference(name: &str) -> Value {
+    let bytes = std::fs::read(fixture_dir().join(name)).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
 fn floats(value: &Value) -> Vec<f32> {
     serde_json::from_value(value.clone()).unwrap()
 }
@@ -186,7 +191,7 @@ fn fixture_identity_is_frozen() {
 fn official_yarn_frequency_cache_and_rotated_qk_goldens() -> Result<()> {
     let device = Device::Cpu;
     for mode in ["tf4", "tf5"] {
-        for (case_index, case) in read_fixture(mode, "rope.json")["cases"]
+        for (case_index, case) in read_reference("rope.json")["cases"]
             .as_array()
             .unwrap()
             .iter()
@@ -258,7 +263,7 @@ pub(crate) fn assert_tiny_fixture(
 ) -> Result<Vec<f32>> {
     let device = Device::Cpu;
     let mut all_outputs = Vec::new();
-    for (index, case) in read_fixture(mode, "tiny-output.json")["cases"]
+    for (index, case) in read_reference("tiny-output.json")["cases"]
         .as_array()
         .unwrap()
         .iter()
@@ -334,7 +339,7 @@ pub(crate) fn assert_default_forward_unchanged(
     mut current: impl FnMut(&Tensor, &Tensor) -> Result<Tensor>,
     mut previous: impl FnMut(&Tensor, &Tensor) -> Result<Tensor>,
 ) -> Result<()> {
-    for case in read_fixture("tf4", "tiny-output.json")["cases"]
+    for case in read_reference("tiny-output.json")["cases"]
         .as_array()
         .unwrap()
     {

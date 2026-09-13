@@ -5,8 +5,10 @@ These fixtures contain a randomly initialized two-layer ModernBERT backbone
 arrays. They contain no trained checkpoint, tokenizer, dataset or task examples.
 The 79,672-byte `weights.safetensors.fixture` file is ordinary safetensors with a
 fixture suffix and a binary Git attribute. Both reference versions use identical
-weight bytes. Their manifests lock the weights, configuration, outputs,
-generator and installed official implementation hashes.
+weight bytes. The two official versions also produced byte-identical numerical
+outputs, stored once in `rope.json` and `tiny-output.json`. Their manifests
+retain the original generator and implementation hashes and each refer to
+the shared outputs. No numerical values were changed during deduplication.
 The reference configurations use only the official `norm_eps` spelling.
 Separate loader tests cover the legacy alias and reject conflicting values.
 
@@ -18,8 +20,8 @@ python generate_modernbert_rope_fixtures.py --mode tf5 --output /tmp/rope-refere
 ```
 
 Use [the repository generator](../../scripts/generate_modernbert_rope_fixtures.py)
-under Transformers 4.57.6 and 5.3.0 respectively. Then copy `tf4/` and `tf5/`,
-and rename `model.safetensors` to `weights.safetensors.fixture`. No model download
+under Transformers 4.57.6 and 5.3.0 respectively. Copy the output directory;
+the second run rejects any difference in the shared references. No model download
 or accelerator is needed. The stored fixtures used PyTorch 2.10.0 on CPU;
 regeneration with another math library can vary in floating-point rounding.
 

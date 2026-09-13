@@ -11,9 +11,9 @@
   },
   "weights_sha256": "8f28e25dbadf411e45829bf223f4b719f77cec36af56d6c241127cfcffc0961f",
   "files": {
-    "rope.json": "87eeb508015847ebb08d35d991427cba97acadb984e6476ff417b3a71ecc15f6",
     "config.json": "8444e8b56031b078122474318f61bda4c1c6428f8fa5ca57cb9d7ffe5133644b",
-    "tiny-output.json": "0807d98c7ec9498b933d12735a8758be61d8362ad26de5e6744fedcc1e103d2a"
+    "../rope.json": "87eeb508015847ebb08d35d991427cba97acadb984e6476ff417b3a71ecc15f6",
+    "../tiny-output.json": "0807d98c7ec9498b933d12735a8758be61d8362ad26de5e6744fedcc1e103d2a"
   },
   "configuration_path": "direct official TF4 constructor",
   "scope": "Generated random tiny backbone and numerical arrays; no trained checkpoint, data, or task-quality claim"
