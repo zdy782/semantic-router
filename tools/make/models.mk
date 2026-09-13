@@ -111,6 +111,12 @@ download-models-lora: ## Download models for LoRA and advanced embedding tests
 	@$(MAKE) download-models
 	@$(MAKE) download-qwen3-embedding
 
+# The evaluation registry pins current Vela native snapshots. The MMBERT lists
+# below and their download targets intentionally remain explicit legacy tools.
+.PHONY: download-eval-models
+download-eval-models: ## Download current native evaluation models (Vela plus legacy PromptGuard)
+	@python3 -m src.training.model_eval.download_models --output $(MODELS_DIR)
+
 # Minimal model set for perf/benchmarks (CI performance tests).
 # The component benchmarks initialize classifiers/embeddings directly instead
 # of going through the router's startup download, so these must be

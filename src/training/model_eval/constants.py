@@ -1,8 +1,11 @@
 """
-Constants for MoM Collection Evaluation Script
+Constants for served-model evaluation and explicit legacy MoM evaluation
 All shared constants, registries and configs are defined here.
 """
 
+from copy import deepcopy
+
+# Historical reference only; loaders must use the artifact's declared base.
 BASE_MODEL_ID = "jhu-clsp/mmBERT-base"
 
 # Supported langs
@@ -20,7 +23,7 @@ LANGUAGE_CODES = {
 }
 
 # Registry of all MoM models (merged as well as LoRA)
-MODEL_REGISTRY = {
+LEGACY_MODEL_REGISTRY = {
     "feedback": {
         "id": "llm-semantic-router/mmbert32k-feedback-detector-merged",
         "lora_id": "llm-semantic-router/mmbert32k-feedback-detector-lora",
@@ -36,7 +39,8 @@ MODEL_REGISTRY = {
         "lora_id": "llm-semantic-router/mmbert32k-jailbreak-detector-lora",
         "type": "text_classification",
         "hf_dataset": "llm-semantic-router/jailbreak-detection-dataset",
-        "labels": ["safe", "unsafe"],
+        "labels": ["benign", "jailbreak"],
+        "dataset_label_aliases": {"safe": "benign", "unsafe": "jailbreak"},
         "text_col": "text",
         "label_col": "label",
         "split": "test",
@@ -123,3 +127,39 @@ MODEL_REGISTRY = {
         "split": "test",
     },
 }
+
+# Immutable native releases. Keep these in sync with config/registry.go; tests
+# compare every entry, including releases outside this classifier evaluator.
+VELA_RELEASE_REVISIONS = {
+    "llm-semantic-router/Vela-1.0-Encoder-307M": "225bb8021e0e7839e6045b253caadcb19e96bb25",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck": "e4869536922d693c9213f68ecf7b3c9ff610f3e2",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Domain": "938773f3f7b67392c3aba6f2a344b251de881ecf",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "fe0d5700d4498110fd2a6de71243d95dee4ca657",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "994b999048f349bfb62fc92578db86ca4e853205",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "e7a4f126b4b19810a4dd90ad2019f86acd32e920",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding": "5e639f1a709168f6f1cf69cd519f3aa9221bfbef",
+}
+
+MODEL_REGISTRY = deepcopy(LEGACY_MODEL_REGISTRY)
+for _role, _suffix in {
+    "feedback": "Feedback",
+    "fact-check": "FactCheck",
+    "intent": "Domain",
+    "pii": "PII",
+}.items():
+    _entry = MODEL_REGISTRY[_role]
+    _entry["id"] = f"llm-semantic-router/Vela-1.0-Encoder-307M-{_suffix}"
+    _entry["revision"] = VELA_RELEASE_REVISIONS[_entry["id"]]
+    # Published lora/ variants require their own reproduction contract. They
+    # are not independent *-lora repositories or generic base+adapter loads.
+    del _entry["lora_id"]
+MODEL_REGISTRY["feedback"]["labels"].append("NO_FEEDBACK")
+
+COLLECTIONS = {"served": MODEL_REGISTRY, "legacy-mom": LEGACY_MODEL_REGISTRY}
+
+
+def model_registry(collection="served"):
+    """Return an explicit collection; never fall back to a legacy artifact."""
+    if collection not in COLLECTIONS:
+        raise ValueError(f"Unknown model collection: {collection}")
+    return COLLECTIONS[collection]

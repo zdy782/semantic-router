@@ -1,17 +1,23 @@
 # Classifier Model Evaluation
 
-`mom_collection_eval.py` evaluates the merged and LoRA variants registered in
-`constants.py`:
+`mom_collection_eval.py` defaults to the Router's served classifier collection:
+Vela Feedback (five classes), FactCheck, Domain (`intent` CLI key), and PII,
+plus the currently served legacy PromptGuard (`jailbreak` key). Vela native
+snapshots are pinned to the immutable revisions in the Router registry.
 
-- feedback;
-- jailbreak;
-- fact-check;
-- intent;
-- PII.
+`--collection legacy-mom` explicitly selects the previous five mmBERT-32K
+models and their legacy adapter entries. The filename remains compatible.
+Loading preserves each artifact's tokenizer, context configuration, pooling and
+complete classification head. Wrong label orders or missing head parameters
+fail before scoring. Vela `lora/` bundles have their own published reproduction
+contracts and are not supported by this generic `--use_lora` path.
 
-It reports classification metrics, latency summaries, and confusion matrices
-where applicable. The registry defines the default model, dataset, label
-mapping, text field, and split for each task.
+The default datasets are **historical source diagnostics**, not independent
+Vela release benchmarks. In particular, the old Feedback dataset has no
+NO_FEEDBACK gold examples. Results retain all five classes, their support,
+unsupported labels, and full-contract macro F1; zero support does not establish
+quality for that class. Use a separately held-out custom dataset for five-class
+coverage. FactCheck predicts whether verification is needed, not factual truth.
 
 ## Install
 
@@ -32,6 +38,7 @@ Evaluate several models or their LoRA variants:
 
 ```bash
 python mom_collection_eval.py \
+  --collection legacy-mom \
   --model feedback jailbreak fact-check intent pii \
   --use_lora \
   --device cuda
@@ -41,6 +48,10 @@ Useful options:
 
 | Option | Purpose |
 |---|---|
+| `--collection` | `served` (default) or explicit `legacy-mom` |
+| `--revision` | explicit revision for an override or legacy artifact |
+| `--dtype` | native loading precision; default `float32`, without autocast |
+| `--max_length` | full-input token budget (default 32768); over-budget input fails |
 | `--model_id` | override the registered checkpoint for a single-model run |
 | `--custom_dataset` | use a local JSON or CSV dataset |
 | `--language` | filter rows when the dataset exposes a supported language field |
@@ -52,7 +63,18 @@ Useful options:
 Use underscores in option names, as shown by
 `python mom_collection_eval.py --help`.
 
+Download evaluation native snapshots with `make download-eval-models`. Production
+`make download-models` continues to use the Router's downloader, including its
+runtime artifact validation. Existing `download-mmbert-*` targets remain legacy
+utilities; they do not download Vela. Legacy adapters must declare an available
+base and save every newly initialized task-head parameter; otherwise evaluation
+rejects them instead of scoring a random head.
+
 ## Results
+
+This evaluator uses native full-input argmax inference; it does not reproduce
+Router PII scanning windows or FactCheck threshold decisions. The loaded
+precision, pooling, model revision and token budget are recorded in each result.
 
 The default output directory is `src/training/model_eval/results/`. JSON files
 contain the metrics and run metadata; text-classification tasks also produce a
@@ -71,7 +93,8 @@ your workload.
 
 `quality_baseline.py` measures the artifact a maintained configuration actually
 loads, resolved from `config/config.yaml` rather than from `constants.py`. It
-takes the class order from the artifact's own mapping, reports calibration and
+uses the same immutable pins for published Vela models and takes the class order
+from the artifact's own mapping, reports calibration and
 threshold behaviour alongside accuracy, and writes provenance manifests next to
 the result.
 
