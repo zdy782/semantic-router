@@ -54,6 +54,90 @@ def _ancestors(producers, name):
     return result
 
 
+def _gathered_padding(graph, producers, gather):
+    """Prove the export's GatherND is precisely mask[batch, key].
+
+    Its two index ranges broadcast to [B, 1, 1, K], then concatenate
+    on a new final axis. No query-dependent indices or arbitrary gather
+    expressions are accepted, even when their example output agrees.
+    """
+
+    def node(value, kind):
+        result = producers.get(value)
+        if result is None or result.op_type != kind:
+            raise ValueError(f"GatherND padding requires {kind}")
+        return result
+
+    def attributes(value):
+        return {a.name: a.i for a in value.attribute}
+
+    def unsqueeze(value, axes):
+        result = node(value, "Unsqueeze")
+        actual = _array(graph, producers, result.input[1])
+        if actual is None or actual.dtype != np.int64 or actual.tolist() != axes:
+            raise ValueError("Unproved GatherND index axis")
+        return result.input[0]
+
+    def index_range(value, axis):
+        result = node(value, "Range")
+        for name, expected in [(result.input[0], 0), (result.input[2], 1)]:
+            constant = _array(graph, producers, name)
+            if (
+                constant is None
+                or constant.dtype != np.int64
+                or constant.ndim != 0
+                or constant.item() != expected
+            ):
+                raise ValueError("GatherND indices require exact int64 ranges")
+        squeeze = node(result.input[1], "Squeeze")
+        axes_inputs = squeeze.input[1:]
+        if axes_inputs:
+            if len(axes_inputs) != 1:
+                raise ValueError("Unproved GatherND range dimension squeeze")
+            axes = _array(graph, producers, axes_inputs[0])
+            if axes is None or axes.dtype != np.int64 or axes.tolist() != [0]:
+                raise ValueError("Unproved GatherND range dimension squeeze")
+        shape = node(squeeze.input[0], "Shape")
+        if list(shape.input) != ["attention_mask"] or attributes(shape) != {
+            "start": axis,
+            "end": axis + 1,
+        }:
+            raise ValueError("GatherND range must span the corresponding mask axis")
+
+    if attributes(gather) not in ({}, {"batch_dims": 0}):
+        raise ValueError("GatherND padding requires batch_dims=0")
+    cast = node(gather.input[0], "Cast")
+    if list(cast.input) != ["attention_mask"] or attributes(cast) != {
+        "to": TensorProto.BOOL
+    }:
+        raise ValueError("GatherND padding must read the boolean attention_mask")
+    concat = node(gather.input[1], "Concat")
+    if len(concat.input) != MASK_RANK or attributes(concat) not in (
+        {"axis": -1},
+        {"axis": 4},
+    ):
+        raise ValueError("GatherND padding requires final-axis [batch, key] pairs")
+    expanded = []
+    for name in concat.input:
+        wrapper = node(name, "Unsqueeze")
+        axes = _array(graph, producers, wrapper.input[1])
+        if axes is None or axes.dtype != np.int64 or axes.tolist() not in ([-1], [4]):
+            raise ValueError("GatherND index pairs require a new final axis")
+        expanded.append(node(wrapper.input[0], "Expand"))
+    if expanded[0].input[1] != expanded[1].input[1]:
+        raise ValueError("GatherND index ranges must share their broadcast shape")
+    shape = node(expanded[0].input[1], "Shape")
+    if attributes(shape) not in ({}, {"start": 0}):
+        raise ValueError("GatherND broadcast shape must preserve all dimensions")
+    broadcast = node(shape.input[0], "Max")
+    views = [item.input[0] for item in expanded]
+    if len(broadcast.input) != MASK_RANK or set(broadcast.input) != set(views):
+        raise ValueError("GatherND broadcast shape must come from its index ranges")
+    # Exact exporter axes prove [B,1,1,1] and [1,1,1,K].
+    index_range(unsqueeze(unsqueeze(views[0], [3]), [1, 2]), 0)
+    index_range(unsqueeze(unsqueeze(views[1], [2]), [0, 1]), 1)
+
+
 def _mask_contract(graph, producers, name):
     window = attention_window(graph, producers, name)
     ancestors = _ancestors(producers, name)
@@ -141,6 +225,9 @@ def _mask_contract(graph, producers, name):
             return flags
         if node.op_type == "And":
             return predicate(node.input[0]) | predicate(node.input[1])
+        if node.op_type == "GatherND":
+            _gathered_padding(graph, producers, node)
+            return {"padding"}
         if node.op_type in {"Less", "LessOrEqual"}:
             # The shared recognizer proves abs(q-k) and the radius. Also prove
             # these are the query and key axes, not two views of the same axis.

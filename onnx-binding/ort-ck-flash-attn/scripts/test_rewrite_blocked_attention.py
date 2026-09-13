@@ -14,7 +14,9 @@ except ImportError:
     ort = None
 
 
-def attention_model(radius=None, guard=True, inverted=False, negative=-np.inf):
+def attention_model(
+    radius=None, guard=True, inverted=False, negative=-np.inf, gathered=False
+):
     nodes, initializers = [], []
 
     def const(name, value, dtype=np.int64):
@@ -54,8 +56,30 @@ def attention_model(radius=None, guard=True, inverted=False, negative=-np.inf):
         mask = op("Where", [is_pad, neg, inverse], "global_mask")
     else:
         padding = op("Cast", ["attention_mask"], "bool_padding", to=TensorProto.BOOL)
-        expanded = op("Unsqueeze", [padding, "pad_axes"], "expanded_padding")
-        keep = op("Expand", [expanded, dense], "global_keep")
+        if gathered:
+            # Actual torch exporter mask[batch, key] advanced-indexing graph.
+            bs = op("Shape", ["attention_mask"], "mask_batch_shape", start=0, end=1)
+            ks = op("Shape", ["attention_mask"], "mask_key_shape", start=1, end=2)
+            bl = op("Squeeze", [bs], "mask_batch_length")
+            kl = op("Squeeze", [ks], "mask_key_length")
+            br = op("Range", ["zero_i", bl, "one_i"], "batch_indices")
+            kr = op("Range", ["zero_i", kl, "one_i"], "key_indices")
+            bv = op("Unsqueeze", [br, "pad_axes"], "batch_view_3d")
+            bv = op("Unsqueeze", [bv, const("axes3", [3])], "batch_view")
+            kv = op("Unsqueeze", [kr, const("axes01", [0, 1])], "key_view_3d")
+            kv = op("Unsqueeze", [kv, const("axes2", [2])], "key_view")
+            common = op("Max", [bv, kv], "broadcast_indices")
+            common = op("Shape", [common], "index_shape", start=0)
+            be = op("Expand", [bv, common], "broadcast_batch")
+            ke = op("Expand", [kv, common], "broadcast_key")
+            final_axis = const("final_axis", [-1])
+            be = op("Unsqueeze", [be, final_axis], "batch_column")
+            ke = op("Unsqueeze", [ke, final_axis], "key_column")
+            pairs = op("Concat", [be, ke], "index_pairs", axis=-1)
+            keep = op("GatherND", [padding, pairs], "global_keep", batch_dims=0)
+        else:
+            expanded = op("Unsqueeze", [padding, "pad_axes"], "expanded_padding")
+            keep = op("Expand", [expanded, dense], "global_keep")
         mask = op("Where", [keep, zero, neg], "global_mask")
     if radius is not None:
         position = op("Range", ["zero_i", length, "one_i"], "positions")
@@ -204,6 +228,68 @@ class BlockedNumerics(unittest.TestCase):
                     after = candidate.run(None, inputs)[0]
                     np.testing.assert_allclose(after, before, atol=2e-6, rtol=2e-6)
                     self.assertEqual(after.shape, (batch, 2, length, 4))
+
+    def test_gathered_padding_matches_actual_export_for_batch_and_key_axes(self):
+        for radius in [None, 2, 64]:
+            with self.subTest(radius=radius):
+                original = attention_model(
+                    radius=radius, negative=-np.finfo(np.float32).max, gathered=True
+                )
+                frozen = original.SerializeToString()
+                blocked, receipt = rewrite_model(original, max_score_bytes=16384)
+                self.assertEqual(original.SerializeToString(), frozen)
+                self.assertEqual(
+                    receipt["cropped_local_blocks"], int(radius is not None)
+                )
+                self.assertFalse(
+                    any(n.op_type == "GatherND" for n in blocked.graph.node)
+                )
+                reference, candidate = session(original), session(blocked)
+                for batch, length in [(1, 1), (2, 7), (2, 17), (1, 129), (2, 257)]:
+                    for padding in ["irregular", "all_masked", "valid"]:
+                        inputs = feeds(
+                            batch, length, all_masked=padding == "all_masked"
+                        )
+                        if padding == "valid":
+                            inputs["attention_mask"][:] = 1
+                        np.testing.assert_allclose(
+                            candidate.run(None, inputs)[0],
+                            reference.run(None, inputs)[0],
+                            atol=2e-6,
+                            rtol=2e-6,
+                        )
+
+    def test_gathered_padding_rejects_unproved_indices(self):
+        mutations = [
+            ("global_keep", "batch_dims", 1),
+            ("index_pairs", "axis", 0),
+            ("mask_batch_shape", "start", 1),
+            ("mask_key_shape", "end", 1),
+            ("index_shape", "start", 1),
+            ("bool_padding", "to", TensorProto.INT64),
+        ]
+        for name, attribute, value in mutations:
+            with self.subTest(name=name, attribute=attribute):
+                model = attention_model(radius=2, gathered=True)
+                node = next(n for n in model.graph.node if n.name == name)
+                next(a for a in node.attribute if a.name == attribute).i = value
+                with self.assertRaises(ValueError):
+                    rewrite_model(model)
+        for name, index, replacement in [
+            ("index_pairs", 0, "key_column"),
+            ("broadcast_key", 1, "dense_shape"),
+            ("key_view", 1, "axes3"),
+            ("batch_indices", 0, "one_i"),
+            ("key_indices", 2, "two_i"),
+            ("broadcast_indices", 1, "batch_view"),
+            ("global_keep", 0, "attention_mask"),
+        ]:
+            with self.subTest(name=name, replacement=replacement):
+                model = attention_model(radius=2, gathered=True)
+                node = next(n for n in model.graph.node if n.name == name)
+                node.input[index] = replacement
+                with self.assertRaises(ValueError):
+                    rewrite_model(model)
 
     def test_adaptive_memory_limit_still_uses_complete_keys(self):
         original = attention_model(radius=3)
