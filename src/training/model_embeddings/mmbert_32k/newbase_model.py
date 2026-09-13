@@ -310,6 +310,9 @@ class NewBaseTask(nn.Module):
                 )
                 + "\n"
             )
+            # Normalize has no parameters or configuration file. The module
+            # makes default SentenceTransformer.encode match the full exit.
+            (directory / "2_Normalize").mkdir()
             (directory / "modules.json").write_text(
                 json.dumps(
                     [
@@ -324,6 +327,12 @@ class NewBaseTask(nn.Module):
                             "name": "1",
                             "path": "1_Pooling",
                             "type": "sentence_transformers.models.Pooling",
+                        },
+                        {
+                            "idx": 2,
+                            "name": "2",
+                            "path": "2_Normalize",
+                            "type": "sentence_transformers.models.Normalize",
                         },
                     ],
                     indent=2,

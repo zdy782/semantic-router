@@ -20,6 +20,13 @@ try:
 except ImportError:
     torch = None
 
+try:
+    from sentence_transformers import SentenceTransformer
+    from tokenizers import Tokenizer, models, pre_tokenizers, processors
+    from transformers import PreTrainedTokenizerFast
+except ImportError:
+    SentenceTransformer = None
+
 
 @unittest.skipIf(torch is None, "requires torch and transformers")
 class NewBaseModelTest(unittest.TestCase):
@@ -132,6 +139,71 @@ class NewBaseModelTest(unittest.TestCase):
                 values.norm(dim=-1), torch.ones(2), atol=1e-6, rtol=1e-6
             )
             torch.testing.assert_close(values[1:2], single[key], atol=1e-5, rtol=1e-5)
+
+    @unittest.skipIf(SentenceTransformer is None, "requires sentence-transformers")
+    def test_standard_embedding_encode_matches_native_and_preserves_weights(self):
+        vocabulary = {
+            "[PAD]": 0,
+            "[CLS]": 1,
+            "[SEP]": 2,
+            "[UNK]": 3,
+            "quiet": 4,
+            "observatory": 5,
+            "clear": 6,
+            "sky": 7,
+        }
+        backend = Tokenizer(models.WordLevel(vocabulary, unk_token="[UNK]"))
+        backend.pre_tokenizer = pre_tokenizers.Whitespace()
+        backend.post_processor = processors.TemplateProcessing(
+            single="[CLS] $A [SEP]",
+            special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
+        )
+        tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=backend,
+            pad_token="[PAD]",
+            cls_token="[CLS]",
+            sep_token="[SEP]",
+            unk_token="[UNK]",
+            model_max_length=128,
+            model_input_names=["input_ids", "attention_mask"],
+        )
+        sentences = ["quiet observatory", "clear"]
+        batch = tokenizer(sentences, padding=True, return_tensors="pt")
+        model = self.model("embedding").eval()
+        initial_state = state_digest(model.state_dict())
+        with torch.no_grad():
+            expected = model(batch["input_ids"], batch["attention_mask"])
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint"
+            model.save(checkpoint, tokenizer)
+            # Hub Git snapshots preserve files, not empty module directories.
+            (checkpoint / "2_Normalize").rmdir()
+            saved = SentenceTransformer(
+                str(checkpoint), device="cpu", local_files_only=True
+            )
+            # No normalize_embeddings argument: the saved module must suffice.
+            actual = saved.encode(sentences, convert_to_tensor=True)
+            torch.testing.assert_close(actual, expected[22, 16], atol=1e-6, rtol=1e-6)
+            torch.testing.assert_close(
+                actual.norm(dim=-1), torch.ones(2), atol=1e-6, rtol=1e-6
+            )
+            for dimension in model.exits.dimensions:
+                prefix = saved.encode(
+                    sentences,
+                    convert_to_tensor=True,
+                    truncate_dim=dimension,
+                    normalize_embeddings=True,
+                )
+                torch.testing.assert_close(
+                    prefix, expected[22, dimension], atol=1e-6, rtol=1e-6
+                )
+            restored = NewBaseTask.resume(checkpoint).eval()
+            self.assertEqual(state_digest(restored.state_dict()), initial_state)
+            self.assertEqual(state_digest(model.state_dict()), initial_state)
+            self.assertEqual(
+                state_digest(saved[0].auto_model.state_dict()),
+                state_digest(model.encoder.state_dict()),
+            )
 
     def test_missing_encoder_identity_rejected(self):
         with (
