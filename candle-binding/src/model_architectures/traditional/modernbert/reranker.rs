@@ -25,10 +25,12 @@ struct MatryoshkaConfig {
     hidden_size: usize,
     num_layers: usize,
     pooling_strategy: String,
-    has_final_norm: bool,
+    // Older layouts repeat the encoder's normalization declaration.
+    has_final_norm: Option<bool>,
+    representation_contract: Option<RepresentationContract>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RepresentationContract {
     version: usize,
@@ -72,7 +74,11 @@ impl MatryoshkaReranker {
             layout.hidden_size == config.hidden_size
                 && layout.num_layers == config.num_hidden_layers
                 && layout.pooling_strategy == "cls"
-                && layout.has_final_norm,
+                && layout.has_final_norm != Some(false)
+                && layout
+                    .representation_contract
+                    .as_ref()
+                    .is_none_or(|declared| declared == &representation),
             "configuration: reranker head layout disagrees with its encoder"
         );
         ensure!(

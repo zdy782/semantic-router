@@ -907,3 +907,32 @@ fn owned_reranker_rejects_missing_norm_or_invalid_representation() {
     std::fs::write(config, raw.to_string()).unwrap();
     assert!(load(opts, "pair_scores").is_err());
 }
+
+#[test]
+fn owned_reranker_uses_declared_normalization_without_legacy_flag() {
+    let dir = reranker_fixture();
+    let mut opts = options(&dir);
+    opts.overflow = "reject".into();
+    let path = dir.path().join("matryoshka_config.json");
+    let mut layout: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    layout.as_object_mut().unwrap().remove("has_final_norm");
+    let config: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("config.json")).unwrap()).unwrap();
+    layout["representation_contract"] = config["representation_contract"].clone();
+    std::fs::write(&path, layout.to_string()).unwrap();
+    let model = load(opts.clone(), "pair_scores").unwrap();
+    let result = model
+        .score_pairs(serde_json::from_value(json!([{"query":"hello","document":"world"}])).unwrap())
+        .unwrap();
+    let output = serde_json::to_value(result).unwrap();
+    assert!((output["scores"][0].as_f64().unwrap() - 3.682689492).abs() < 1e-6);
+    for bad in [json!(false), json!("invalid")] {
+        layout["has_final_norm"] = bad;
+        std::fs::write(&path, layout.to_string()).unwrap();
+        assert!(load(opts.clone(), "pair_scores").is_err());
+    }
+    layout.as_object_mut().unwrap().remove("has_final_norm");
+    layout["representation_contract"]["final_normalization"] = json!("none");
+    std::fs::write(&path, layout.to_string()).unwrap();
+    assert!(load(opts, "pair_scores").is_err());
+}

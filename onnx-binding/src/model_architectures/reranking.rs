@@ -28,7 +28,7 @@ struct ModelConfig {
     representation_contract: RepresentationContract,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RepresentationContract {
     version: usize,
@@ -45,7 +45,9 @@ struct MatryoshkaConfig {
     hidden_size: usize,
     num_layers: usize,
     pooling_strategy: String,
-    has_final_norm: bool,
+    // The encoder contract is authoritative; reject contradictory old metadata.
+    has_final_norm: Option<bool>,
+    representation_contract: Option<RepresentationContract>,
 }
 
 #[derive(Deserialize)]
@@ -96,7 +98,11 @@ impl PairScorer {
         if layout.hidden_size != config.hidden_size
             || layout.num_layers != config.num_hidden_layers
             || layout.pooling_strategy != "cls"
-            || !layout.has_final_norm
+            || layout.has_final_norm == Some(false)
+            || layout
+                .representation_contract
+                .as_ref()
+                .is_some_and(|declared| declared != representation)
             || layout.layer_indices.is_empty()
             || layout.dim_indices.is_empty()
             || !layout
