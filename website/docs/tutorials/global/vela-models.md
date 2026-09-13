@@ -35,7 +35,7 @@ can be configured explicitly.
 
 Vela Reranker is integrated with the vectorstore RAG plugin. Bind a local pair
 scorer through `rag.reranker` and enable the plugin's `rerank` setting, as shown
-in [neural reranking](../plugin/rag.md#neural-reranking). It scores retrieved
+in [neural reranking](/docs/tutorials/plugin/rag#neural-reranking). It scores retrieved
 query/document pairs during a live request. Route preview reports routing
 signals and their latency; actual reranker timing comes from the RAG request
 trace. An encoder Base is a training parent, not an additional routing signal.
@@ -66,7 +66,7 @@ Changing embedding weights changes the vector space even when both models
 produce 768 dimensions. Local mmBERT response caches and memory use the loaded
 representation identity to isolate persistent data. Existing vector stores
 require compatible embeddings or reindexing; old data is not silently adopted
-or deleted. See [stores and tools](./stores-and-tools.md).
+or deleted. See [stores and tools](/docs/tutorials/global/stores-and-tools).
 
 ### Opt into long-context inference
 
