@@ -1,27 +1,27 @@
-# mmBERT-32K Safety Classifier Training
+# Vela Safety and Hazard training
 
-For the Vela generation, see the [application recipes](../vela-applications.md).
-They preserve historical recipes below while defining the new data, label,
-training and independent evaluation contracts.
+Safety predicts `safe` / `unsafe`. Hazard predicts twelve independent content-risk
+scores using the [fixed rubric](configs/hazard-rubric-v1.json), including explicit
+safe negatives and unknown-label masks. See the [application recipes](../vela-applications.md)
+for source admission, initialization, training and independent evaluation.
 
-This package trains two hierarchical content-safety classifiers on the current
-mmBERT-32K foundation:
+New runs start from `llm-semantic-router/Vela-1.0-Encoder-307M` revision
+`ccd22e6ba42f86681578229f9dfd468295da3def`. Bind the downloaded encoder,
+configuration and tokenizer bytes in each run. A shared model name alone does
+not establish common training lineage.
 
-- Level 1: binary `safe` / `unsafe` prompt classification;
-- Level 2: the historical nine-output hazard classifier, explicitly versioned
-  as `legacy-9-v1`.
+Use `sequence_repair.train` for binary Safety and `train_vela_hazard` for Hazard.
+Both accept explicit TRAIN and DEV files, source/group provenance and fixed
+budgets. `--method full --fresh-head` trains the complete encoder and a newly
+initialized task head. Adapter training uses an explicitly initialized adapter
+with its actual parent revision. Full checkpoints and adapters have separate
+export contracts; neither is a qualified release without the task's independent
+evaluation.
 
-The checked workflow produces deterministic checkpoints from the pinned
-`llm-semantic-router/mmbert-32k-yarn` base. Release receipts capture the base,
-data inputs, dependencies, evaluation, and artifact checksums. Publication is
-non-overwriting by default.
-
-The two existing collection artifacts, `mmbert-safety-binary-merged` and
-`mmbert-safety-binary-hazard`, are PEFT adapters for
-`jhu-clsp/mmBERT-base`. Despite its suffix, the first artifact is not a full
-merged model. Load existing adapters with the base declared in their
-`adapter_config.json`; use the 32K base only for checkpoints produced by this
-workflow.
+A 32K model capacity does not establish 32K task accuracy. Measure actual input
+tokens, retain rejected rows, and evaluate short retention, long inputs and
+safe quotations separately. Freeze checkpoint selection, thresholds and input
+policy before scoring independent evaluation data.
 
 ## Vela independent Hazard thresholds
 
@@ -83,50 +83,10 @@ trace. Omitting this option preserves the existing random sampler. A replay
 controls sampled examples, not equivalence between different precision, dropout,
 or optimization methods.
 
-## Training Contract
+## Validation
 
-The machine-readable source of truth is
-[`configs/training-v1.json`](configs/training-v1.json). It pins:
-
-- base-model and dataset revisions;
-- raw input-file SHA-256 digests;
-- prompt-only normalization, de-duplication, split precedence, and sampling;
-- the `legacy-9-v1` source-taxonomy crosswalk;
-- max length 512;
-- disabled ModernBERT reference compilation so distributed ranks do not each
-  create a large TorchInductor worker pool;
-- LoRA rank 32, alpha 64, dropout 0.1, and the four ModernBERT target modules;
-- global batch 64, 10 epochs, AdamW, linear warmup, and all random seeds;
-- distinct adapter and merged release artifacts.
-
-Compatibility settings and workflow decisions remain explicit in the contract
-and public documentation. A new run should retain its complete receipt so its
-configuration can be distinguished from an existing published checkpoint.
-
-## Data Contract
-
-`data.py prepare` downloads only pinned files and verifies their hashes. It
-uses AEGIS `prompt` and `prompt_label`; response/refusal variants are excluded.
-Empty and redacted prompts are removed. Fingerprints use NFKC normalization,
-Unicode whitespace collapse, case folding, and SHA-256, while the original
-stripped text remains the model input.
-
-Holdout precedence is `test > validation > train`. Any lower-precedence
-duplicate is removed before sampling, and conflicting-label fingerprint groups
-are dropped entirely.
-
-- Level 1 emits 10,000 training rows per label without replacement.
-- Level 2 emits 2,000 rows per label. Underrepresented classes use documented,
-  deterministic oversampling; validation and test remain natural-distribution
-  AEGIS data.
-- Multi-hazard AEGIS rows use the first mapped category in the dataset's source
-  order. All mapped targets remain in each row for audit and strict-subset
-  evaluation.
-
-## Lightweight Validation
-
-The data, taxonomy, metrics, contract, and artifact-shape tests require only
-the Python standard library:
+Run the retained data, admission, loss, sampling and training tests from the
+repository root in the supported training environment:
 
 ```bash
 python -m unittest discover \
@@ -134,124 +94,15 @@ python -m unittest discover \
   -p 'test_*.py' -v
 ```
 
-## ROCm Environment
+The full-training tests require PyTorch and Transformers; a dependency-based skip
+is not evidence that a model path was tested. Record the actual CPU, CUDA or ROCm
+build separately from dataset and model qualifications.
 
-The Dockerfile uses an immutable official ROCm/PyTorch base digest. Build it
-from the repository root:
+## Existing v1 compatibility
 
-```bash
-docker build \
-  -f src/training/model_classifier/safety_classifier/Dockerfile.rocm \
-  -t semantic-router-mmbert32k-safety:training-v1 .
-```
-
-The image carries conservative single-node RCCL defaults verified for the
-eight-device workflow: scratch reclaim is disabled, GPU P2P is disabled in
-favor of shared-memory collectives, and the channel count is capped at eight.
-These settings trade some collective bandwidth for bounded startup time; LoRA
-gradient communication is small relative to the frozen base model. The trainer
-also fences every distributed checkpoint save before deriving the best-model
-path on each rank. This avoids a Transformers 4.55 race in which rank zero can
-enter the load-best barrier while another rank has not yet observed the newly
-created checkpoint directory.
-
-Mount the repository, a persistent Hugging Face cache, and credentials using
-the normal secret mechanism for the environment. Do not copy tokens into the
-image or repository.
-
-## Prepare Once
-
-Data preparation must run once, before distributed launch, rather than once per
-rank:
-
-```bash
-python -m src.training.model_classifier.safety_classifier.data prepare \
-  --contract src/training/model_classifier/safety_classifier/configs/training-v1.json \
-  --output-dir /artifacts/data
-```
-
-The command writes deterministic JSONL splits and manifests under
-`/artifacts/data/{level1,level2}`. Keep this directory outside Git.
-
-## Eight-Accelerator Training
-
-The checked contract reproduces global batch 64 as `8 samples × 8 ranks × 1`
-gradient accumulation step:
-
-```bash
-VLLM_SR_SOURCE_COMMIT="$(git rev-parse HEAD)" \
-  torchrun --standalone --nproc_per_node=8 \
-  -m src.training.model_classifier.safety_classifier.train \
-  --task level1 \
-  --expected-world-size 8 \
-  --data-dir /artifacts/data \
-  --output-dir /artifacts/runs/level1
-
-VLLM_SR_SOURCE_COMMIT="$(git rev-parse HEAD)" \
-  torchrun --standalone --nproc_per_node=8 \
-  -m src.training.model_classifier.safety_classifier.train \
-  --task level2 \
-  --expected-world-size 8 \
-  --data-dir /artifacts/data \
-  --output-dir /artifacts/runs/level2
-```
-
-`VLLM_SR_SOURCE_COMMIT` is mandatory for a release-eligible container run when
-the mounted checkout is not trusted by the container's Git configuration. The
-trainer validates it as a full immutable Git SHA; missing provenance makes the
-run non-release-eligible, and the release command does not substitute a mutable
-revision.
-
-Use `--max-steps 2` for an accelerator smoke. Override runs are marked
-non-release-eligible in `training_manifest.json`.
-
-## Evaluate, Merge, and Publish
-
-Run independent evaluation against the materialized test split, then merge and
-compare logits:
-
-```bash
-python -m src.training.model_classifier.safety_classifier.evaluate \
-  --task level1 \
-  --model /artifacts/runs/level1/adapter \
-  --artifact-type adapter \
-  --data /artifacts/data/level1/test.jsonl \
-  --output-dir /artifacts/runs/level1/evaluation
-
-python -m src.training.model_classifier.safety_classifier.export \
-  --task level1 \
-  --run-root /artifacts/runs/level1 \
-  --merged-dir /artifacts/runs/level1-merged
-```
-
-Repeat for Level 2. Publication refuses existing repositories by default and
-performs a remote checksum plus load/inference verification:
-
-```bash
-python -m src.training.model_classifier.safety_classifier.release \
-  --task level1 \
-  --run-root /artifacts/runs/level1 \
-  --merged-dir /artifacts/runs/level1-merged
-```
-
-Every published adapter contains `adapter_model.safetensors`; every merged
-repository contains full `model.safetensors` weights. Both include label,
-contract, data, dependency, metric, parity, and file-checksum manifests.
-
-## Explicit v2 candidate recipe
-
-`configs/training-v1.json` remains the historical 512-token recipe. The separate
-`configs/training-v2.json` trains up to 2048 tokens on the pinned 32K backbone,
-keeps the same binary and legacy nine-class hazard IDs, and preserves global
-batch 64 through gradient accumulation. It uses validation to select the best
-checkpoint and leaves final-test inference to a separate frozen-candidate run.
-A device count is not a model-quality criterion in v2.
-
-Pass the v2 contract to both data preparation and training; their contract
-hashes must match. On one GPU the configured microbatch is 8 with eight
-accumulation steps. Training at 2048 does not establish 32K accuracy: evaluate
-4K/8K/16K/32K inputs with relevant content at the beginning, middle, and end,
-including safe quotations and negated harmful requests. Report full-context
-and windowed results separately. The hazard head covers `legacy-9-v1`, not all
-thirteen contemporary hazard categories, and its scores on safe content are
-not themselves an unsafe decision.
+The explicit [`training-v1.json`](configs/training-v1.json) contract and its
+`data`, `train`, `evaluate`, `export` and `release` commands remain available for
+existing binary and `legacy-9-v1` artifacts. They retain their pinned parent,
+512-token policy and existing label IDs. They do not define the current Vela
+twelve-label Hazard recipe. Load an existing adapter with the parent declared in
+its `adapter_config.json`.

@@ -101,17 +101,6 @@ the repository root. Download only the source files required by a builder.
   data is synthetic translation/adaptation, not twelve independent natural
   benchmarks. Its jailbreak tag is never converted into a Guard target.
 
-Hazard's historical `safety_classifier.vela_hazard_supervision` v3 projection
-remains reproducible. The subsequent `safety_classifier.vela_hazard_partial` v4
-projection quarantines all generated `jailbreaking` rows and unsafe `adapted`
-rows because the generation process does not establish reliable binary and
-exhaustive category annotations. Generic unsafe rows retain only positive
-categories also supported by the original AEGIS training prompt; all other
-categories are unknown. Generic/adapted safe rows retain full negative masks.
-These and unchanged AEGIS labels remain weak source supervision, not individually
-verified clean negatives. Both versions refuse development/test input and record
-exclusions. Never overwrite the original raw development/test labels.
-
 Use the [content-risk rubric](safety_classifier/configs/hazard-rubric-v1.json)
 for separate, explicitly reviewed development. It distinguishes harmful action
 and current crisis from education, prevention and support; insufficient context
@@ -122,26 +111,7 @@ For such development data, set Hazard's explicit
 `--selection-minimum-support 10` to exclude classes with fewer than ten positive
 or negative observations from the checkpoint selection category average. All raw per-class metrics
 remain recorded. The default of one preserves existing selection behavior.
-`safety_classifier.vela_hard_negatives` supplies a small original contrast corpus
-with fixed train/development semantic families and paired translations. These
-authored examples supplement source supervision; they are not independent
-natural-user evidence.
-
-The later `safety_classifier.vela_reviewed_supervision` v5 projection uses the
-explicit [training review](safety_classifier/configs/vela-training-risk-review-v2.json)
-to replace selected source groups with reviewed visible-text supervision. It
-removes all unreviewed variants of those groups without copying a reviewed
-translation's label onto different text. Source-only positive annotations for
-`specialized_advice` and `misinformation` become unknown in Hazard: the source
-definitions frequently include ordinary technical help, fiction and generic
-instruction attacks that differ from this family contract. Safety excludes
-weak unsafe rows supported only by these categories, without relabeling them
-safe. Clear reviewed and independently authored examples remain eligible for
-both categories. Other source supervision stays explicitly weak. This is a
-versioned training repair; raw evaluation labels and earlier runs stay intact.
-The stratified review counts are not estimates of an entire source's error rate.
-
-To reproduce the historical source projections:
+To materialize the pinned source projections:
 
 ```bash
 python -m src.training.model_classifier.safety_classifier.vela_data \
@@ -151,9 +121,10 @@ python -m src.training.model_classifier.safety_classifier.vela_cultureguard \
   --output /artifacts/cultureguard
 ```
 
-Each task has a `vela_authored` module for original training contrasts.
-These examples and their repeated or translated variants are training data,
-not independent evidence. Preserve `group_id` across every variant.
+Supply admitted training rows and their source manifests explicitly. Authored
+contrasts, repeated backgrounds and translations remain related training
+examples; preserve `group_id` across every variant. Source annotations must
+retain their original provenance and license.
 
 Hazard rows add `targets` and `label_mask`, both in config label order. Missing
 annotation is not a negative label. The loss averages observed binary losses
@@ -250,12 +221,15 @@ scikit-learn 1.7.2 and a platform-appropriate PyTorch 2.10 installation. Record 
 actual Torch accelerator build and all installed dependency versions with each
 candidate; installing a CPU or CUDA wheel does not enable ROCm.
 
+New Vela runs start from `llm-semantic-router/Vela-1.0-Encoder-307M` at
+revision `ccd22e6ba42f86681578229f9dfd468295da3def`. Download that revision
+to `/models/encoder` and retain its file hashes in the training receipt.
 Initialize a fresh adapter and trainable prediction head:
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.initialize \
-  --base /models/encoder --base-id llm-semantic-router/mmbert-32k-yarn \
-  --base-revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
+  --base /models/encoder --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
   --contract /artifacts/task/contract.json --output /artifacts/initial
 ```
 
@@ -270,7 +244,8 @@ python -m src.training.model_classifier.vela_partition \
   --input /artifacts/task/validation.jsonl --tokenizer /models/encoder \
   --max-length 2048 --output /artifacts/validation-2048
 python -m src.training.model_classifier.sequence_repair.train \
-  --base /models/encoder --base-revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
+  --base /models/encoder --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
   --adapter /artifacts/initial --contract /artifacts/task/contract.json \
   --train /artifacts/task/train.jsonl \
   --dev /artifacts/validation-2048/within-budget.jsonl \
@@ -283,7 +258,8 @@ Hazard instead uses `safety_classifier.train_vela_hazard` with the same base,
 adapter, contract and budget arguments. For new runs, pass the admitted training
 `rows.jsonl` and separately admitted development rows described above, keeping
 raw crosswalk data for historical reproduction. Its selection choices are
-`macro-ap`, `source-macro-ap`, and `fp-budget-macro-f1`; it implements masked BCE and samples safe
+`macro-ap`, `source-macro-ap`, `fp-budget-macro-f1`, and
+`joint-fp-budget-macro-f1`; it implements masked BCE and samples safe
 negatives plus positive categories. Do not pass Hazard data through the
 single-label trainer or use softmax to decode its logits.
 

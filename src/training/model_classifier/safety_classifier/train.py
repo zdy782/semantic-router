@@ -445,10 +445,7 @@ def _build_trainer(
 
 
 def _release_eligible(
-    args: argparse.Namespace,
-    world_size: int,
-    use_bf16: bool,
-    contract: dict[str, Any] | None = None,
+    args: argparse.Namespace, world_size: int, use_bf16: bool
 ) -> bool:
     """Return whether a run used the unmodified release training contract."""
     return bool(
@@ -457,11 +454,7 @@ def _release_eligible(
         and args.learning_rate is None
         and args.per_device_train_batch_size is None
         and args.gradient_accumulation_steps is None
-        and (
-            world_size == RELEASE_WORLD_SIZE
-            if contract is None or contract["contract_version"] == 1
-            else world_size > 0
-        )
+        and world_size == RELEASE_WORLD_SIZE
         and use_bf16
     )
 
@@ -545,7 +538,7 @@ def _write_run_receipts(
         source_manifest_path,
         model,
         runtime,
-        _release_eligible(args, runtime.world_size, runtime.use_bf16, contract),
+        _release_eligible(args, runtime.world_size, runtime.use_bf16),
     )
     _write_json(runtime.output_root / "training_manifest.json", manifest)
     _write_json(runtime.output_root / "training_contract.json", contract)
