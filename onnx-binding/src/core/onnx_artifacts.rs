@@ -1,5 +1,5 @@
 //! Stream the ONNX envelope, skipping tensor bytes, to bind every external data file.
-use super::runtime_identity::ArtifactSnapshot;
+use super::artifact_identity::ArtifactSnapshot;
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -180,4 +180,185 @@ mod tests {
             assert!(walk(&mut data.as_slice(), "model", 0, &mut BTreeSet::new()).is_err());
         }
     }
+}
+
+/// Declared graph input metadata, read without materializing tensor payloads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphInput {
+    pub name: String,
+    pub element_type: i32,
+    pub dimensions: Vec<Option<i64>>,
+    pub dimension_symbols: Vec<Option<String>>,
+}
+
+enum Field<'a> {
+    Integer(u64),
+    Bytes(&'a mut dyn Read),
+}
+
+fn fields(
+    reader: &mut dyn Read,
+    visitor: &mut dyn FnMut(u64, Field<'_>) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    while let Some(tag) = varint(reader)? {
+        let number = tag >> 3;
+        anyhow::ensure!(number > 0, "invalid ONNX field number");
+        match tag & 7 {
+            0 => visitor(number, Field::Integer(required_varint(reader)?))?,
+            1 => discard(reader, 8)?,
+            2 => {
+                let length = required_varint(reader)?;
+                let mut limited = reader.take(length);
+                visitor(number, Field::Bytes(&mut limited))?;
+                let remaining = limited.limit();
+                discard(&mut limited, remaining)?;
+            }
+            5 => discard(reader, 4)?,
+            _ => anyhow::bail!("unsupported ONNX protobuf wire type"),
+        }
+    }
+    Ok(())
+}
+
+fn small_string(reader: &mut dyn Read) -> anyhow::Result<String> {
+    let mut value = Vec::new();
+    reader.take(65537).read_to_end(&mut value)?;
+    anyhow::ensure!(value.len() <= 65536, "oversize ONNX input metadata");
+    Ok(String::from_utf8(value)?)
+}
+
+fn dimension(reader: &mut dyn Read) -> anyhow::Result<(Option<i64>, Option<String>)> {
+    let mut result = None;
+    let mut symbol = None;
+    let mut seen = false;
+    fields(reader, &mut |number, value| {
+        match (number, value) {
+            (1, Field::Integer(value)) => {
+                anyhow::ensure!(
+                    !seen && value > 0 && value <= i64::MAX as u64,
+                    "invalid ONNX input dimension"
+                );
+                result = Some(value as i64);
+                seen = true;
+            }
+            (2, Field::Bytes(bytes)) => {
+                let name = small_string(bytes)?;
+                anyhow::ensure!(!seen && !name.is_empty(), "invalid symbolic ONNX dimension");
+                symbol = Some(name);
+                seen = true;
+            }
+            _ => {}
+        }
+        Ok(())
+    })?;
+    Ok((result, symbol))
+}
+
+fn tensor_type(reader: &mut dyn Read, input: &mut GraphInput) -> anyhow::Result<()> {
+    let mut has_shape = false;
+    fields(reader, &mut |number, value| {
+        match (number, value) {
+            (1, Field::Integer(value)) => {
+                anyhow::ensure!(
+                    input.element_type == 0 && value > 0 && value <= i32::MAX as u64,
+                    "invalid ONNX input tensor type"
+                );
+                input.element_type = value as i32;
+            }
+            (2, Field::Bytes(bytes)) => {
+                anyhow::ensure!(!has_shape, "duplicate ONNX input shape");
+                has_shape = true;
+                fields(bytes, &mut |number, value| {
+                    if let (1, Field::Bytes(bytes)) = (number, value) {
+                        anyhow::ensure!(input.dimensions.len() < 32, "oversize ONNX input rank");
+                        let (size, symbol) = dimension(bytes)?;
+                        input.dimensions.push(size);
+                        input.dimension_symbols.push(symbol);
+                    }
+                    Ok(())
+                })?;
+            }
+            _ => {}
+        }
+        Ok(())
+    })?;
+    anyhow::ensure!(
+        has_shape && input.element_type != 0,
+        "incomplete ONNX input type"
+    );
+    Ok(())
+}
+
+fn graph_input(reader: &mut dyn Read) -> anyhow::Result<GraphInput> {
+    let mut input = GraphInput {
+        name: String::new(),
+        element_type: 0,
+        dimensions: Vec::new(),
+        dimension_symbols: Vec::new(),
+    };
+    let mut tensor_seen = false;
+    fields(reader, &mut |number, value| {
+        match (number, value) {
+            (1, Field::Bytes(bytes)) => {
+                anyhow::ensure!(input.name.is_empty(), "duplicate ONNX input name");
+                input.name = small_string(bytes)?;
+            }
+            (2, Field::Bytes(bytes)) => {
+                fields(bytes, &mut |number, value| {
+                    match (number, value) {
+                        (1, Field::Bytes(bytes)) => {
+                            anyhow::ensure!(!tensor_seen, "duplicate ONNX tensor input type");
+                            tensor_seen = true;
+                            tensor_type(bytes, &mut input)?;
+                        }
+                        (4 | 5 | 8 | 9, _) => {
+                            anyhow::bail!("cached execution requires tensor inputs")
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                })?;
+            }
+            _ => {}
+        }
+        Ok(())
+    })?;
+    anyhow::ensure!(
+        !input.name.is_empty() && tensor_seen,
+        "incomplete ONNX input declaration"
+    );
+    Ok(input)
+}
+
+/// Read the actual top-level inputs using the same bounded ONNX wire reader.
+pub fn input_schema(path: &Path) -> anyhow::Result<Vec<GraphInput>> {
+    let mut inputs = Vec::new();
+    let mut graph_seen = false;
+    fields(
+        &mut BufReader::new(File::open(path)?),
+        &mut |number, value| {
+            if let (7, Field::Bytes(bytes)) = (number, value) {
+                anyhow::ensure!(!graph_seen, "duplicate ONNX model graph");
+                graph_seen = true;
+                fields(bytes, &mut |number, value| {
+                    if let (11, Field::Bytes(bytes)) = (number, value) {
+                        anyhow::ensure!(inputs.len() < 256, "oversize ONNX input count");
+                        let input = graph_input(bytes)?;
+                        anyhow::ensure!(
+                            !inputs.iter().any(|old: &GraphInput| old.name == input.name),
+                            "duplicate ONNX input name"
+                        );
+                        inputs.push(input);
+                    }
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        },
+    )?;
+    anyhow::ensure!(
+        graph_seen && !inputs.is_empty(),
+        "ONNX graph has no declared inputs"
+    );
+    Ok(inputs)
 }

@@ -61,6 +61,7 @@ struct GraphContract {
 
 pub struct PairScorer {
     session: Session,
+    cache_lease: Option<crate::core::compilation_cache::CompilationCacheLease>,
     tokenizer: Tokenizer,
     selection: PairScorerSelection,
     capacity: usize,
@@ -148,11 +149,24 @@ impl PairScorer {
                 "pair budget is smaller than its special-token template",
             ));
         }
-        let graph = options.select_graph(vec![path.join(format!(
-            "onnx/layer-{}/dim-{}/model.onnx",
-            selection.layer, selection.dimension
-        ))])?;
-        let session = options.create_session(&graph)?;
+        let mut candidates = Vec::new();
+        if selection.layer == layout.num_layers && selection.dimension == layout.hidden_size {
+            candidates.push(path.join("onnx/model.onnx"));
+        }
+        candidates.extend([
+            path.join(format!(
+                "onnx/model_layer_{}_dim_{}.onnx",
+                selection.layer, selection.dimension
+            )),
+            path.join(format!(
+                "onnx/layer-{}/dim-{}/model.onnx",
+                selection.layer, selection.dimension
+            )),
+        ]);
+        let graph = options.select_graph(candidates)?;
+        let execution_limit = options.execution_limit(config.max_position_embeddings)?;
+        let prepared = modernbert_inputs::prepare_session(options, &graph, execution_limit)?;
+        let session = prepared.session;
         let metadata = session.metadata().map_err(|e| invalid(&e.to_string()))?;
         let declared = metadata
             .custom("semantic_router.pair_scorer")
@@ -176,10 +190,11 @@ impl PairScorer {
         }
         Ok(Self {
             session,
+            cache_lease: prepared.cache_lease,
             tokenizer,
             selection,
             capacity: config.max_position_embeddings,
-            execution_length: (options.provider == Provider::Migraphx).then_some(limit),
+            execution_length: (options.provider == Provider::Migraphx).then_some(execution_limit),
             pad_token_id: config.pad_token_id,
         })
     }
@@ -214,7 +229,14 @@ impl PairScorer {
             input[i] = id.into();
             mask[i] = 1;
         }
-        let outputs = modernbert_inputs::run(&mut self.session, input, mask, 1, length)?;
+        let outputs = modernbert_inputs::run_cached(
+            &mut self.session,
+            &mut self.cache_lease,
+            input,
+            mask,
+            1,
+            length,
+        )?;
         // The trained head computes FP32 logits even with a lower precision encoder.
         let (shape, values) = outputs["logits"]
             .try_extract_tensor::<f32>()
@@ -226,5 +248,68 @@ impl PairScorer {
             ));
         }
         Ok(values[0])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_graph_layout_preserves_scores_and_requires_the_selected_head_contract() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("instance/testdata/pair_scorer");
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["config.json", "matryoshka_config.json", "tokenizer.json"] {
+            std::fs::copy(source.join(name), directory.path().join(name)).unwrap();
+        }
+        std::fs::create_dir(directory.path().join("onnx")).unwrap();
+        let graph = directory.path().join("onnx/model_layer_2_dim_4.onnx");
+        std::fs::copy(source.join("model.onnx"), &graph).unwrap();
+        let options = InstanceOptions {
+            model_path: directory.path().display().to_string(),
+            ..Default::default()
+        };
+        let mut flat = PairScorer::load(&options, PairScorerSelection::default()).unwrap();
+        let mut original = PairScorer::load(
+            &InstanceOptions {
+                model_path: source.display().to_string(),
+                model_file: Some("model.onnx".into()),
+                ..Default::default()
+            },
+            PairScorerSelection::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            flat.score_tokens(&[2, 3, 4]).unwrap(),
+            original.score_tokens(&[2, 3, 4]).unwrap()
+        );
+        std::fs::copy(
+            &graph,
+            directory.path().join("onnx/model_layer_1_dim_2.onnx"),
+        )
+        .unwrap();
+        assert!(PairScorer::load(
+            &options,
+            PairScorerSelection {
+                layer: 1,
+                dimension: 2
+            }
+        )
+        .is_err());
+        std::fs::rename(&graph, directory.path().join("onnx/model.onnx")).unwrap();
+        let mut primary = PairScorer::load(&options, PairScorerSelection::default()).unwrap();
+        assert_eq!(
+            primary.score_tokens(&[2, 3, 4]).unwrap(),
+            flat.score_tokens(&[2, 3, 4]).unwrap()
+        );
+        // A primary graph is never a fallback for an unrepresented sub-exit.
+        assert!(PairScorer::load(
+            &options,
+            PairScorerSelection {
+                layer: 1,
+                dimension: 4
+            }
+        )
+        .is_err());
     }
 }

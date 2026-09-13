@@ -171,3 +171,91 @@ fn actual_legacy_and_explicit_sessions_preserve_padded_absolute_positions() {
     assert!(run(&mut new, vec![7; 5], vec![1; 5], 1, 8).is_err());
     assert!(run(&mut new, vec![], vec![], 1, 0).is_err());
 }
+
+#[test]
+fn pre_load_input_contract_matches_actual_ort_schema_and_cpu_stays_dynamic() {
+    let directory = tempfile::tempdir().unwrap();
+    for explicit in [false, true] {
+        let path = directory.path().join("model.onnx");
+        std::fs::write(&path, graph(explicit)).unwrap();
+        let expected = resolved_inputs(&path, 1, 2048).unwrap();
+        assert_eq!(expected.len(), if explicit { 3 } else { 2 });
+        let options = crate::core::instance_options::InstanceOptions {
+            model_path: directory.path().display().to_string(),
+            execution_max_input_tokens: Some(2048),
+            ..Default::default()
+        };
+        let mut prepared = options
+            .create_session_with_contract(&path, &expected)
+            .unwrap();
+        assert!(options.evidence.lock()[0].execution_inputs.is_empty());
+        assert_eq!(
+            options.evidence.lock()[0].execution_max_input_tokens,
+            Some(2048)
+        );
+        assert_eq!(options.evidence.lock()[0].artifacts.len(), 1);
+        assert!(prepared.cache_lease.is_none());
+        for (batch, sequence) in [(1, 7), (2, 31), (1, 2048)] {
+            let output = run_cached(
+                &mut prepared.session,
+                &mut prepared.cache_lease,
+                vec![9; batch * sequence],
+                vec![1; batch * sequence],
+                batch,
+                sequence,
+            )
+            .unwrap();
+            assert_eq!(
+                output["output"]
+                    .try_extract_tensor::<i64>()
+                    .unwrap()
+                    .0
+                    .as_ref(),
+                [batch as i64, sequence as i64]
+            );
+        }
+        let mut bad = expected.clone();
+        bad[0].dtype = "float32".into();
+        assert!(options.create_session_with_contract(&path, &bad).is_err());
+        let bytes = graph(explicit);
+        std::fs::write(&path, &bytes[..bytes.len() - 1]).unwrap();
+        assert!(resolved_inputs(&path, 1, 2048).is_err());
+    }
+}
+
+#[test]
+fn symbolic_contract_is_applied_to_actual_ort_session_before_loading() {
+    use crate::core::{execution_contract::dimension_overrides, onnx_artifacts::input_schema};
+    let directory = tempfile::tempdir().unwrap();
+    for explicit in [false, true] {
+        let path = directory.path().join("model.onnx");
+        std::fs::write(&path, graph(explicit)).unwrap();
+        let contract = resolved_inputs(&path, 1, 64).unwrap();
+        let declarations = input_schema(&path).unwrap();
+        let overrides = dimension_overrides(&declarations, &contract).unwrap();
+        assert_eq!(overrides.get("batch"), Some(&1));
+        assert_eq!(overrides.get("sequence"), Some(&64));
+        let mut builder = Session::builder().unwrap();
+        for (name, size) in overrides {
+            builder = builder.with_dimension_override(name, size).unwrap();
+        }
+        let mut session = builder.commit_from_file(&path).unwrap();
+        assert!(session
+            .inputs
+            .iter()
+            .all(|item| dimensions(item).unwrap() == [1, 64]));
+        let result = run(&mut session, vec![7; 64], vec![1; 64], 1, 64).unwrap();
+        assert_eq!(
+            result["output"].try_extract_tensor::<i64>().unwrap().1[63],
+            70
+        );
+        drop(result);
+        assert!(run(&mut session, vec![7; 63], vec![1; 63], 1, 63).is_err());
+        let mut inconsistent = contract.clone();
+        inconsistent[0].shape[1] = 63;
+        assert!(dimension_overrides(&declarations, &inconsistent).is_err());
+        let mut anonymous = declarations.clone();
+        anonymous[0].dimension_symbols[1] = None;
+        assert!(dimension_overrides(&anonymous, &contract).is_err());
+    }
+}

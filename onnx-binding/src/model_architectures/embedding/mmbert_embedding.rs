@@ -20,11 +20,11 @@
 //! - **Cross-platform**: Works on Linux, Windows, macOS
 //! - **Optimized inference**: Graph optimizations, operator fusion
 
-use super::onnx_artifacts::capture_onnx;
 use super::runtime_identity::{
     json_digest, tokenizer_digest, ArtifactDigest, ArtifactSnapshot, RuntimeIdentity,
 };
 use crate::core::instance_options::{CustomOpsProfile, InstanceOptions, Overflow, Provider};
+use crate::core::onnx_artifacts::capture_onnx;
 use crate::core::unified_error::{errors, UnifiedError, UnifiedResult};
 use crate::model_architectures::embedding::pooling::{
     l2_normalize, mean_pool_3d, truncate_dimension,
@@ -269,6 +269,7 @@ impl ExecutionProvider {
 
 struct LoadedSession {
     session: Session,
+    cache_lease: Option<crate::core::compilation_cache::CompilationCacheLease>,
     artifacts: Vec<ArtifactDigest>,
     runtime: String,
 }
@@ -342,7 +343,7 @@ impl MmBertEmbeddingModel {
                         "owned MIGraphX embeddings require an explicit positive input token budget for their fixed execution shape",
                     ));
                 }
-                Some(options.effective_limit(config.max_position_embeddings)?)
+                Some(options.execution_limit(config.max_position_embeddings)?)
             }
             _ => None,
         };
@@ -399,7 +400,8 @@ impl MmBertEmbeddingModel {
         let mut selected_path: Option<std::path::PathBuf> = None;
         let mut last_error: Option<String> = None;
         for onnx_path in onnx_candidates {
-            let loaded = Self::load_session(&onnx_path, use_cpu, options);
+            let loaded =
+                Self::load_session(&onnx_path, use_cpu, options, config.max_position_embeddings);
             match loaded {
                 Ok(session) => {
                     selected_path = Some(onnx_path);
@@ -439,6 +441,7 @@ impl MmBertEmbeddingModel {
             options,
             &selected_path,
             config.num_hidden_layers,
+            config.max_position_embeddings,
         )?;
 
         let identity = RuntimeIdentity {
@@ -657,17 +660,20 @@ impl MmBertEmbeddingModel {
         path: &Path,
         use_cpu: bool,
         options: Option<&InstanceOptions>,
+        task_limit: usize,
     ) -> UnifiedResult<LoadedSession> {
         let Some(options) = options else {
             return Self::create_session(path, use_cpu);
         };
         let error =
             |e: anyhow::Error| errors::model_load(&path.display().to_string(), &e.to_string());
-        let mut snapshots = capture_onnx(path).map_err(error)?;
-        if let Some(library) = options.custom_ops_library_path()? {
-            snapshots.push(ArtifactSnapshot::capture(&library, "custom-operators").map_err(error)?);
-        }
-        let session = options.create_session(path)?;
+        let prepared = modernbert_inputs::prepare_session(
+            options,
+            path,
+            options.execution_limit(task_limit)?,
+        )?;
+        let session = prepared.session;
+        let snapshots = prepared.artifacts;
         modernbert_inputs::validate(&session.inputs)?;
         let evidence = options.evidence.lock();
         let actual = evidence.last().ok_or_else(|| {
@@ -686,6 +692,8 @@ impl MmBertEmbeddingModel {
             "custom_ops_profile": actual.custom_ops_profile,
             "custom_ops_sha256": actual.custom_ops_sha256,
             "intra_threads": options.intra_threads,
+            "execution_inputs": actual.execution_inputs,
+            "execution_max_input_tokens": actual.execution_max_input_tokens,
         }))
         .map_err(error)?;
         drop(evidence);
@@ -694,6 +702,7 @@ impl MmBertEmbeddingModel {
         }
         Ok(LoadedSession {
             session,
+            cache_lease: prepared.cache_lease,
             runtime: format!("onnx-mmbert-owned-v1:{runtime}"),
             artifacts: snapshots.into_iter().map(|s| s.digest).collect(),
         })
@@ -727,6 +736,7 @@ impl MmBertEmbeddingModel {
         }
         Ok(LoadedSession {
             session,
+            cache_lease: None,
             runtime: runtime.to_string(),
             artifacts: snapshots.into_iter().map(|s| s.digest).collect(),
         })
@@ -923,6 +933,7 @@ impl MmBertEmbeddingModel {
         options: Option<&InstanceOptions>,
         primary_path: &Path,
         full_depth: usize,
+        task_limit: usize,
     ) -> UnifiedResult<(usize, BTreeMap<usize, LoadedSession>)> {
         let mut sessions = BTreeMap::new();
         let canonical_primary = std::fs::canonicalize(primary_path)
@@ -963,7 +974,7 @@ impl MmBertEmbeddingModel {
                         "another declared layer aliases the selected primary graph",
                     ));
                 }
-                let loaded = Self::load_session(&path, use_cpu, options);
+                let loaded = Self::load_session(&path, use_cpu, options, task_limit);
                 match loaded {
                     Ok(session) => {
                         sessions.insert(layer, session);
@@ -1194,8 +1205,9 @@ impl MmBertEmbeddingModel {
 
         let input_ids_flat: Vec<i64> = input_ids.iter().copied().collect();
         let attention_mask_flat: Vec<i64> = attention_mask.iter().copied().collect();
-        let outputs = modernbert_inputs::run(
+        let outputs = modernbert_inputs::run_cached(
             session,
+            &mut loaded.cache_lease,
             input_ids_flat,
             attention_mask_flat,
             batch_size,

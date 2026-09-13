@@ -63,6 +63,77 @@ pub(crate) fn validate(inputs: &[Input]) -> UnifiedResult<bool> {
     Ok(names.contains("position_ids"))
 }
 
+/// Resolve the actual graph's two/three token inputs before cached preparation.
+pub(crate) fn resolved_inputs(
+    path: &std::path::Path,
+    batch: usize,
+    sequence: usize,
+) -> UnifiedResult<Vec<crate::core::execution_contract::ExecutionInput>> {
+    use crate::core::{execution_contract::ExecutionInput, onnx_artifacts::input_schema};
+    if batch == 0 || sequence == 0 || batch > i64::MAX as usize || sequence > i64::MAX as usize {
+        return Err(invalid("invalid nonempty token execution shape"));
+    }
+    let declarations = input_schema(path).map_err(|error| invalid(&error.to_string()))?;
+    let mut names = HashSet::new();
+    let mut result = Vec::new();
+    for input in declarations {
+        if !matches!(
+            input.name.as_str(),
+            "input_ids" | "attention_mask" | "position_ids"
+        ) || !names.insert(input.name.clone())
+            || input.element_type != 7
+            || input.dimensions.len() != 2
+        {
+            return Err(invalid("unknown, duplicate or non-int64 token input"));
+        }
+        if input.name == "position_ids" && input.dimensions[0] != Some(1) {
+            return Err(invalid("position_ids must declare one broadcast row"));
+        }
+        let shape = vec![
+            if input.name == "position_ids" {
+                1
+            } else {
+                batch as i64
+            },
+            sequence as i64,
+        ];
+        if input
+            .dimensions
+            .iter()
+            .zip(&shape)
+            .any(|(declared, actual)| declared.is_some_and(|n| n != *actual))
+        {
+            return Err(invalid(
+                "declared graph dimensions differ from execution shape",
+            ));
+        }
+        result.push(ExecutionInput {
+            name: input.name,
+            dtype: "int64".into(),
+            shape,
+        });
+    }
+    if !names.contains("input_ids") || !names.contains("attention_mask") {
+        return Err(invalid("input_ids and attention_mask are required"));
+    }
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(result)
+}
+
+/// Resolve fixed MIGraphX execution only; CPU retains dynamic short inputs.
+pub(crate) fn prepare_session(
+    options: &crate::core::instance_options::InstanceOptions,
+    path: &std::path::Path,
+    execution_limit: usize,
+) -> UnifiedResult<crate::core::instance_options::PreparedSession> {
+    if options.provider == crate::core::instance_options::Provider::Migraphx {
+        let inputs = resolved_inputs(path, 1, execution_limit)?;
+        options.create_session_with_contract(path, &inputs)
+    } else {
+        options.prepare_session(path)
+    }
+}
+
 pub(crate) fn run(
     session: &mut Session,
     input_ids: Vec<i64>,
@@ -113,6 +184,40 @@ pub(crate) fn run(
         ));
     }
     session.run(inputs).map_err(error)
+}
+
+/// Retain the compile lease until the first actual execution has completed.
+/// Uncached CPU sessions retain their ordinary dynamic batch/sequence behavior.
+pub(crate) fn run_cached<'a>(
+    session: &'a mut Session,
+    lease: &mut Option<crate::core::compilation_cache::CompilationCacheLease>,
+    input_ids: Vec<i64>,
+    attention_mask: Vec<i64>,
+    batch: usize,
+    sequence: usize,
+) -> UnifiedResult<SessionOutputs<'a>> {
+    use crate::core::{compilation_cache::with_inference, execution_contract::ExecutionInput};
+    validate(&session.inputs)?;
+    let mut actual = session
+        .inputs
+        .iter()
+        .map(|input| ExecutionInput {
+            name: input.name.clone(),
+            dtype: "int64".into(),
+            shape: vec![
+                if input.name == "position_ids" {
+                    1
+                } else {
+                    batch as i64
+                },
+                sequence as i64,
+            ],
+        })
+        .collect::<Vec<_>>();
+    actual.sort_by(|a, b| a.name.cmp(&b.name));
+    with_inference(lease, &actual, || {
+        run(session, input_ids, attention_mask, batch, sequence)
+    })
 }
 
 #[cfg(test)]
