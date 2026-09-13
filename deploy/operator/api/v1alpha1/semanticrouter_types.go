@@ -1465,11 +1465,11 @@ type PromptGuardConfig struct {
 	// +kubebuilder:validation:Enum=http_chat;http_classify
 	// +optional
 	Protocol string `json:"protocol,omitempty"`
-	// +kubebuilder:default="models/mmbert32k-jailbreak-detector-merged"
+	// +kubebuilder:default="models/Vela-1.0-Encoder-307M-Guard"
 	// +optional
 	ModelID string `json:"model_id,omitempty"`
 	// Jailbreak detection threshold (0.0-1.0). Stored as string to avoid float precision issues.
-	// +kubebuilder:default="0.7"
+	// +kubebuilder:default="0.5"
 	// +kubebuilder:validation:Pattern=`^0(\.[0-9]+)?$|^1(\.0+)?$`
 	// +optional
 	Threshold string `json:"threshold,omitempty"`

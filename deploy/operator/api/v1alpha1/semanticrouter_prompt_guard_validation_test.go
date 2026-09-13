@@ -6,12 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"sigs.k8s.io/yaml"
+
+	routerconfig "github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 )
 
 func TestPromptGuardContextAdmission(t *testing.T) {
@@ -125,6 +128,17 @@ func TestGeneratedPromptGuardContextSchemasAgree(t *testing.T) {
 			t.Fatal(err)
 		}
 		guard := crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties["spec"].Properties["config"].Properties["prompt_guard"]
+		defaults := routerconfig.DefaultGlobalConfig().PromptGuard
+		for field, want := range map[string]string{
+			"model_id":  defaults.ModelID,
+			"threshold": strconv.FormatFloat(float64(defaults.Threshold), 'f', -1, 32),
+		} {
+			value := guard.Properties[field].Default
+			var got string
+			if value == nil || json.Unmarshal(value.Raw, &got) != nil || got != want {
+				t.Fatalf("%s admission default for %s differs from router: got %q, want %q", relative, field, got, want)
+			}
+		}
 		window := guard.Properties["window"]
 		budget := guard.Properties["max_sequence_length"]
 		if !window.Nullable || window.Type != "object" || budget.Type != "integer" || budget.Minimum == nil || *budget.Minimum != 0 {

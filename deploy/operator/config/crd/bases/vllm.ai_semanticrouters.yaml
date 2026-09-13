@@ -1806,7 +1806,7 @@ spec:
                         minimum: 0
                         type: integer
                       model_id:
-                        default: models/mmbert32k-jailbreak-detector-merged
+                        default: models/Vela-1.0-Encoder-307M-Guard
                         type: string
                       on_error:
                         description: |-
@@ -1837,7 +1837,7 @@ spec:
                         - http_classify
                         type: string
                       threshold:
-                        default: "0.7"
+                        default: "0.5"
                         description: Jailbreak detection threshold (0.0-1.0). Stored
                           as string to avoid float precision issues.
                         pattern: ^0(\.[0-9]+)?$|^1(\.0+)?$
