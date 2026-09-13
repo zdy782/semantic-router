@@ -200,7 +200,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Hazard",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Hazard",
-		Revision:                "75b152b312f3a4e94dee4c1ea01d06251034907d",
+		Revision:                "5dd25f2cc3c98f338e6a79b667662d60f936a28d",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Hazard"},
 		Purpose:                 PurposeHazard,

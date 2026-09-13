@@ -159,7 +159,7 @@ routing:
       adapter: modernbert
       operating_point:
         path: operating_point.json
-        sha256: ecd674d79dec8b201d5397b79e47d9bf27f7a1b86c3eee745815805bb0d05b7b
+        sha256: e79a78f48bf45eb38e3f5402de3b3b18eeaa822e00b42b3640bf471276290de5
     rag.reranker:
       deployment: document-ranker
       contract: relevance_scores.v1
