@@ -1,8 +1,10 @@
-"""Vela prompt safety and unconditional multi-label hazard supervision.
+"""Historical weak source projections for prompt safety and twelve risk outputs.
 
-AEGIS categories describe a dialogue. Category targets are therefore eligible
-only for prompt-only rows or unsafe prompts whose response is labelled safe.
-Binary prompt labels do not require this restriction. Source splits are kept;
+AEGIS categories describe a dialogue under its own policy. This legacy crosswalk
+restricts attribution to prompt-only rows or unsafe prompts with safe responses;
+that restriction does not certify Vela semantic labels. Full masks and binary
+labels remain weak source projections. Use vela_hazard_admission for explicitly
+reviewed supervision. Source splits and historical numerical outputs are kept;
 normalized duplicate prompts belong to the most restrictive held-out split.
 """
 
@@ -66,7 +68,7 @@ SOURCE_SHA256 = {
 
 
 def hazard_target(row):
-    """Return observed risk targets, or a reason category attribution is unsafe."""
+    """Return the legacy weak crosswalk, not reviewed Vela risk observations."""
     categories = {
         part.strip() for part in row["violated_categories"].split(",") if part.strip()
     }
@@ -74,16 +76,16 @@ def hazard_target(row):
     if unknown:
         raise ValueError(f"Unreviewed AEGIS categories: {sorted(unknown)}")
     if row["prompt_label"] == "safe":
-        # Source category mentions can describe topics, including benign quotes.
-        # The human prompt-level safe label takes precedence for risk targets.
+        # Preserve the historical binary-safe projection. It does not certify
+        # twelve individually reviewed negatives under the Vela content rubric.
         return [0] * len(LABELS), [1] * len(LABELS), None
     if row.get("response") and row.get("response_label") != "safe":
         return None, None, "dialogue category cannot be attributed to prompt"
     positives = {MAPPING[category] for category in categories if category in MAPPING}
     if not positives:
         return None, None, "unsafe prompt has no supported category annotation"
-    # This source annotates the whole declared taxonomy; absence is an observed
-    # negative only inside that scope. Partial-taxonomy sources must supply masks.
+    # Preserve historical source-category absence as a weak negative projection.
+    # Reviewed Vela admission cannot inherit these negatives or full masks.
     return [int(label in positives) for label in LABELS], [1] * len(LABELS), None
 
 

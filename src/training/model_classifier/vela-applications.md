@@ -86,10 +86,13 @@ the repository root. Download only the source files required by a builder.
   ToxicChat's noncommercial data is excluded from these Vela candidates.
 - [Safety/Hazard builder](safety_classifier/vela_data.py) reads
   [AEGIS 2](https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0).
-  Its binary target is the prompt label. Dialogue categories are attributed to
+  It reproduces a historical **weak source crosswalk**, not reviewed Vela gold.
+  Its binary target is the source prompt label. Dialogue categories are attributed to
   the prompt only for prompt-only examples or unsafe prompts with a safe
-  response. Safe prompts have zero risk targets. Unsupported or ambiguous
-  category attribution is recorded rather than guessed.
+  response. Source-safe prompts have zero projected risk targets. These
+  attribution rules and full masks do not establish that the visible text
+  satisfies Vela's twelve definitions; a source category can describe a topic
+  or quoted material. Unsupported source categories remain in the audit.
 - [CultureGuard extension](safety_classifier/vela_cultureguard.py) uses the
   [official twelve-language source](https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3).
   Original AEGIS IDs bind translations and cultural adaptations to the source
@@ -138,7 +141,7 @@ both categories. Other source supervision stays explicitly weak. This is a
 versioned training repair; raw evaluation labels and earlier runs stay intact.
 The stratified review counts are not estimates of an entire source's error rate.
 
-For example:
+To reproduce the historical source projections:
 
 ```bash
 python -m src.training.model_classifier.safety_classifier.vela_data \
@@ -157,6 +160,88 @@ annotation is not a negative label. The loss averages observed binary losses
 within each example, then averages examples; unknown dimensions have zero
 loss and gradient. A partially annotated positive can supervise one hazard
 without asserting that every other hazard is absent.
+
+### Admit reviewed Hazard supervision
+
+For new Hazard training and semantic evaluation, use
+[vela_hazard_admission](safety_classifier/vela_hazard_admission.py) after source
+selection, split isolation and full-text review. Broad source labels may help
+stratify review sampling; they never supply the reviewed targets or negatives.
+Keep historical raw evaluation labels and results as separate source-policy
+diagnostics. An incompatible crosswalk does not excuse errors on correctly
+labelled safe examples.
+
+The input JSONL must retain `id`, `text`, `group_id`, `source`, `source_revision`
+and `source_split`. The review JSON binds the exact input-file SHA, rubric-file
+SHA and ordered labels. Every input ID needs an item with matching source
+identity and visible-text SHA, a reason, and three explicit, disjoint lists:
+`positive_labels`, `negative_labels`, `unknown_labels`. Together they must cover
+all twelve labels. `unknown_reasons` gives a reason for each unknown label.
+Record the actual reviewer and whether review was AI-assisted or human; hashes
+establish identity, not annotation accuracy.
+
+This runnable example illustrates the format using one authored documentation
+sentence; it is not a training corpus or quality benchmark:
+
+```bash
+export VELA_ADMISSION_DEMO="$(mktemp -d)"
+python - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+out = Path(os.environ["VELA_ADMISSION_DEMO"])
+rubric = Path("src/training/model_classifier/safety_classifier/configs/hazard-rubric-v1.json")
+rubric_bytes = rubric.read_bytes()
+labels = list(json.loads(rubric_bytes)["labels"])
+sha = lambda value: hashlib.sha256(value).hexdigest()
+row = {
+    "id": "example-1", "group_id": "example-family-1",
+    "source": "documentation_example", "source_revision": "authored-example-v1",
+    "source_split": "train", "text": "Explain what personal data means.",
+    "source_categories": ["PII/Privacy"],
+}
+input_bytes = (json.dumps(row) + "\n").encode()
+(out / "input.jsonl").write_bytes(input_bytes)
+item = {key: row[key] for key in ("id", "group_id", "source", "source_revision", "source_split")}
+item.update({
+    "text_sha256": sha(row["text"].encode()),
+    "positive_labels": [], "negative_labels": labels, "unknown_labels": [],
+    "unknown_reasons": {}, "binary_label": "safe",
+    "reason": "A general definition requests no harmful action or personal disclosure.",
+})
+review = {
+    "protocol": "documentation-review-example-v1",
+    "reviewer": "illustrative AI review", "reviewer_kind": "ai",
+    "input_sha256": sha(input_bytes), "rubric_sha256": sha(rubric_bytes),
+    "labels": labels, "items": [item],
+}
+(out / "review.json").write_text(json.dumps(review, indent=2) + "\n")
+PY
+python -m src.training.model_classifier.safety_classifier.vela_hazard_admission \
+  --input "$VELA_ADMISSION_DEMO/input.jsonl" \
+  --review "$VELA_ADMISSION_DEMO/review.json" \
+  --rubric src/training/model_classifier/safety_classifier/configs/hazard-rubric-v1.json \
+  --output "$VELA_ADMISSION_DEMO/admitted"
+```
+
+Use the resulting `admitted/rows.jsonl` as the new Hazard training input; admit
+the independently reviewed development partition separately. A known positive
+produces `unsafe`. Only twelve observed negatives produce `safe`; partial
+negative supervision stays `unknown` with `binary_observed=false`, outside the
+safe false-positive denominator. Fully unknown rows are excluded from loss,
+while their group IDs and unknown counts remain in the manifest. Identical
+visible text with conflicting targets or masks requires explicit adjudication.
+
+`source_annotations` preserves the previous input metadata, including weak
+targets when present; `current_supervision` identifies the actual review.
+For an existing reviewed corpus, recover its exact review and parent lineage
+and add `--preserve-existing` to reject unexpected target or mask changes.
+This flag checks equality; it does not certify an old review by source name.
+Translations and context variants need verified semantic parent provenance or
+their own text review. Reserve all related source groups across splits before
+creating variants. Never overwrite a frozen input, review or admission output.
 
 ## Initialization and training
 
@@ -195,7 +280,9 @@ python -m src.training.model_classifier.sequence_repair.train \
 ```
 
 Hazard instead uses `safety_classifier.train_vela_hazard` with the same base,
-adapter, contract, data and budget arguments. Its selection choices are
+adapter, contract and budget arguments. For new runs, pass the admitted training
+`rows.jsonl` and separately admitted development rows described above, keeping
+raw crosswalk data for historical reproduction. Its selection choices are
 `macro-ap`, `source-macro-ap`, and `fp-budget-macro-f1`; it implements masked BCE and samples safe
 negatives plus positive categories. Do not pass Hazard data through the
 single-label trainer or use softmax to decode its logits.
