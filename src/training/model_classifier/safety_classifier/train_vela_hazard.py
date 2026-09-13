@@ -22,6 +22,7 @@ from ..sequence_repair.optimization import (
     validate_method,
 )
 from ..sequence_repair.train import token_budget_microbatches
+from ..sequence_repair.training_order import load_training_order
 from .vela_hazard import evaluate, masked_loss, read_rows
 from .vela_hazard_diagnostics import SupervisionDiagnostics
 from .vela_hazard_joint import safe_group_indices, select_joint_operating_point
@@ -143,6 +144,10 @@ def main():
     parser.add_argument("--method", choices=["lora", "full"], default="lora")
     parser.add_argument("--fresh-head", action="store_true")
     parser.add_argument("--train", nargs="+", required=True)
+    parser.add_argument(
+        "--training-order",
+        help="Complete content-bound TRAIN ID order; mutually exclusive with sampling flags",
+    )
     parser.add_argument("--dev", nargs="+", required=True)
     parser.add_argument("--source-balanced-sampling", action="store_true")
     parser.add_argument(
@@ -185,6 +190,12 @@ def main():
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
     validate_method(args.method, args.adapter, args.fresh_head)
+    if args.training_order and (
+        args.source_balanced_sampling
+        or args.length_balanced_sampling
+        or args.source_weights is not None
+    ):
+        raise ValueError("A fixed training order cannot also configure sampling")
     if args.selection_safe_groups and args.selection != "joint-fp-budget-macro-f1":
         raise ValueError("Explicit safe groups require joint-fp-budget-macro-f1")
     if (
@@ -259,6 +270,17 @@ def main():
         and max(train_lengths) > args.microbatch_token_budget
     ):
         raise ValueError("An eligible input exceeds the microbatch token budget")
+    training_order = (
+        load_training_order(
+            args.training_order,
+            [row for row, _ in train],
+            args.train,
+            steps=args.steps,
+            global_batch=args.batch_size * args.accumulate,
+        )
+        if args.training_order
+        else None
+    )
     balance_sources = args.source_balanced_sampling or args.source_weights is not None
     source_weights = source_sampling_weights(
         [row for row, _ in train], args.source_weights
@@ -295,7 +317,12 @@ def main():
         "examples_per_optimizer_step": args.batch_size * args.accumulate,
         "microbatch_token_budget": args.microbatch_token_budget,
         "dropout_trajectory_equivalence": args.microbatch_token_budget is None,
-        "sampling": "30% explicit safe; 70% uniform positive category then row",
+        "sampling": (
+            "Explicit complete training order"
+            if training_order
+            else "30% explicit safe; 70% uniform positive category then row"
+        ),
+        "training_order": training_order.receipt if training_order else None,
         "source_sampling_probabilities": (
             dict(
                 zip(
@@ -332,6 +359,7 @@ def main():
                 Path(__file__).parent.parent / "sequence_repair/optimization.py",
                 Path(__file__).parent.parent / "sequence_repair/data.py",
                 Path(__file__).parent.parent / "sequence_repair/train.py",
+                Path(__file__).parent.parent / "sequence_repair/training_order.py",
             ]
         },
         "requirements": {
@@ -389,7 +417,19 @@ def main():
             optimizer.zero_grad(set_to_none=True)
             started = time.perf_counter()
             total = 0.0
-            if args.microbatch_token_budget is None:
+            if training_order:
+                planned = training_order.indices_for_step(step)
+                microbatches = (
+                    token_budget_microbatches(
+                        planned, train_lengths, args.microbatch_token_budget
+                    )
+                    if args.microbatch_token_budget is not None
+                    else [
+                        planned[start : start + args.batch_size]
+                        for start in range(0, len(planned), args.batch_size)
+                    ]
+                )
+            elif args.microbatch_token_budget is None:
                 microbatches = (
                     draw_microbatch_indices() for _ in range(args.accumulate)
                 )
@@ -476,6 +516,10 @@ def main():
             for group in optimizer.param_groups:
                 group["lr"] = group["initial_lr"] * factor
             optimizer.step()
+            if training_order:
+                trace = training_order.record_step(step, microbatches)
+                with (output / "actual-training-order.jsonl").open("a") as stream:
+                    stream.write(json.dumps(trace, ensure_ascii=False) + "\n")
             log = {
                 "step": step,
                 "loss": total,
@@ -600,6 +644,14 @@ def main():
                     )
                     + "\n"
                 )
+    if training_order:
+        order_receipt = training_order.finish()
+        order_receipt["actual_trace_sha256"] = hashlib.sha256(
+            (output / "actual-training-order.jsonl").read_bytes()
+        ).hexdigest()
+        (output / "training-order-completed.json").write_text(
+            json.dumps(order_receipt, indent=2) + "\n"
+        )
     save_training_checkpoint(
         model,
         tokenizer,

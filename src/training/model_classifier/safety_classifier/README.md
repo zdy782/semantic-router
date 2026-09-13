@@ -59,6 +59,30 @@ retain independent evaluation and the task's existing quality gates. See the
 [application recipes](../vela-applications.md) for full-encoder and adapter
 training options.
 
+### Replay a fixed training order
+
+For a controlled training comparison, pass `--training-order order.json` instead
+of source/length sampling flags or source weights. The version 1 JSON contains
+`train_files` (the existing `file_receipts` filename/SHA256 list),
+`eligible_ids_sha256`, `steps`, `global_batch`, the complete draw `ids`, and
+`ids_sha256`. Both ID hashes use UTF-8 JSON with `ensure_ascii=False` and
+`separators=(",", ":")`; `ordered_ids_sha256` in
+`sequence_repair/training_order.py` implements this encoding. Eligible IDs follow
+TRAIN file/row order after tokenization.
+
+The loader rejects changed TRAIN bytes, unknown or filtered IDs, changed budgets,
+and missing or extra draws. Repeated draws are allowed; every TRAIN row need not
+be sampled. A fixed order must contain exactly `steps × batch_size × accumulate`
+IDs. Token-budget batching may reorder examples within that optimizer step;
+its multiplicities and global loss denominator stay unchanged.
+
+`run.json` binds the order file and ID hashes. `actual-training-order.jsonl`
+records each completed step's planned IDs and actual microbatch IDs, and
+`training-order-completed.json` verifies complete consumption and hashes the
+trace. Omitting this option preserves the existing random sampler. A replay
+controls sampled examples, not equivalence between different precision, dropout,
+or optimization methods.
+
 ## Training Contract
 
 The machine-readable source of truth is
