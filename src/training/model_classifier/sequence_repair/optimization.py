@@ -32,6 +32,22 @@ def load_trainable_model(base, contract, adapter, method, fresh_head=False):
             raise ValueError("Full sequence training requires a ModernBERT classifier")
         model.requires_grad_(True)
         if fresh_head:
+            from torch import nn
+
+            head_parameter = next(model.head.parameters())
+            model.head = type(model.head)(model.config).to(
+                device=head_parameter.device, dtype=head_parameter.dtype
+            )
+            classifier = model.classifier
+            model.classifier = nn.Linear(
+                classifier.in_features,
+                classifier.out_features,
+                bias=classifier.bias is not None,
+                device=classifier.weight.device,
+                dtype=classifier.weight.dtype,
+            )
+            # Fresh modules let HF apply its native initialization without
+            # mutating the initialization guards on loaded checkpoint tensors.
             model.head.apply(model._init_weights)
             # ModernBERT initializes the final classifier on its owning task
             # module, not when visiting the bare Linear child.

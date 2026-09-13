@@ -187,6 +187,8 @@ def main():
     }
     verify_output_source(args.output, source_artifacts)
     config = AutoConfig.from_pretrained(args.model, local_files_only=True)
+    if hasattr(config, "reference_compile"):
+        config.reference_compile = False
     if config.model_type != "modernbert":
         raise ValueError("This exporter only supports ModernBERT task heads")
     architectures = config.architectures or []
@@ -209,10 +211,10 @@ def main():
     )
     model, loading = kind.from_pretrained(
         args.model,
+        config=config,
         local_files_only=True,
         torch_dtype=torch.float32,
         attn_implementation="sdpa",
-        reference_compile=False,
         output_loading_info=True,
     )
     if any(
@@ -226,10 +228,10 @@ def main():
         reference = ClassifierLogits(
             kind.from_pretrained(
                 args.model,
+                config=config,
                 local_files_only=True,
                 torch_dtype=torch.float32,
                 attn_implementation="sdpa",
-                reference_compile=False,
             ).eval(),
             token_task,
         ).eval()

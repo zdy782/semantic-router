@@ -12,7 +12,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.training.model_classifier.sequence_repair import complete_adapter, export
-from src.training.model_classifier.sequence_repair.model import load_model, save_adapter
+from src.training.model_classifier.sequence_repair.model import (
+    load_model,
+    load_task_config,
+    save_adapter,
+)
 from src.training.model_classifier.sequence_repair.optimization import (
     initial_artifact_receipt,
     load_trainable_model,
@@ -220,7 +224,9 @@ class TaskHeadStorageTests(unittest.TestCase):
         reloaded = (
             type(merged)
             .from_pretrained(
-                merged_path, attn_implementation="sdpa", reference_compile=False
+                merged_path,
+                config=load_task_config(merged_path),
+                attn_implementation="sdpa",
             )
             .eval()
         )

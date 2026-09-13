@@ -28,6 +28,16 @@ def configuration_overrides(contract):
     return overrides
 
 
+def load_task_config(base, **overrides):
+    """Keep optional execution settings on the configuration that owns them."""
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(base, **overrides)
+    if hasattr(config, "reference_compile"):
+        config.reference_compile = False
+    return config
+
+
 def load_model(base, contract, adapter=None, trainable=False):
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -35,16 +45,19 @@ def load_model(base, contract, adapter=None, trainable=False):
     label_to_id, id_to_label = load_contract(contract)
     overrides = configuration_overrides(contract)
     tokenizer = AutoTokenizer.from_pretrained(base)
-    model, loading = AutoModelForSequenceClassification.from_pretrained(
+    config = load_task_config(
         base,
         num_labels=len(label_to_id),
         label2id=label_to_id,
         id2label=id_to_label,
+        **overrides,
+    )
+    model, loading = AutoModelForSequenceClassification.from_pretrained(
+        base,
+        config=config,
         torch_dtype=torch.float32,
         attn_implementation="sdpa",
-        reference_compile=False,
         output_loading_info=True,
-        **overrides,
     )
     missing_encoder = [
         name for name in loading["missing_keys"] if name.startswith("model.")

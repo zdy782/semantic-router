@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from .data import load_contract
-from .model import configuration_overrides, load_model
+from .model import configuration_overrides, load_model, load_task_config
 from .optimization import validate_method, verify_full_checkpoint
 from .runtime_mapping import RUNTIME_TASKS, write_runtime_mappings
 from .task_head import (
@@ -99,9 +99,9 @@ def main():
         type(exported)
         .from_pretrained(
             args.output,
+            config=load_task_config(args.output),
             torch_dtype=torch.float32,
             attn_implementation="sdpa",
-            reference_compile=False,
         )
         .eval()
     )

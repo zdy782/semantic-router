@@ -57,9 +57,9 @@ class ClassifierExportTest(unittest.TestCase):
                 original.save_pretrained(directory)
                 native = kind.from_pretrained(
                     directory,
+                    config=copy.deepcopy(config),
                     torch_dtype=torch.float16,
                     attn_implementation="sdpa",
-                    reference_compile=False,
                 ).eval()
                 # The export retains FP32 task weights, independent of encoder precision.
                 native.head = copy.deepcopy(original.head)
