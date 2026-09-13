@@ -50,7 +50,11 @@ managing application state.
 | Unmatched request | Fall back to the simple local lane. |
 
 Domain and general-purpose routes include exclusion guards so one request does
-not accidentally match several peer lanes.
+not accidentally match several peer lanes. Coding combines a software topic
+with a coding or editing task; a developer-oriented business request does not
+become code work merely because of its topic. Explicit comparisons can use the
+medium lane, and experimental comparisons retain their specialist lane even
+when the difficulty estimate is low.
 
 ## Requirements
 
@@ -70,7 +74,7 @@ managed credential and database for production.
 The PII rule allows GPE entities such as cities and countries, so ordinary
 geography does not trigger privacy containment. Other detected entity types,
 including email and street addresses, remain restricted at the configured
-threshold. This is a type-level allowance: a person's city is also allowed by
+threshold of 0.9. This is a type-level allowance: a person's city is also allowed by
 this PII rule. It does not distinguish public geography from personal location
 disclosure; explicit private-context signals still apply.
 

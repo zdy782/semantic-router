@@ -368,6 +368,11 @@ recipes:
       - name: unified_balance_reasoning_markers
         operator: OR
         keywords:
+        - "\\bprove\\b"
+        - "\\bproof\\b"
+        - formal derivation
+        - 严格证明
+        - 数学证明
         - analyze the tradeoffs
         - analyze the trade-offs
         - from first principles
@@ -398,6 +403,9 @@ recipes:
       - name: unified_balance_verification_markers
         operator: OR
         keywords:
+        - "\\bverify\\b"
+        - "\\bcite\\b"
+        - "\\bcitations?\\b"
         - verify the answer
         - cite sources
         - fact-check
@@ -537,7 +545,7 @@ recipes:
           value_source: confidence
         - type: fact_check
           name: needs_fact_check
-          weight: 0.45
+          weight: 0.1
         - type: user_feedback
           name: wrong_answer
           weight: 0.35
@@ -1808,6 +1816,12 @@ global:
           store_backend: file
           ttl_seconds: 1800
   model_catalog:
+    admission:
+      prompt_guard:
+        max_concurrency: 8
+        max_queue: 16
+        queue_timeout_ms: 5000
+        on_overflow: wait
     embeddings:
       semantic:
         mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
@@ -1821,7 +1835,7 @@ global:
           top_k: 1
           min_score_threshold: 0.5
     system:
-      prompt_guard: models/mmbert32k-jailbreak-detector-merged
+      prompt_guard: models/Vela-1.0-Encoder-307M-Guard
       pii_classifier: models/Vela-1.0-Encoder-307M-PII
       fact_check_classifier: models/Vela-1.0-Encoder-307M-FactCheck
       hallucination_detector: models/mom-halugate-detector
@@ -1830,11 +1844,16 @@ global:
     modules:
       prompt_guard:
         enabled: true
-        model_id: models/mmbert32k-jailbreak-detector-merged
+        model_id: models/Vela-1.0-Encoder-307M-Guard
         threshold: 0.7
         use_cpu: true
         variant: mmbert32k
-        jailbreak_mapping_path: models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json
+        max_sequence_length: 32768
+        window:
+          size: 512
+          overlap: 255
+        positive_labels: [jailbreak]
+        jailbreak_mapping_path: models/Vela-1.0-Encoder-307M-Guard/jailbreak_type_mapping.json
         model_ref: prompt_guard
       classifier:
         pii:

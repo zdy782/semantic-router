@@ -60,6 +60,12 @@ verified explanation lane even when its topic falls outside the named domains.
 Explicit evidence requests retain their dedicated policy, including the
 low-cost path for short factual questions.
 
+Health guidance with an explicit source request retains the verification lane
+even when the task is short. Creative form and interpersonal tone combine with
+a drafting action; fictional subject matter alone does not establish a need for
+medical or legal advice. Systems design can be supported by both the domain and
+semantic task signals, or by architecture language and a matching task signal.
+
 A mathematical topic with medium similarity does not override an overall
 simple difficulty result. Simple everyday messages also need an explanation
 anchor before a medium evidence-synthesis signal can move them into the
