@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildCanonicalConfigPromptGuardMappingPath(t *testing.T) {
-	const defaultMappingPath = "models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json"
+	const defaultMappingPath = "models/Vela-1.0-Encoder-307M-Guard/jailbreak_type_mapping.json"
 
 	tests := []struct {
 		name        string
