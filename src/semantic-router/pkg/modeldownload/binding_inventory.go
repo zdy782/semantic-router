@@ -195,6 +195,7 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		files = append(files, "matryoshka_config.json")
 	}
 	groups := [][]string{}
+	var rerankerSelections []config.PairScorerSelection
 	excludes := []string(nil)
 	if spec.Deployment.Provider == "ort" {
 		if spec.Binding.OperatingPoint != nil {
@@ -211,7 +212,11 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 				return err
 			}
 		} else if spec.Binding.Contract == config.RelevanceScoresContract {
-			groups = append(groups, rerankerGraphFiles(spec.Binding.PairScorer))
+			selection := config.PairScorerSelection{}
+			if spec.Binding.PairScorer != nil {
+				selection = *spec.Binding.PairScorer
+			}
+			rerankerSelections = append(rerankerSelections, selection)
 		} else {
 			groups = append(groups, []string{"*.onnx", "onnx/*.onnx", "onnx/layer-*/*.onnx"})
 		}
@@ -255,7 +260,7 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 			}
 		}
 	}
-	if err := i.add(ModelSpec{LocalPath: path, Revision: spec.Deployment.Revision, RequiredFiles: files, RequiredFileGroups: groups, ExcludePatterns: excludes, CheckONNX: spec.Deployment.Provider == "ort", Strict: true}); err != nil {
+	if err := i.add(ModelSpec{LocalPath: path, Revision: spec.Deployment.Revision, RequiredFiles: files, RequiredFileGroups: groups, RerankerSelections: rerankerSelections, ExcludePatterns: excludes, CheckONNX: spec.Deployment.Provider == "ort", Strict: true}); err != nil {
 		return err
 	}
 	if spec.Binding.MappingPath != "" {
@@ -267,29 +272,6 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		return i.addFile(spec.Binding.OperatingPoint.ResolvePath(path), path, spec.Deployment.Revision)
 	}
 	return nil
-}
-
-func rerankerGraphFiles(selection *config.PairScorerSelection) []string {
-	layer, dimension := "*", "*"
-	if selection == nil || (selection.Layer == 0 && selection.Dimension == 0) {
-		return []string{"onnx/model.onnx"}
-	}
-	if selection.Layer > 0 {
-		layer = fmt.Sprint(selection.Layer)
-	}
-	if selection.Dimension > 0 {
-		dimension = fmt.Sprint(selection.Dimension)
-	}
-	files := []string{
-		fmt.Sprintf("onnx/model_layer_%s_dim_%s.onnx", layer, dimension),
-		fmt.Sprintf("onnx/layer-%s/dim-%s/model.onnx", layer, dimension),
-	}
-	if layer == "*" || dimension == "*" {
-		// The owner resolves the missing coordinate from actual metadata and
-		// accepts the primary graph only when that selection is full-sized.
-		files = append(files, "onnx/model.onnx")
-	}
-	return files
 }
 
 func (i *modelInventory) addFile(path, artifact, revision string) error {
@@ -371,6 +353,7 @@ func (i *modelInventory) add(next ModelSpec) error {
 		}
 		next.RequiredFiles = append(previous.RequiredFiles, next.RequiredFiles...)
 		next.RequiredFileGroups = append(previous.RequiredFileGroups, next.RequiredFileGroups...)
+		next.RerankerSelections = append(previous.RerankerSelections, next.RerankerSelections...)
 		// Companion files do not introduce another execution format. Only
 		// two model consumers intersect their provider exclusion policies.
 		switch {

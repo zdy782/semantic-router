@@ -156,7 +156,11 @@ func isSpecComplete(spec ModelSpec) (bool, error) {
 			return complete, err
 		}
 	}
-	for _, group := range spec.RequiredFileGroups {
+	groups, err := requiredRerankerGraphGroups(spec)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
 		found := false
 		for _, pattern := range group {
 			matches, err := filepath.Glob(filepath.Join(spec.LocalPath, pattern))
