@@ -21,7 +21,7 @@ global:
           preload_embeddings: true
           target_dimension: 768
           target_layer: 22
-        mmbert_model_path: models/mmbert-embed-32k-2d-matryoshka
+        mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
 ```
 
 Use a matching Candle or ORT image and include the model's required files.
@@ -38,9 +38,9 @@ global:
   model_catalog:
     deployments:
       local-embedding:
-        artifact: models/mmbert-embed-32k-2d-matryoshka
+        artifact: models/Vela-1.0-Encoder-307M-Embedding
         provider: ort
-        device: migraphx:0
+        device: rocm:0
         precision: native
         input:
           max_tokens: 1024
@@ -53,11 +53,33 @@ routing:
       adapter: mmbert
 ```
 
-Use the maintained ROCm image and an ONNX export of the model. A positive
+Use a ROCm image with the selected ONNX execution provider and a compatible
+export. A graph using CK attention also needs the explicit
+`custom_ops_profile: ck_flash_attention` deployment option. Keep `native`
+precision to preserve the selected graph's math. A positive
 `max_tokens` is required for GPU embeddings; choose a budget that fits your
 workload and the model. This example rejects inputs beyond 1024 tokens.
-Larger budgets increase preparation and inference cost. Classification has
-a separate 512-token limit.
+Larger budgets increase preparation and inference cost. Classifiers have
+their own deployment budgets; the default is 512 tokens.
+
+## Input policy
+
+Routing signals use representative samples by default. Set
+`global.model_catalog.embeddings.semantic.embedding_config.full_context: true`
+to send complete routing text to the loaded model. An explicit embedding
+deployment's `input.max_tokens` sets its capacity; it does not override
+`full_context: false`.
+
+The deployment budget still must fit the artifact. A 32768-token budget is an
+explicit opt-in for an appropriate export, not a claim of long-document
+retrieval accuracy. Memory, response caches and vector stores retain their
+own layer, dimension and input requirements.
+
+Vela text embeddings use raw intermediate layers and the final-normalized full
+layer, FP32 masked-mean pooling, then dimension truncation before L2
+normalization. Preserve the artifact's representation metadata when exporting
+or changing engines. Evaluate a shallower or narrower exit before making it
+a latency optimization.
 
 ## Remote embeddings
 
@@ -102,11 +124,18 @@ receives the text being embedded.
 | Consumer | Check before changing the model |
 | --- | --- |
 | Semantic signals and model selectors | Matching thresholds and the trained embedding space |
-| Vector stores and persistent caches | Stored index dimensions and model revision |
+| Vector stores and persistent caches | Stored representation identity, dimensions and re-ingestion requirements |
 | In-memory mmBERT cache | Layer 6, dimension 256 must be available |
 | Memory | Configured dimensions; mmBERT defaults to 256, multimodal to 384 |
 | Response cache and RAG windows | Local tokenizer-window support |
 | Image or audio features | A local model with the required encoder |
+
+The Router binds supported local mmBERT stores and caches to the loaded
+representation, including actual artifacts, effective layer/dimension and
+input policy. Changing the space isolates persistent cache and memory data;
+incompatible vector-store data requires re-ingestion. Old vectors are kept,
+not adopted because their dimensions match. Remote mutable model identities
+do not provide the same local-artifact guarantee.
 
 Rebuild stored vectors when changing their embedding space, even if the new
 model has the same output dimension. ORT exports must include every layer used

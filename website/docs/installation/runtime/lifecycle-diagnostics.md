@@ -29,18 +29,24 @@ can make the first startup slower than later requests.
 
 ## AMD startup problems
 
-Use the maintained ROCm image so ORT and MIGraphX libraries match. It includes
-ORT 1.22.1 / MIGraphX 2.13 and sets `MIGRAPHX_MLIR_USE_SPECIFIC_OPS=~attention`.
-Keep that setting with this image; it disables MLIR attention fusion.
+Select the execution provider explicitly: `rocm:N` uses the ROCm provider;
+`migraphx:N` uses MIGraphX. Use an image containing that provider and the
+libraries required by the graph. A CK graph also requires the trusted
+`ck_flash_attention` custom-op profile. Its library identity is checked when
+the session is prepared; a configuration name alone is not execution evidence.
+
+For the maintained MIGraphX image, keep
+`MIGRAPHX_MLIR_USE_SPECIFIC_OPS=~attention`; it disables MLIR attention fusion.
 
 | Error or symptom | Action |
 | --- | --- |
-| `IsNaN` unsupported in the SDPA graph | Use the compatible standard `onnx/model.onnx` graph |
+| Unsupported graph operator | Check the selected graph against the selected execution provider; an export for another engine is not interchangeable |
 | Missing GPU embedding budget | Set a positive deployment `input.max_tokens`; see [Embeddings](embeddings.md#amd-gpu) |
 | Model fails during GPU preparation | Check the graph and vendor libraries; requested GPU execution does not fall back to CPU |
 | Unexpectedly slow first startup | Allow time for compilation and warmup of every requested embedding layer |
 
-Unset these process variables and configure precision in the deployment instead:
+For MIGraphX, unset these process variables and configure precision in the
+deployment instead:
 
 ```text
 ORT_MIGRAPHX_FP16_ENABLE
@@ -52,6 +58,25 @@ ORT_MIGRAPHX_MODEL_CACHE_PATH
 
 Any nonempty value, including `0`, is rejected because it can override the
 configured precision or compiled model. The maintained images leave them unset.
+
+## Inspect the executed path
+
+Use `POST /api/v1/routing/preview?trace=true` with the request and recipe you
+intend to route. Preview runs the configured routing signals and reports their
+matches, values, errors and route trace without calling a generation backend.
+It does not execute the RAG retrieval/reranking plugin. Check the
+[API reference](../../api/apiserver.md) for its request format.
+
+Use startup and model-runtime observations to confirm the actual provider,
+precision and effective input limits. A requested AMD device alone does not
+prove GPU execution. The native ORT path rejects CPU fallback for a requested
+GPU session. Preserve that distinction when comparing CPU, ROCm and CUDA.
+
+For a live RAG request, inference spans record `rag.rerank_latency_seconds`,
+`rag.rerank_candidates`, `rag.reranker_identity` and raw relevance scores.
+Cached context does not represent a new reranker forward pass. Report model
+inference, queue time, retrieval and backend generation separately; preview
+latency is not end-to-end response latency.
 
 ## Limit concurrent inference
 

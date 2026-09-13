@@ -22,16 +22,19 @@ Use this section in three steps:
 | You need to | Start with | Output |
 | --- | --- | --- |
 | Compare queries and documents efficiently | [mmBERT-32K embedder](./mmbert-32k-models#embedding-model-bi-encoder) | One normalized vector per input |
-| Re-score a short list with higher accuracy | [mmBERT-32K reranker](./mmbert-32k-models#reranking-model-cross-encoder) | A relevance score for each query-document pair |
+| Re-score a short list with higher accuracy | [mmBERT-32K reranker](./mmbert-32k-models#reranking-model-cross-encoder) | An uncalibrated relevance logit for each query-document pair |
 | Place text, images, and audio in one vector space | [Multimodal embeddings](./multimodal-embeddings) | A normalized cross-modal vector |
 | Detect intent, jailbreaks, feedback, modality, fact-check needs, or PII | [Classifier models](./classifier-models) | A class, probability distribution, or token labels |
-| Apply hierarchical prompt-safety policy | [Safety classifiers](./mmbert-safety-classifier) | `safe`/`unsafe`, followed by a hazard class |
+| Apply hierarchical prompt-safety policy | [Safety classifiers](./mmbert-safety-classifier) | `safe`/`unsafe`, then independent Hazard category scores |
 | Learn which provider model should answer | [ML-based model selection](./ml-model-selection) | A provider-model choice |
 | Compare models already in a provider pool | [Model performance evaluation](./model-performance-eval) | Per-model and per-category scores |
 
-The [model catalog](./model-catalog) lists every artifact in the current MoM
-multilingual embedding and classifier collections and maps release variants to
-their training workflow.
+The [model catalog](./model-catalog) maps existing MoM artifacts to their
+training workflows. Vela is the text-router model family; its task name is
+**Guard**, while the public configuration keeps `prompt_guard` and `jailbreak`.
+Check each published artifact for its supported runtime, labels and evaluation
+scope. Guard, Safety and Hazard release qualification is still in progress;
+configuration support alone does not announce their availability.
 
 ## Understand the three common architectures
 
@@ -46,6 +49,18 @@ Most router models in this section use one of these patterns:
 Multimodal models extend the bi-encoder pattern with separate text, image, and
 audio towers whose outputs are projected into a shared space. The catalog and
 family pages explain the exact towers, dimensions, labels, and objectives.
+
+## Record the base and task lineage
+
+A base encoder is a training dependency, not a routing signal. Record the exact
+base revision, tokenizer, training data versions and task-head initialization.
+A shared family name or architecture does not establish shared weight ancestry.
+
+The next Vela lineage starts from `jhu-clsp/mmBERT-base`: a new Vela Encoder is
+being rebuilt directly from that checkpoint, then downstream tasks will train
+or migrate from its fixed revision and be re-evaluated. Until that work is
+complete, existing releases retain their documented ancestry and results.
+Do not describe them as migrated by changing names or model cards.
 
 ## Adapter versus merged model
 
@@ -72,8 +87,11 @@ is useful only when it maps to an observable router decision or policy.
 
 Keep training, validation, and test splits separate. Record dataset revisions,
 licenses, preprocessing, label definitions, and synthetic-data rules.
-Deduplicate before splitting so near-identical examples do not leak into
-evaluation.
+Split by source document, conversation or other independent group, then audit
+exact and near-duplicate overlap. Keep unknown labels separate from negatives;
+for partially reviewed Hazard data, record a per-label supervision mask. Source
+labels and generated labels need task-specific review before they become
+training targets.
 
 ### 3. Start with a smoke run
 
@@ -89,12 +107,21 @@ Match metrics to the decision:
 | --- | --- |
 | Sequence classification | Per-class precision, recall, F1, and confusion matrix |
 | PII token classification | Entity-level precision, recall, and F1 |
-| Safety detection | False-negative and false-positive rates plus per-hazard F1 |
+| Safety detection | False-negative and false-positive rates, sensitive-topic safe controls, and per-hazard metrics |
+| Pair reranking | Ranking quality, stable query/document groups, and combined-input length slices |
 | Embedding retrieval | Recall@k, ranking quality, language/domain slices, and latency |
 | Model selection | End-to-end answer quality, cost, latency, and regret against an oracle |
 
 Always retain a held-out test set. Slice results by language, domain, input
-length, and the failure modes that matter to your deployment.
+length, and the failure modes that matter to your deployment. Freeze the
+selection rule and acceptable regressions before final evaluation. A successful
+32K forward pass establishes capacity, not accuracy or useful latency.
+
+Training, evaluation and export must agree on pooling, normalization, label
+activation, token windows and precision. Keep full categorical distributions
+for Safety/Guard, independent sigmoid scores for Hazard, and raw pair logits
+for Reranker. Validate the exported engine on task metrics as well as numerical
+parity, especially when small score margins can change a decision or ranking.
 
 ### 5. Export and integrate
 

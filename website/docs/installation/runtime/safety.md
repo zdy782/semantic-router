@@ -1,6 +1,6 @@
 ---
 title: Safety models
-description: Configure prompt guard, PII, and hallucination checks and choose how to handle failures.
+description: Configure Guard, content Safety and Hazard, PII, and grounding checks with explicit input and failure policies.
 ---
 
 Safety models detect risks; routing decisions and plugins determine the action.
@@ -8,14 +8,16 @@ Enabling a model alone does not block or redact a request.
 
 | Check | What it detects | Configure the action |
 | --- | --- | --- |
-| Prompt guard | Prompt injection and jailbreaks | [Jailbreak signals](../../tutorials/signal/learned/jailbreak.md) |
+| Guard | Prompt injection and jailbreaks | [Jailbreak signals](../../tutorials/signal/learned/jailbreak.md) |
 | PII | Personal information in text | [PII signals](../../tutorials/signal/learned/pii.md) |
 | Hallucination | Answer claims unsupported by supplied context | [Hallucination plugin](../../tutorials/plugin/hallucination.md) |
-| Fact-check | Whether a request needs factual verification | [Fact-check signals](../../tutorials/signal/learned/fact-check.md) |
+| Fact-check | Whether answering requires external factual knowledge or checking | [Fact-check signals](../../tutorials/signal/learned/fact-check.md) |
 
-## Prompt guard
+## Guard
 
-To enable the maintained local guard, merge this into your configuration:
+Guard detects prompt attacks. The configuration names `prompt_guard` and
+`jailbreak` remain unchanged. To enable the currently configured local guard,
+merge this into your configuration:
 
 ```yaml
 global:
@@ -71,7 +73,7 @@ NLI still requires a supported local explainer. Configure how context is
 supplied and how detected spans are handled in the
 [hallucination guide](../../tutorials/plugin/hallucination.md).
 
-### Content safety and prompt attacks
+## Content safety and prompt attacks
 
 Use `routing.signals.safety` for content risks and `routing.signals.jailbreak`
 for prompt injection, jailbreak and instruction hijacking. A harmful request
@@ -84,14 +86,58 @@ categories. A category-specific rule first requires the Safety score to reach
 its threshold, then checks whether any selected Hazard category reaches its
 own threshold. The router skips Hazard inference when Safety is below threshold.
 
-Omit a rule's `model` to use the native head configured under
-`global.model_catalog.modules.safety`. Set `model` to an external classifier
-name to use `POST /classify` instead. Native heads are independently owned by
-the recipe, shared between its identical rule contracts, and released when the
-recipe closes. Local artifact labels and activation are checked on loading.
+Omit a rule's `model` to use its recipe binding, or the native head configured
+under `global.model_catalog.modules.safety` when no binding is present. Set
+`model` to an external classifier name to use `POST /classify` instead. Bindings
+are recipe-scoped and use the shared model lifecycle; local artifact labels,
+activation and input capacity are checked on loading.
 External endpoints must return the complete declared label set. Safety scores
 form a softmax distribution; Hazard scores are independent sigmoid values and
 may sum to more than one.
+
+For a custom two-head deployment, merge this fragment into an existing recipe.
+Supply complete checkpoints and use the Hazard labels in their trained order.
+These examples require your own compatible artifacts. Vela Guard, Safety and
+Hazard release qualification is ongoing.
+
+```yaml
+routing:
+  model_bindings:
+    safety.content-risk:
+      deployment: content-safety
+      contract: label_distribution.v1
+      adapter: modernbert
+    safety.content-risk.hazard:
+      deployment: content-hazard
+      contract: label_scores.v1
+      adapter: modernbert
+  signals:
+    safety:
+      - name: content-risk
+        threshold: 0.7
+        hazard:
+          labels: [violence, criminal_activity, sexual_content, child_exploitation, hate, harassment_abuse, regulated_substances, weapons, self_harm, privacy, specialized_advice, misinformation]
+          categories: [privacy]
+          threshold: 0.7
+global:
+  model_catalog:
+    deployments:
+      content-safety:
+        artifact: models/content-safety
+        provider: candle
+        device: cpu
+        input: {max_tokens: 512, overflow: reject}
+      content-hazard:
+        artifact: models/content-hazard
+        provider: candle
+        device: cpu
+        input: {max_tokens: 512, overflow: reject}
+```
+
+Add a decision consuming `type: safety`, `name: content-risk` to apply the
+policy. The default Safety labels are `[safe, unsafe]`; Hazard requires its
+complete label set and a nonempty subset of categories. Do not apply softmax
+to Hazard outputs or sum independent category scores as probability mass.
 
 The [content-safety fragment](https://github.com/vllm-project/semantic-router/blob/main/config/fragments/signal/safety/content-safety.yaml)
 shows two HTTP heads with a privacy-specific policy and a general unsafe policy.
@@ -105,33 +151,62 @@ trigger a blanket refusal.
 
 ### Native classifier context
 
-`max_sequence_length` on the domain, PII, prompt-guard, feedback, fact-check and
-modality classifier modules is an explicit native mmBERT input budget. Zero
-retains the historical 512-token budget. Larger values must fit the loaded
-artifact's position capacity. Configure the separate Safety/Hazard head budgets
+An explicit recipe binding uses its deployment's `input.max_tokens`. Without
+that binding, native classifier modules use `max_sequence_length`; omission or
+zero preserves the 512-token default. The actual checkpoint and graph must
+support the chosen limit. Safety and Hazard have separate module settings
 under `modules.safety.safety` and `modules.safety.hazard`.
 
-For the supported local classifier paths, a budget above 512 also enables full
-routing text instead of representative sampling or small security windows.
-Over-budget inputs produce an inference error rather than a result computed
-from an unseen truncation. Existing PII/jailbreak configurations with the
-historical budget retain overlapping scans across the entire input. Choose a
-budget supported by task-level quality and latency measurements; positional
-capacity alone is not evidence of long-text accuracy.
+For supported local classifier signals, an explicit budget above 512 also
+selects full routing text rather than representative sampling or the existing
+small security scans. With the historical budget, PII and jailbreak signals
+retain their overlapping scans. A 32K limit is a capacity choice, not evidence
+of accuracy across a 32K document.
 
-For a prompt-guard checkpoint evaluated with token windows, configure
-`modules.prompt_guard.window.size` and `window.overlap` alongside the total
-`max_sequence_length` budget. This scans the original tokens and retains the
-window with the highest combined positive-label probability. The model's
-window size and decision threshold must be calibrated together; a larger
-position capacity does not replace this inference policy. See
-[Jailbreak Signal](../../tutorials/signal/learned/jailbreak.md#token-windows-for-a-local-classifier).
+A Guard evaluated with token windows can use a separate whole-input budget
+and inference-window size:
 
-For native mmBERT embedding signals, set
-`global.model_catalog.embeddings.semantic.embedding_config.full_context: true`
-to use the loaded embedding model's complete context capacity. The default
-keeps representative routing samples for latency. This affects the embedding
-signal; unrelated semantic consumers keep their own policies.
+```yaml
+routing:
+  model_bindings:
+    prompt_guard:
+      deployment: guard-windowed
+      contract: label_distribution.v1
+      adapter: modernbert
+      mapping_path: models/guard/jailbreak_type_mapping.json
+global:
+  model_catalog:
+    modules:
+      prompt_guard:
+        enabled: true
+        positive_labels: [jailbreak]
+        threshold: 0.7
+        on_error: block
+        window: {size: 2048, overlap: 256}
+    deployments:
+      guard-windowed:
+        artifact: models/guard
+        provider: candle
+        device: cpu
+        input: {max_tokens: 32768, overflow: reject}
+```
+
+Replace the mapping and positive labels with the checkpoint's own values.
+The total budget includes special tokens; each window's `size` also includes
+special tokens, while `overlap` counts content tokens. Native inference uses
+the original token IDs and preserves every window's complete output and
+content-token range. Guard keeps the distribution from the window with the
+highest combined positive-label probability. It does not combine per-class
+maxima from different windows.
+
+Safety and Hazard can likewise set `window` under their respective module
+settings. Safety sums its selected unsafe labels within each window, then
+uses the maximum window score. Hazard uses the maximum selected category
+score across windows, after Safety passes its gate. Window size, thresholds
+and whole-input budget must be evaluated together; remote HTTP heads cannot
+use this local-tokenizer policy.
+
+For embedding signals, see [embedding input policy](embeddings.md#input-policy).
 
 ## Handle failures and missing scores
 

@@ -13,17 +13,20 @@ model service. Install the CLI and a matching image using the
 | --- | --- | --- |
 | Candle | CPU (`cpu`), NVIDIA (`cuda:0`), Apple Metal (`metal:0`) | Compatible checkpoint weights; `native` or `fp32` precision |
 | ONNX Runtime | CPU (`cpu`) | ONNX graph; `precision: native` |
-| ONNX Runtime with MIGraphX | AMD GPU (`migraphx:N`) | Compatible ONNX graph; `native` or `fp16` precision |
+| ONNX Runtime with ROCm | AMD GPU (`rocm:N`) | Compatible ONNX graph; `precision: native` preserves the graph’s precision |
+| ONNX Runtime with MIGraphX | AMD GPU (`migraphx:N`) | Compatible ONNX graph; `native` or explicit `fp16` conversion |
 | ML and NLP engines | CPU | Trained selectors or keyword-matching configuration |
 
 Candle supports GPU index 0. BERT, merged BERT LoRA, and LoRA token models do
-not support Metal. ORT accepts CPU and MIGraphX devices; use Candle for the NVIDIA and Metal
-options above. The existing OpenVINO primary embedding integration remains a
+not support Metal. ORT accepts CPU, ROCm and MIGraphX devices; use Candle for
+the NVIDIA and Metal options above. CUDA is a supported build path; CPU or AMD
+results do not establish NVIDIA performance or model quality. The existing OpenVINO primary embedding integration remains a
 separate platform setup, without a deployment provider or cache/window API.
 
 | Model family | Supported uses |
 | --- | --- |
-| ModernBERT / mmBERT | Sequence and token classification; mmBERT text embeddings |
+| ModernBERT / mmBERT | Categorical classification, independent label scores, token spans and text embeddings |
+| Compatible Vela Reranker artifact | Joint query/document relevance scoring for vectorstore RAG |
 | BERT and merged BERT LoRA | Sequence/token classification; BERT text embeddings |
 | DeBERTa | Sequence classification |
 | Task-specific hallucination and NLI models | Grounding and sentence-pair checks with Candle |
@@ -34,11 +37,18 @@ separate platform setup, without a deployment provider or cache/window API.
 | TextRank, TF-IDF, and heuristics | Prompt compression and rules in Go |
 
 ORT supports exported mmBERT classifiers and mmBERT or multimodal embedding
-graphs. Local classifiers accept at most **512 tokens**, including special
-tokens; embedding limits depend on the model. A classifier needs a head and
+graphs, plus compatible pair-scoring graphs. Local classifier budgets default
+to **512 tokens**, including special tokens. An explicit deployment
+`input.max_tokens` can select a larger budget up to the actual checkpoint and
+graph capacity; zero preserves the existing default. A classifier needs a head and
 labels trained for its task, such as domain, prompt guard, PII, fact-check,
 feedback, or output modality. Qwen3/Gemma embedding models do not provide a
 local generative classifier.
+
+Sequence classification returns `label_distribution.v1`, whose probabilities
+sum to one. Hazard detection uses `label_scores.v1`, whose scores are independent
+and may sum above one. The loader checks the task head and its activation;
+these contracts are not interchangeable.
 
 For setup of other local features, see [Embeddings](embeddings.md),
 [Safety models](safety.md), [MLP selection](../../tutorials/algorithm/selection/mlp.md),
@@ -140,3 +150,75 @@ change its model without changing other recipes. See the
 
 For a source build, use `make vllm-sr-dev`, then add
 `--image-pull-policy never` to the serve command.
+
+## Choose a long-input or AMD deployment
+
+For a checkpoint and exported graph evaluated at 32K, an explicit deployment
+can use the following settings. Merge this fragment into a configuration with
+a compatible binding; it does not enable a task by itself.
+
+```yaml
+global:
+  model_catalog:
+    deployments:
+      long-classifier:
+        artifact: models/long-classifier
+        provider: ort
+        device: rocm:0
+        precision: native
+        input:
+          max_tokens: 32768
+          overflow: reject
+```
+
+For a native checkpoint on CPU, select `provider: candle` and `device: cpu`.
+For a graph exported with CK attention, select its exact graph in the binding
+and add `custom_ops_profile: ck_flash_attention` to the ROCm deployment. Plain
+FP32 graphs do not require that profile. `native` means the graph's existing
+math, including any mixed precision; it does not mean every operation is FP32.
+GPU preparation rejects an unavailable provider or CPU fallback.
+
+A larger budget does not improve accuracy by itself. It can substantially
+increase CPU latency and GPU memory use. Keep short routing samples or a
+validated [window policy](safety.md#native-classifier-context) unless the task
+needs the complete input. Test quality and latency with the selected graph,
+precision, length and padding pattern.
+
+## Bind a RAG reranker
+
+A reranker consumes query/document pairs after retrieval. It is not a routing
+signal or a generation endpoint. In the recipe using vectorstore RAG, bind:
+
+```yaml
+routing:
+  model_bindings:
+    rag.reranker:
+      deployment: document-ranker
+      contract: relevance_scores.v1
+      adapter: vela_reranker
+      pair_scorer:
+        layer: 22
+        dimension: 768
+global:
+  model_catalog:
+    deployments:
+      document-ranker:
+        artifact: models/document-ranker
+        provider: candle
+        device: cpu
+        precision: native
+        input:
+          max_tokens: 4096
+          overflow: reject
+```
+
+Enable `rerank` in that recipe's RAG plugin, as shown in the
+[RAG guide](../../tutorials/plugin/rag.md#neural-reranking).
+The deployment loads only when a reachable recipe uses it. Candle requires the
+encoder weights, tokenizer, config, `matryoshka_config.json` and
+`classification_heads.safetensors`. ORT needs a complete pair-scoring graph with
+its declared layer, dimension and relevance-logit metadata.
+
+The fixed exit must exist in the artifact. Scores are raw relevance logits,
+not probabilities. The token budget covers both inputs and pair special tokens;
+oversized pairs fail instead of being silently shortened.
