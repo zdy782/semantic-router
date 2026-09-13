@@ -21,23 +21,23 @@ python -m src.training.model_classifier.sequence_repair.fetch_sources \
   --output artifacts/vela/sources
 ```
 
-The reviewed-label sidecars contain source identifiers and task judgments rather
-than copies of source requests. Hydration verifies the complete source file and
-each request's text hash; Aya also verifies its contributor group. For example:
+Keep reviewed-label sidecars with the dataset artifacts for each run. They
+contain source identifiers and task judgments rather than copies of source
+requests. Hydration verifies the complete source file and each request's text
+hash; Aya also verifies its contributor group. For example:
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.hydrate_annotations \
-  --sidecar src/training/model_classifier/sequence_repair/data/aya-reviewed-labels-v1.json \
+  --sidecar artifacts/vela/annotations/aya-labels.json \
   --source artifacts/vela/sources/CohereLabs--aya_dataset/data/train-00000-of-00001.parquet \
-  --output artifacts/vela/annotations/aya-reviewed-labels-v1.jsonl
+  --output artifacts/vela/annotations/aya-requests.jsonl
 ```
 
-The same command reconstructs `aya-fact-reviewed-v2.json` and
-`dolly-fact-reviewed-v2.json` using their specified source file. New task labels
-were individually reviewed by an assistant before model predictions. Source
-requests were human-authored; the new labels must not be described as expert
-human annotations. Ambiguous requests and identified duplicate source/template
-families retain their exclusion reasons. See [data provenance](data/README.md).
+The same command accepts Dolly sidecars and their specified source file. Record
+how new task labels were reviewed before model predictions; assistant labels
+must not be described as expert human annotations. Retain exclusion reasons for
+ambiguous requests and duplicate source/template families. See
+[data provenance](data/README.md) for source attribution and grouping.
 
 Each task recipe writes `train.jsonl`, `dev.jsonl`, `test.jsonl`, `contract.json`,
 and `manifest.json`. Rows contain `id`, `text`, `label`, and `group_id`; reported
@@ -159,11 +159,26 @@ behavior are preserved. `sampling-step-*.json` and `sampling-final.json` record
 per-source draws, unique-row coverage, and label draws. These receipts expose
 repeated sampling of small sources; they are not quality metrics.
 
+### Optional explicit training order
+
+`--training-order order.json` replays a complete plan through the same training
+loop. It uses the shared [training-order contract](../safety_classifier/README.md#replay-a-fixed-training-order):
+exact TRAIN file hashes, eligible ID order, optimizer steps, global batch size,
+and the full ordered draw list must match. Repeated draws are valid; unknown or
+filtered IDs and incomplete plans are rejected. Do not combine this option with
+sampling flags or source weights.
+
+The plan supplies exactly `batch-size × accumulate` examples per optimizer step.
+An optional token budget may regroup that step without changing its example
+multiset or loss denominator. `actual-training-order.jsonl` records planned IDs
+and actual microbatches; `training-order-completed.json` binds the completed trace.
+Without this flag, existing sampling behavior is unchanged.
+
 ### Optional token-budget microbatches
 
-`--microbatch-token-budget 32768` first samples the same
-`batch-size × accumulate` examples using the existing RNG, stably orders those
-examples by their measured length, and groups them so each padded microbatch
+`--microbatch-token-budget 32768` takes the same `batch-size × accumulate`
+examples from the existing sampler or explicit order, stably orders them by
+their measured length, and groups them so each padded microbatch
 fits the token budget. Every example contributes CE sum divided by the original
 optimizer-step example count. A 32K example therefore runs alone; shorter
 examples can share a forward pass. Optimizer steps, learning-rate schedule,

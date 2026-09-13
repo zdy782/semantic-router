@@ -28,6 +28,7 @@ from .selection import (
     validate_selection_options,
 )
 from .task_head import task_head_scope
+from .training_order import load_training_order
 
 
 def microbatch_loss(logits, labels, accumulation_steps):
@@ -224,10 +225,18 @@ def main():
         "--source-weights", help="JSON object of explicit source weights"
     )
     parser.add_argument("--microbatch-token-budget", type=int)
+    parser.add_argument("--training-order", type=Path)
     parser.add_argument("--probe-only", action="store_true")
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
     validate_method(args.method, args.adapter, args.fresh_head)
+    if args.training_order and (
+        args.balanced_sampling
+        or args.length_balanced_sampling
+        or args.source_balanced_sampling
+        or args.source_weights is not None
+    ):
+        raise ValueError("An explicit training order cannot also configure sampling")
     if (
         min(
             args.steps,
@@ -295,6 +304,17 @@ def main():
         raise ValueError(
             "Microbatch token budget cannot fit the longest eligible example"
         )
+    training_order = (
+        load_training_order(
+            args.training_order,
+            [row for row, _ in train],
+            args.train,
+            steps=args.steps,
+            global_batch=args.batch_size * args.accumulate,
+        )
+        if args.training_order
+        else None
+    )
     pool_values = list(pools.values())
     length_pools = length_sampling_pools([row for row, _encoded in train])
     balance_sources = args.source_balanced_sampling or args.source_weights is not None
@@ -356,6 +376,7 @@ def main():
             for group in groups
         ],
         "balanced_sampling": args.balanced_sampling,
+        "training_order": training_order.receipt if training_order else None,
         "length_balanced_sampling": args.length_balanced_sampling,
         "source_balanced_sampling": balance_sources,
         "source_sampling_probabilities": (
@@ -511,7 +532,19 @@ def main():
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
         start, step_loss, lengths = time.perf_counter(), 0.0, []
-        if args.microbatch_token_budget is None:
+        if training_order:
+            planned = training_order.indices_for_step(step)
+            microbatches = (
+                token_budget_microbatches(
+                    planned, train_lengths, args.microbatch_token_budget
+                )
+                if args.microbatch_token_budget is not None
+                else [
+                    planned[start : start + args.batch_size]
+                    for start in range(0, len(planned), args.batch_size)
+                ]
+            )
+        elif args.microbatch_token_budget is None:
             microbatches = (draw_microbatch_indices() for _ in range(args.accumulate))
         else:
             sampled = [
@@ -570,6 +603,10 @@ def main():
         for group in optimizer.param_groups:
             group["lr"] = group["initial_lr"] * rate
         optimizer.step()
+        if training_order:
+            trace = training_order.record_step(step, microbatches)
+            with (args.output / "actual-training-order.jsonl").open("a") as stream:
+                stream.write(json.dumps(trace) + "\n")
         torch.cuda.synchronize()
         log = {
             "step": step,
@@ -591,6 +628,14 @@ def main():
             print(json.dumps(log), flush=True)
         if not args.probe_only and (step % args.eval_every == 0 or step == args.steps):
             evaluate_checkpoint(step)
+    if training_order:
+        order_receipt = training_order.finish()
+        order_receipt["actual_trace_sha256"] = hashlib.sha256(
+            (args.output / "actual-training-order.jsonl").read_bytes()
+        ).hexdigest()
+        (args.output / "training-order-completed.json").write_text(
+            json.dumps(order_receipt, indent=2) + "\n"
+        )
     (args.output / "sampling-final.json").write_text(
         json.dumps(sampling_exposure([row for row, _ in train], drawn), indent=2) + "\n"
     )
