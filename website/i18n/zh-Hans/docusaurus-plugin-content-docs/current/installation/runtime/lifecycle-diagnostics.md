@@ -2,7 +2,7 @@
 title: 运维与故障排查
 description: 检查就绪状态、限制模型并发并更新运行中的模型。
 translation:
-  source_commit: "69481b71f8497a1af826e93f8d3d984fc59e00d2"
+  source_commit: "b2f672651b66f00e3410d5b58b5d6d8cb883cfad"
   source_file: "docs/installation/runtime/lifecycle-diagnostics.md"
   outdated: false
 ---
@@ -19,6 +19,8 @@ curl -fsS http://localhost:8080/startup-status
 
 验证命令检查配置。启动时，Router 再加载或连接模型，并检查已启用功能所需的能力。GPU 内核编译可能使首次启动比后续请求耗时更长。
 
+本地 Docker 部署可使用 `vllm-sr serve --startup-timeout 7200`，在容器启动后最多等待 7200 秒就绪。默认值为 1800 秒，参数接受正整数；应根据配置的模型、输入上限和硬件的实测启动时间选择。CLI 会限制每次就绪探测的耗时，超时后最多再用 5 秒收集诊断日志。超时不会停止容器、取消模型加载或改变推理请求时限。先通过 `vllm-sr status` 和 `vllm-sr logs router` 检查，再决定是否停止栈。
+
 | 问题 | 检查项 |
 | --- | --- |
 | 模型无法加载 | 权重或 ONNX 文件是否完整，以及分词器、标签和挂载路径 |
@@ -30,16 +32,18 @@ curl -fsS http://localhost:8080/startup-status
 
 ## AMD 启动问题 {#amd-startup-problems}
 
-使用维护的 ROCm 镜像，确保 ORT 与 MIGraphX 库匹配。镜像包含 ORT 1.22.1 / MIGraphX 2.13，并设置 `MIGRAPHX_MLIR_USE_SPECIFIC_OPS=~attention`。使用该镜像时保留此设置；它会禁用 MLIR attention fusion。
+显式选择执行提供方：`rocm:N` 使用 ROCm，`migraphx:N` 使用 MIGraphX。镜像必须包含所选提供方及模型图所需的运行库。CK 图还需要受信任的 `ck_flash_attention` 自定义算子配置；准备会话时会校验其库的身份，仅有配置名称不能证明实际执行路径。
+
+使用维护的 MIGraphX 镜像时，保留 `MIGRAPHX_MLIR_USE_SPECIFIC_OPS=~attention`，以禁用 MLIR attention fusion。
 
 | 错误或现象 | 处理方式 |
 | --- | --- |
-| SDPA 图中的 `IsNaN` 不受支持 | 使用兼容的标准 `onnx/model.onnx` 图 |
+| 模型图的算子不受支持 | 检查模型图与所选执行提供方是否匹配；为其他引擎导出的图不能直接互换 |
 | GPU 嵌入缺少输入预算 | 将部署的 `input.max_tokens` 设为正数；见[嵌入模型](embeddings.md#amd-gpu) |
 | 模型在 GPU 准备阶段失败 | 检查图和运行库；请求的 GPU 执行不会回退到 CPU |
 | 首次启动耗时明显较长 | 为编译和每个所需嵌入层的预热留出时间 |
 
-取消设置以下进程环境变量，改用 deployment 配置精度：
+使用 MIGraphX 时，取消设置以下进程环境变量，改用 deployment 配置精度：
 
 ```text
 ORT_MIGRAPHX_FP16_ENABLE
@@ -50,6 +54,14 @@ ORT_MIGRAPHX_MODEL_CACHE_PATH
 ```
 
 任何非空值（包括 `0`）都会被拒绝，因为它们可能覆盖配置的精度或已编译模型。维护的镜像不设置这些变量。
+
+## 检查实际执行路径 {#inspect-the-executed-path}
+
+使用 `POST /api/v1/routing/preview?trace=true`，提交实际需要路由的请求和 recipe。Preview 执行配置的路由信号，返回匹配结果、数值、错误和路由轨迹，不调用生成后端，也不执行 RAG 检索或 rerank 插件。请求格式见[API 参考](/zh-Hans/docs/api/apiserver)。
+
+通过启动和模型运行时记录确认实际的执行提供方、精度和有效输入上限。配置 AMD 设备本身不能证明 GPU 执行；原生 ORT 路径会拒绝请求的 GPU 会话回退到 CPU。比较 CPU、ROCm 和 CUDA 时，应保留这一差别。
+
+真实 RAG 请求的推理 span 会记录 `rag.rerank_latency_seconds`、`rag.rerank_candidates`、`rag.reranker_identity` 和原始相关性分数。缓存上下文不代表本次执行了 reranker。分别报告模型推理、排队、检索与后端生成耗时；Preview 延迟不是端到端响应延迟。
 
 ## 限制推理并发 {#limit-concurrent-inference}
 
