@@ -397,7 +397,7 @@ func buildSetupCandidateConfig(
 		return nil, fmt.Errorf("config is required")
 	}
 
-	requestConfig, err := decodeYAMLTaggedBytes[canonicalConfigTransport](req.Config)
+	requestConfig, err := decodeStrictSetupConfig(req.Config)
 	if err != nil {
 		return nil, fmt.Errorf("invalid config payload: %w", err)
 	}
@@ -448,7 +448,7 @@ func normalizeRemoteConfigURL(rawValue string) (string, error) {
 }
 
 func parseSetupCanonicalConfig(raw []byte) (*setupConfigFile, error) {
-	parsed, err := decodeYAMLTaggedBytes[setupConfigFile](raw)
+	parsed, err := decodeStrictSetupConfig(raw)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse remote config: %w", err)
 	}
