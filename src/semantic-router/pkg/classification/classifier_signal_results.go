@@ -8,11 +8,28 @@ import (
 
 // SignalMetrics contains performance and probability metrics for a single signal.
 type SignalMetrics struct {
-	Method              string  `json:"method,omitempty"`
-	PolicyDefault       string  `json:"policy_default,omitempty"`
-	ExecutionTimeMs     float64 `json:"execution_time_ms"` // Execution time in milliseconds
-	Confidence          float64 `json:"confidence"`        // Confidence score (0.0-1.0), 0 if not applicable
-	ConfidenceAvailable *bool   `json:"confidence_available,omitempty"`
+	Method              string                            `json:"method,omitempty"`
+	PolicyDefault       string                            `json:"policy_default,omitempty"`
+	ExecutionTimeMs     float64                           `json:"execution_time_ms"` // Execution time in milliseconds
+	Confidence          float64                           `json:"confidence"`        // Confidence score (0.0-1.0), 0 if not applicable
+	ConfidenceAvailable *bool                             `json:"confidence_available,omitempty"`
+	Rules               map[string]*ClassifierRuleMetrics `json:"rules,omitempty"`
+}
+
+// ClassifierRuleMetrics explains a prepared policy without exposing paths or
+// request text. Scores remain in SignalValues; latency covers the complete scan.
+type ClassifierRuleMetrics struct {
+	PolicySHA256    string             `json:"policy_sha256"`
+	Provider        string             `json:"provider"`
+	Device          string             `json:"device"`
+	Precision       string             `json:"precision"`
+	InputTokens     int                `json:"input_tokens"`
+	ProcessedTokens int                `json:"processed_tokens"`
+	Truncated       bool               `json:"truncated"`
+	Windows         [][2]int           `json:"content_token_windows"`
+	Thresholds      map[string]float64 `json:"thresholds"`
+	WindowBatchSize int                `json:"window_batch_size"`
+	ExecutionTimeMs float64            `json:"execution_time_ms"`
 }
 
 // DomainClassificationResult preserves one domain evaluation before routing

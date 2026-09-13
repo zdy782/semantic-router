@@ -2,6 +2,7 @@
 
 import json
 import math
+import posixpath
 import re
 import warnings
 from datetime import date, datetime
@@ -702,8 +703,8 @@ class Condition(BaseModel):
             raise ValueError("leaf condition node cannot define child conditions")
         if self.label is not None and self.type != "classifier":
             raise ValueError("label is only valid for classifier conditions")
-        if self.type == "classifier" and (self.label is None or self.predicate is None):
-            raise ValueError("classifier conditions require label and predicate")
+        if self.type == "classifier" and self.label is None:
+            raise ValueError("classifier conditions require a label")
         if self.on_error is not None and self.type != "classifier":
             raise ValueError("on_error is only valid for classifier conditions")
         if self.on_unknown is not None:
@@ -2230,6 +2231,27 @@ class PairScorerSelection(BaseModel):
     dimension: int = Field(default=0, ge=0)
 
 
+class OperatingPointReference(BaseModel):
+    """Explicit immutable score policy; relative paths are inside the deployment."""
+
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("path")
+    @classmethod
+    def validate_policy_path(cls, value):
+        normalized = posixpath.normpath(value)
+        if value != value.strip() or (
+            not posixpath.isabs(value)
+            and (normalized == ".." or normalized.startswith("../"))
+        ):
+            raise ValueError(
+                "operating point path must be trimmed and stay inside the artifact"
+            )
+        return value
+
+
 class ModelBinding(BaseModel):
     """A recipe-owned use of a router model deployment."""
 
@@ -2241,6 +2263,7 @@ class ModelBinding(BaseModel):
     head: Optional[str] = None
     mapping_path: Optional[str] = None
     pair_scorer: Optional[PairScorerSelection] = None
+    operating_point: Optional[OperatingPointReference] = None
 
 
 def _validate_unbound_classifier_selectors(profile):

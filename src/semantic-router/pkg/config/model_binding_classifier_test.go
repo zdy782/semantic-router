@@ -125,3 +125,69 @@ func TestMultipleLocalClassifierRulesRoundTripIndependently(t *testing.T) {
 		t.Fatalf("duplicate identity error=%v", err)
 	}
 }
+
+func TestIndependentBindingAndDecisionContract(t *testing.T) {
+	cfg := genericBindingConfig("candle", ClassifierSignalTypeLocal)
+	decl := cfg.ModelBindings["classifier.risk.tenant"]
+	decl.Contract = RemoteClassifierContractLabelScores
+	decl.OperatingPoint = &OperatingPointReference{Path: "point.json", SHA256: strings.Repeat("a", 64)}
+	cfg.ModelBindings["classifier.risk.tenant"] = decl
+	deployment := cfg.ModelDeployments["selected"]
+	deployment.Input = ModelInputBudget{MaxTokens: 32768, Overflow: "reject"}
+	cfg.ModelDeployments["selected"] = deployment
+	if _, err := CompileModelBindings(cfg); err != nil {
+		t.Fatal(err)
+	}
+	node := RuleNode{Type: SignalTypeClassifier, Name: "risk.tenant", Label: "unsafe"}
+	if err := validateClassifierDecisionLeaf(cfg, "route", &node); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := yaml.Marshal(decl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored ModelBinding
+	if err := yaml.UnmarshalStrict(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decl, restored) {
+		t.Fatal("policy reference lost in canonical roundtrip")
+	}
+	for _, scenario := range []string{"no policy", "categorical policy", "ORT", "separate head", "bad sha", "escape", "missing budget", "truncate", "half precision"} {
+		t.Run(scenario, func(t *testing.T) {
+			bad := decl
+			dep := deployment
+			ref := *decl.OperatingPoint
+			bad.OperatingPoint = &ref
+			switch scenario {
+			case "no policy":
+				bad.OperatingPoint = nil
+			case "categorical policy":
+				bad.Contract = RemoteClassifierContractLabelDistribution
+			case "ORT":
+				dep.Provider = "ort"
+			case "separate head":
+				bad.Head = "head"
+			case "bad sha":
+				ref.SHA256 = "abc"
+			case "escape":
+				ref.Path = "../policy.json"
+			case "missing budget":
+				dep.Input.MaxTokens = 0
+			case "truncate":
+				dep.Input.Overflow = "truncate"
+			case "half precision":
+				dep.Precision = "fp16"
+			}
+			cfg.ModelBindings["classifier.risk.tenant"] = bad
+			cfg.ModelDeployments["selected"] = dep
+			if _, err := CompileModelBindings(cfg); err == nil {
+				t.Fatal("invalid independent binding accepted")
+			}
+		})
+	}
+	cfg.ModelBindings = nil
+	if validateClassifierDecisionLeaf(cfg, "route", &node) == nil {
+		t.Fatal("unbound classifier omitted predicate")
+	}
+}

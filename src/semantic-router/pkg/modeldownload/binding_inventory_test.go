@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protowire"
@@ -504,5 +505,30 @@ func TestPinnedSnapshotRejectsStaleExtraProviderFiles(t *testing.T) {
 	}
 	if matched {
 		t.Fatal("untracked old graph incorrectly matched pinned snapshot")
+	}
+}
+
+func TestExplicitOperatingPointIsDownloadedWithBoundSnapshot(t *testing.T) {
+	cfg := deploymentConfig("candle", "models/independent")
+	cfg.ModelDeployments["new"] = config.ModelDeployment{Provider: "candle", Artifact: "models/independent", Revision: "exact-revision", Input: config.ModelInputBudget{MaxTokens: 32768, Overflow: "reject"}}
+	cfg.ClassifierRules = []config.ClassifierSignalRule{{Name: "risk", Type: "local", Labels: []string{"one", "two"}}}
+	cfg.ModelBindings = map[string]config.ModelBinding{"classifier.risk": {Deployment: "new", Adapter: "modernbert", Contract: config.RemoteClassifierContractLabelScores, OperatingPoint: &config.OperatingPointReference{Path: "policies/point.json", SHA256: strings.Repeat("a", 64)}}}
+	cfg.Decisions = []config.Decision{{Name: "route", Rules: config.RuleNode{Type: "classifier", Name: "risk", Label: "one"}}}
+	specs, err := BuildModelSpecs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := findSpecByPath(specs, "models/independent")
+	if !ok || spec.Revision != "exact-revision" || !slices.Contains(spec.RequiredFiles, "policies/point.json") {
+		t.Fatalf("explicit runtime policy omitted or unpinned: %+v", specs)
+	}
+	cfg.ModelBindings["classifier.risk"] = config.ModelBinding{Deployment: "new", Adapter: "modernbert", Contract: config.RemoteClassifierContractLabelDistribution}
+	cfg.Decisions = nil
+	specs, err = BuildModelSpecs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec, ok := findSpecByPath(specs, "models/independent"); ok && slices.Contains(spec.RequiredFiles, "policies/point.json") {
+		t.Fatal("policy discovered without reference")
 	}
 }

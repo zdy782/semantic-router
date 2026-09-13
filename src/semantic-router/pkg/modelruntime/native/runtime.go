@@ -156,6 +156,17 @@ func (r *Runtime) artifactRevision(ctx context.Context, path string) (string, er
 	if cached, ok := r.artifacts[abs]; ok {
 		return cached, nil
 	}
+	revision, err := fingerprintArtifact(ctx, abs)
+	if err != nil {
+		return "", err
+	}
+	r.artifacts[abs] = revision
+	return revision, nil
+}
+
+// fingerprintArtifact is also used to verify an already prepared generation;
+// it uses the same identity framing and file traversal as normal preparation.
+func fingerprintArtifact(ctx context.Context, abs string) (string, error) {
 	directory, err := os.OpenRoot(filepath.Dir(abs))
 	if err != nil {
 		return "", fmt.Errorf("open model artifact directory: %w", err)
@@ -207,9 +218,7 @@ func (r *Runtime) artifactRevision(ctx context.Context, path string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("fingerprint model artifact: %w", err)
 	}
-	revision := hex.EncodeToString(hash.Sum(nil))
-	r.artifacts[abs] = revision
-	return revision, nil
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func openArtifactFile(directory *os.Root, name string, mode fs.FileMode) (*os.File, error) {

@@ -396,15 +396,26 @@ func (e *DecisionEngine) evalLeaf(
 	if node.Predicate != nil {
 		return evaluatePredicateLeaf(node, normalizedType, signals, policy)
 	}
+	if normalizedType == config.SignalTypeClassifier {
+		// Predicate-free classifier leaves are admitted only for a prepared
+		// operating point. Errors stay keyed by the rule, not its label.
+		matched = slices.Contains(signals.ClassifierRules, node.Name+":"+node.Label)
+	}
 	unresolved := signalFailed(signals, normalizedType, node.Name) &&
 		(!matched || signalErrorMatch(signals, normalizedType, node.Name))
 	if unresolved && policy != "" {
 		return nodeEvaluation{state: evaluationUnknown}
 	}
+	if unresolved && normalizedType == config.SignalTypeClassifier && strings.EqualFold(node.OnError, "match") {
+		return nodeEvaluation{state: evaluationTrue, confidence: 1, matchedRules: []string{formatMatchedRule(node)}, onError: true}
+	}
 	if !matched {
 		return nodeEvaluation{state: evaluationFalse, onError: unresolved}
 	}
 	confidence, scored := signalConfidence(signals.SignalConfidences, normalizedType, node.Name)
+	if normalizedType == config.SignalTypeClassifier {
+		confidence, scored = signalPredicateValue(signals, normalizedType, node.Name, node.Label)
+	}
 	return nodeEvaluation{
 		state:        evaluationTrue,
 		confidence:   confidence,
@@ -522,8 +533,8 @@ func (e *DecisionEngine) matchesSignalType(
 		return e.matchesDomainCondition(name, signals.DomainRules), true
 	}
 	if normalizedType == config.SignalTypeClassifier {
-		// Classifier conditions are predicate-only and configuration validation
-		// guarantees that the named classifier exists.
+		// The leaf evaluator handles raw-score predicates and prepared
+		// operating-point label matches separately.
 		return false, true
 	}
 

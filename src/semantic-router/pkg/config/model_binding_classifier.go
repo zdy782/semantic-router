@@ -15,6 +15,19 @@ func validateGenericModelBinding(cfg *RouterConfig, rule *ClassifierSignalRule, 
 	if err := validateClassifierLabels(*rule); err != nil {
 		return err
 	}
+	if decl.Contract == RemoteClassifierContractLabelScores {
+		if decl.OperatingPoint == nil || deployment.Provider != "candle" || rule.Type == ClassifierSignalTypeLLM || decl.Head != "" {
+			return fmt.Errorf("independent scores require an operating_point and a complete local Candle artifact; remote or separate heads are unsupported")
+		}
+		if deployment.Input.MaxTokens <= 0 || deployment.Input.Overflow != "reject" {
+			return fmt.Errorf("operating_point requires an explicit document token budget with reject overflow")
+		}
+		if deployment.Precision != "native" && deployment.Precision != "fp32" {
+			return fmt.Errorf("operating_point requires float32 execution")
+		}
+	} else if decl.OperatingPoint != nil {
+		return fmt.Errorf("operating_point requires label_scores.v1")
+	}
 	switch rule.Type {
 	case ClassifierSignalTypeLocal, ClassifierSignalTypeSequenceClassifier:
 		if len(rule.Labels) < 2 || rule.Instructions != "" {

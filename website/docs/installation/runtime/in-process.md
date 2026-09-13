@@ -50,6 +50,11 @@ sum to one. Hazard detection uses `label_scores.v1`, whose scores are independen
 and may sum above one. The loader checks the task head and its activation;
 these contracts are not interchangeable.
 
+For standalone independent-label routing, the generic classifier binding accepts
+an explicit immutable operating-point sidecar with Candle float32. Its frozen
+window and threshold policy replaces manually repeated threshold predicates;
+see [Classifier signals](../../tutorials/signal/learned/classifier.md#independent-labels-with-a-frozen-operating-point).
+
 For setup of other local features, see [Embeddings](embeddings.md),
 [Safety models](safety.md), [MLP selection](../../tutorials/algorithm/selection/mlp.md),
 and [Keyword signals](../../tutorials/signal/heuristic/keyword.md).

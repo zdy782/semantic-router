@@ -178,6 +178,11 @@ func validateClassifierDecisionLeaf(
 			node.Name,
 		)
 	}
+	if bound, ok := cfg.ModelBindings["classifier."+node.Name]; ok && bound.OperatingPoint != nil && bound.Contract == RemoteClassifierContractLabelScores {
+		// A prepared operating point supplies the default label threshold. An
+		// explicit predicate remains a query of the raw independent score.
+		return nil
+	}
 	if node.Predicate == nil {
 		return fmt.Errorf(
 			"decision '%s': classifier condition %q requires a score predicate",

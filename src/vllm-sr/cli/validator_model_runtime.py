@@ -69,6 +69,8 @@ def validate_model_runtime_references(config: UserConfig) -> list[ValidationErro
 
 def _binding_error(consumer, binding, deployment, profile=None):
     provider = deployment.get("provider") or "candle"
+    if binding.operating_point is not None and not consumer.startswith("classifier."):
+        return "operating_point is only supported by generic classifier bindings"
     contracts = {
         "prompt_guard": "label_distribution.v1",
         "domain_classifier": "label_distribution.v1",
@@ -126,6 +128,25 @@ def _binding_error(consumer, binding, deployment, profile=None):
             return "Generic classifier binding requires an existing rule in the same recipe"
         if binding.mapping_path:
             return "Generic classifier labels define the mapping; mapping_path is not supported"
+        if binding.contract == "label_scores.v1":
+            contracts[consumer] = binding.contract
+            if (
+                binding.operating_point is None
+                or provider != "candle"
+                or binding.head
+                or rule.type == "llm"
+            ):
+                return "Independent scores require operating_point and a complete Candle artifact"
+            budget = deployment.get("input") or {}
+            if (
+                budget.get("max_tokens", 0) <= 0
+                or (budget.get("overflow") or "reject") != "reject"
+            ):
+                return "operating_point requires an explicit document budget and reject overflow"
+            if (deployment.get("precision") or "native") not in {"native", "fp32"}:
+                return "operating_point requires float32 execution"
+        elif binding.operating_point is not None:
+            return "operating_point requires label_scores.v1"
         if rule.type == "llm":
             if provider != "http" or binding.adapter != "http_chat":
                 return (

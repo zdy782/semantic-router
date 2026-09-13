@@ -32,12 +32,13 @@ type ModelInputBudget struct {
 // ModelBinding is a recipe-local use of a deployment. Head and MappingPath
 // describe task interpretation and never imply physical resource compatibility.
 type ModelBinding struct {
-	Deployment  string               `yaml:"deployment" json:"deployment"`
-	Contract    string               `yaml:"contract" json:"contract"`
-	Adapter     string               `yaml:"adapter" json:"adapter"`
-	Head        string               `yaml:"head,omitempty" json:"head,omitempty"`
-	MappingPath string               `yaml:"mapping_path,omitempty" json:"mapping_path,omitempty"`
-	PairScorer  *PairScorerSelection `yaml:"pair_scorer,omitempty" json:"pair_scorer,omitempty"`
+	Deployment     string                   `yaml:"deployment" json:"deployment"`
+	Contract       string                   `yaml:"contract" json:"contract"`
+	Adapter        string                   `yaml:"adapter" json:"adapter"`
+	Head           string                   `yaml:"head,omitempty" json:"head,omitempty"`
+	MappingPath    string                   `yaml:"mapping_path,omitempty" json:"mapping_path,omitempty"`
+	PairScorer     *PairScorerSelection     `yaml:"pair_scorer,omitempty" json:"pair_scorer,omitempty"`
+	OperatingPoint *OperatingPointReference `yaml:"operating_point,omitempty" json:"operating_point,omitempty"`
 }
 
 // ResolvedModelBinding is immutable preparation input, containing no engine
@@ -188,6 +189,14 @@ func CompileModelBindings(cfg *RouterConfig) (*ModelBindingPlan, error) {
 
 func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDeployment) error {
 	want := ""
+	if decl.OperatingPoint != nil {
+		if !strings.HasPrefix(name, "classifier.") {
+			return fmt.Errorf("operating_point is only supported by generic classifier bindings")
+		}
+		if err := decl.OperatingPoint.Validate(); err != nil {
+			return err
+		}
+	}
 	if decl.PairScorer != nil && name != RAGRerankerConsumer {
 		return fmt.Errorf("pair_scorer selection is only supported by rag.reranker")
 	}
@@ -231,6 +240,9 @@ func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDe
 			return fmt.Errorf("unknown task consumer %q", name)
 		}
 		want = RemoteClassifierContractLabelDistribution
+		if decl.Contract == RemoteClassifierContractLabelScores {
+			want = RemoteClassifierContractLabelScores
+		}
 	}
 	if decl.Contract != want {
 		return fmt.Errorf("contract must be %q for %s", want, name)

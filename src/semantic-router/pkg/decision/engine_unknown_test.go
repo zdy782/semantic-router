@@ -302,3 +302,21 @@ func TestOnErrorResolvedBranchNeverOutranksRealMatch(t *testing.T) {
 		})
 	}
 }
+
+func TestOperatingPointLabelMatchesKeepUnknownAndLegacyErrorPolicy(t *testing.T) {
+	node := config.RuleNode{Type: config.SignalTypeClassifier, Name: "risk", Label: "unsafe"}
+	for _, policy := range []config.UnknownPolicy{config.RuleOnUnknownNoMatch, config.RuleOnUnknownMatch, config.RuleOnUnknownFailRequest} {
+		node.OnUnknown = policy
+		engine := NewDecisionEngine(nil, nil, nil, []config.Decision{{Name: "route", Rules: node}}, config.RoutingStrategyPriority)
+		result, diagnostics, err := engine.EvaluateDecisionsWithDiagnostics(&SignalMatches{SignalErrors: map[string]string{"classifier:risk": "failed"}})
+		if (err != nil) != (policy == config.RuleOnUnknownFailRequest) || (result != nil) != (policy == config.RuleOnUnknownMatch) || diagnostics.AppliedUnknownPolicies["route"] != string(policy) {
+			t.Fatalf("policy %s result=%+v diagnostics=%+v error=%v", policy, result, diagnostics, err)
+		}
+	}
+	node.OnUnknown = ""
+	node.OnError = "match"
+	engine := NewDecisionEngine(nil, nil, nil, []config.Decision{{Name: "route", Rules: node}}, config.RoutingStrategyPriority)
+	if result, err := engine.EvaluateDecisionsWithSignals(&SignalMatches{SignalErrors: map[string]string{"classifier:risk": "failed"}}); err != nil || result == nil {
+		t.Fatalf("legacy on_error lost: %+v %v", result, err)
+	}
+}

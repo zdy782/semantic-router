@@ -245,7 +245,12 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		return err
 	}
 	if spec.Binding.MappingPath != "" {
-		return i.addFile(spec.Binding.MappingPath, path, spec.Deployment.Revision)
+		if err := i.addFile(spec.Binding.MappingPath, path, spec.Deployment.Revision); err != nil {
+			return err
+		}
+	}
+	if spec.Binding.OperatingPoint != nil {
+		return i.addFile(spec.Binding.OperatingPoint.ResolvePath(path), path, spec.Deployment.Revision)
 	}
 	return nil
 }

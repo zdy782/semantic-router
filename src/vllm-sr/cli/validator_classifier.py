@@ -47,6 +47,7 @@ def validate_classifier_contracts(
                 routing.decisions,
                 rules,
                 profile_field,
+                routing.model_bindings,
             )
         )
     return errors
@@ -97,6 +98,7 @@ def _validate_profile_classifier_decisions(
     decisions,
     rules: dict,
     profile_field: str,
+    bindings=None,
 ) -> list[ValidationError]:
     errors: list[ValidationError] = []
     for decision in decisions:
@@ -114,6 +116,21 @@ def _validate_profile_classifier_decisions(
                         field=field,
                     )
                 )
+            bound = (bindings or {}).get(f"classifier.{rule.name}")
+            if (
+                bound
+                and bound.operating_point is not None
+                and bound.contract == "label_scores.v1"
+            ):
+                continue
+            if condition.predicate is None:
+                errors.append(
+                    ValidationError(
+                        "Classifier condition requires a score predicate or a bound operating_point",
+                        field=field,
+                    )
+                )
+                continue
             if rule.type == CLASSIFIER_TYPE_LOCAL and not _valid_local_predicate(
                 condition.predicate
             ):

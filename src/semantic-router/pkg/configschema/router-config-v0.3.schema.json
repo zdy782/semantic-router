@@ -3888,6 +3888,9 @@
         },
         "pair_scorer": {
           "$ref": "#/$defs/PairScorerSelection"
+        },
+        "operating_point": {
+          "$ref": "#/$defs/OperatingPointReference"
         }
       },
       "additionalProperties": false,
@@ -4201,6 +4204,22 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "OperatingPointReference": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ]
     },
     "OutputContractChoiceSetSpec": {
       "properties": {
