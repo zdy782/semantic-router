@@ -232,6 +232,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'tutorials/global/api-and-observability',
             'tutorials/global/stores-and-tools',
+            'tutorials/global/vela-models',
           ],
         },
       ],

@@ -207,9 +207,11 @@ func defaultCalibrationKnowledgeBase() KnowledgeBaseConfig {
 func defaultCanonicalEmbeddingModels() CanonicalEmbeddingModels {
 	return CanonicalEmbeddingModels{
 		Semantic: EmbeddingModels{
-			MmBertModelPath: "models/mmbert-embed-32k-2d-matryoshka",
+			MmBertModelPath: "models/Vela-1.0-Encoder-307M-Embedding",
 			UseCPU:          true,
 			EmbeddingConfig: HNSWConfig{
+				// Keep representative routing samples; full 32K text is explicitly opt-in.
+				FullContext:       false,
 				ModelType:         "mmbert",
 				PreloadEmbeddings: true,
 				TargetDimension:   768,
@@ -252,7 +254,7 @@ func defaultClassifierModule() CanonicalClassifierModule {
 				Threshold:           0.5,
 				UseCPU:              true,
 				Variant:             CategoryVariantMmBERT32K,
-				CategoryMappingPath: "models/mmbert32k-intent-classifier-merged/category_mapping.json",
+				CategoryMappingPath: "models/Vela-1.0-Encoder-307M-Domain/category_mapping.json",
 			},
 		},
 		PII: CanonicalPIIModule{
@@ -261,7 +263,7 @@ func defaultClassifierModule() CanonicalClassifierModule {
 				Threshold:      0.9,
 				UseCPU:         true,
 				UseMmBERT32K:   true,
-				PIIMappingPath: "models/mmbert32k-pii-detector-merged/pii_type_mapping.json",
+				PIIMappingPath: "models/Vela-1.0-Encoder-307M-PII/pii_type_mapping.json",
 			},
 		},
 		Preference: PreferenceModelConfig{
@@ -276,7 +278,7 @@ func defaultHallucinationModule() CanonicalHallucinationModule {
 		FactCheck: CanonicalFactCheckModule{
 			ModelRef: "fact_check_classifier",
 			FactCheckModelConfig: FactCheckModelConfig{
-				Threshold:    0.6,
+				Threshold:    0.85,
 				UseCPU:       true,
 				UseMmBERT32K: true,
 			},
@@ -319,12 +321,12 @@ func defaultFeedbackDetectorModule() CanonicalFeedbackDetectorModule {
 func DefaultSystemModels() CanonicalSystemModels {
 	return CanonicalSystemModels{
 		PromptGuard:            "models/mmbert32k-jailbreak-detector-merged",
-		DomainClassifier:       "models/mmbert32k-intent-classifier-merged",
-		PIIClassifier:          "models/mmbert32k-pii-detector-merged",
-		FactCheckClassifier:    "models/mmbert32k-factcheck-classifier-merged",
+		DomainClassifier:       "models/Vela-1.0-Encoder-307M-Domain",
+		PIIClassifier:          "models/Vela-1.0-Encoder-307M-PII",
+		FactCheckClassifier:    "models/Vela-1.0-Encoder-307M-FactCheck",
 		HallucinationDetector:  "models/mom-halugate-detector",
 		HallucinationExplainer: "models/mom-halugate-explainer",
-		FeedbackDetector:       "models/mmbert32k-feedback-detector-merged",
+		FeedbackDetector:       "models/Vela-1.0-Encoder-307M-Feedback",
 	}
 }
 

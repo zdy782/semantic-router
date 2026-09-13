@@ -329,13 +329,13 @@ global:
 func TestReferenceConfigCategoryBackendReplacesDefaultVariant(t *testing.T) {
 	data := string(readReferenceConfigYAML(t))
 	data = strings.Replace(data,
-		"          category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json\n",
+		"          category_mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json\n",
 		"          backend:\n"+
 			"            protocol: http_classify\n"+
 			"            contract: label_distribution.v1\n"+
 			"            model: external-classifier\n"+
 			"            deadline_ms: 5000\n"+
-			"          category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json\n", 1)
+			"          category_mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json\n", 1)
 	if data == string(readReferenceConfigYAML(t)) {
 		t.Fatal("reference config category block was not found")
 	}

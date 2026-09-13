@@ -16,10 +16,10 @@ import (
 )
 
 var expectedAMDModelPaths = []string{
-	"models/mmbert-embed-32k-2d-matryoshka",
-	"models/mmbert32k-intent-classifier-merged",
-	"models/mmbert32k-factcheck-classifier-merged",
-	"models/mmbert32k-feedback-detector-merged",
+	"models/Vela-1.0-Encoder-307M-Embedding",
+	"models/Vela-1.0-Encoder-307M-Domain",
+	"models/Vela-1.0-Encoder-307M-FactCheck",
+	"models/Vela-1.0-Encoder-307M-Feedback",
 }
 
 func TestReloadRejectsLiveArtifactMutationBeforeDownload(t *testing.T) {
