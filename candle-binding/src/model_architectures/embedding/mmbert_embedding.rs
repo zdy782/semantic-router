@@ -1,14 +1,14 @@
 //! mmBERT Embedding Model Implementation (32K Context, 2D Matryoshka)
 //!
 //! This module implements the mmBERT-Embed-32K-2D-Matryoshka model, a multilingual
-//! embedding model based on ModernBERT architecture with YaRN-scaled RoPE for 32K context.
+//! embedding model based on ModernBERT with checkpoint-configured rotary embeddings.
 //!
 //! ## Model Highlights
 //! - **Parameters**: 307M
 //! - **Context Length**: 32,768 tokens
 //! - **Languages**: 1800+ (via Glot500)
 //! - **Embedding Dim**: 768 (supports 64-768 via Matryoshka)
-//! - **Architecture**: ModernBERT encoder with YaRN scaling
+//! - **Architecture**: ModernBERT encoder with default or standard YaRN RoPE
 //!
 //! ## 2D Matryoshka Support (FULLY IMPLEMENTED)
 //! This model supports two dimensions of flexibility:
@@ -21,7 +21,7 @@
 //! - Attention heads: 12
 //! - Local attention window: 128 tokens
 //! - Global attention: Every 3 layers
-//! - RoPE theta: 160000 (YaRN-scaled for 32K)
+//! - Legacy RoPE theta: 160000 (direct theta, not itself YaRN)
 //!
 //! ## References
 //! - Model: https://huggingface.co/llm-semantic-router/mmbert-embed-32k-2d-matryoshka
@@ -34,6 +34,7 @@ use crate::model_architectures::attention::chunked_sdpa::{
 };
 use crate::model_architectures::embedding::pooling::mean_pool;
 use crate::model_architectures::embedding::representation_contract::IntermediateNormalization;
+use crate::model_architectures::modernbert_rope::{Parameters, RopeOptions, RotaryEmbedding};
 use crate::model_architectures::traits::{
     EmbeddingPathSpecialization, LongContextEmbeddingCapable, ModelType, PoolingMethod,
 };
@@ -58,13 +59,29 @@ pub struct MmBertEmbeddingConfig {
     pub num_attention_heads: usize,
     pub intermediate_size: usize,
     pub max_position_embeddings: usize,
+    #[serde(rename = "norm_eps")]
     pub layer_norm_eps: f64,
     pub pad_token_id: u32,
     pub global_attn_every_n_layers: usize,
     pub global_rope_theta: f64,
     pub local_attention: usize,
     pub local_rope_theta: f64,
+    #[serde(flatten)]
+    pub rope_options: RopeOptions,
     pub intermediate_normalization: IntermediateNormalization,
+}
+
+impl MmBertEmbeddingConfig {
+    pub(crate) fn resolve_rope(&self) -> candle_core::Result<[Parameters; 2]> {
+        self.rope_options.resolve(
+            [self.global_rope_theta, self.local_rope_theta],
+            self.max_position_embeddings,
+            self.hidden_size,
+            self.num_attention_heads,
+            self.num_hidden_layers,
+            self.global_attn_every_n_layers,
+        )
+    }
 }
 
 impl MmBertEmbeddingConfig {
@@ -89,8 +106,20 @@ impl MmBertEmbeddingConfig {
             .map_err(|error| {
                 config_errors::invalid_json(&config_path.display().to_string(), &error)
             })?;
-        Ok(Self {
+        let thetas = crate::model_architectures::modernbert_rope::resolve_thetas(
+            &config_json,
+            [160000.0, 160000.0],
+        )
+        .map_err(|e| {
+            config_errors::invalid_json(&config_path.display().to_string(), &e.to_string())
+        })?;
+        let rope_options: RopeOptions =
+            serde_json::from_value(config_json.clone()).map_err(|e| {
+                config_errors::invalid_json(&config_path.display().to_string(), &e.to_string())
+            })?;
+        let config = Self {
             intermediate_normalization,
+            rope_options,
             vocab_size: config_json["vocab_size"].as_u64().unwrap_or(256000) as usize,
             hidden_size: config_json["hidden_size"].as_u64().unwrap_or(768) as usize,
             num_hidden_layers: config_json["num_hidden_layers"].as_u64().unwrap_or(22) as usize,
@@ -99,17 +128,23 @@ impl MmBertEmbeddingConfig {
             max_position_embeddings: config_json["max_position_embeddings"]
                 .as_u64()
                 .unwrap_or(32768) as usize,
-            layer_norm_eps: config_json["layer_norm_eps"].as_f64().unwrap_or(1e-5),
+            layer_norm_eps: crate::model_architectures::modernbert_config::norm_eps(&config_json)
+                .map_err(|e| {
+                    config_errors::invalid_json(&config_path.display().to_string(), &e.to_string())
+                })?
+                .unwrap_or(1e-5),
             pad_token_id: config_json["pad_token_id"].as_u64().unwrap_or(0) as u32,
             global_attn_every_n_layers: config_json["global_attn_every_n_layers"]
                 .as_u64()
                 .unwrap_or(3) as usize,
-            global_rope_theta: config_json["global_rope_theta"]
-                .as_f64()
-                .unwrap_or(160000.0),
+            global_rope_theta: thetas[0],
             local_attention: config_json["local_attention"].as_u64().unwrap_or(128) as usize,
-            local_rope_theta: config_json["local_rope_theta"].as_f64().unwrap_or(160000.0),
-        })
+            local_rope_theta: thetas[1],
+        };
+        config.resolve_rope().map_err(|e| {
+            config_errors::invalid_json(&config_path.display().to_string(), &e.to_string())
+        })?;
+        Ok(config)
     }
 
     pub fn hidden_size(&self) -> usize {
@@ -183,50 +218,6 @@ impl MatryoshkaConfig {
 // ============================================================================
 // Rotary Position Embedding
 // ============================================================================
-
-#[derive(Clone)]
-struct RotaryEmbedding {
-    sin: Tensor,
-    cos: Tensor,
-}
-
-impl RotaryEmbedding {
-    fn new(
-        dtype: DType,
-        config: &MmBertEmbeddingConfig,
-        rope_theta: f64,
-        device: &Device,
-    ) -> candle_core::Result<Self> {
-        let dim = config.head_dim();
-        let inv_freq: Vec<_> = (0..dim)
-            .step_by(2)
-            .map(|i| 1f32 / rope_theta.powf(i as f64 / dim as f64) as f32)
-            .collect();
-        let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), device)?;
-        let max_seq_len = config.max_position_embeddings;
-        // Preserve integer positions and angular precision at 32K before casting.
-        // FP16 rounds adjacent positions above 2048; BF16 loses them above 256.
-        let t = Tensor::arange(0u32, max_seq_len as u32, device)?
-            .to_dtype(DType::F32)?
-            .reshape((max_seq_len, 1))?;
-        let freqs = t.matmul(&inv_freq)?;
-        Ok(Self {
-            sin: freqs.sin()?.to_dtype(dtype)?,
-            cos: freqs.cos()?.to_dtype(dtype)?,
-        })
-    }
-
-    fn apply_rotary_emb_qkv(
-        &self,
-        q: &Tensor,
-        k: &Tensor,
-    ) -> candle_core::Result<(Tensor, Tensor)> {
-        let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &self.cos, &self.sin)?;
-        let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &self.cos, &self.sin)?;
-        Ok((q_embed, k_embed))
-    }
-}
 
 // ============================================================================
 // Attention
@@ -434,6 +425,7 @@ struct MmBertEncoder {
 
 impl MmBertEncoder {
     fn load(vb: VarBuilder, config: &MmBertEmbeddingConfig) -> candle_core::Result<Self> {
+        let rope = config.resolve_rope()?;
         let word_embeddings = embedding(
             config.vocab_size,
             config.hidden_size,
@@ -447,14 +439,16 @@ impl MmBertEncoder {
 
         let global_rotary_emb = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
-            config,
-            config.global_rope_theta,
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            &rope[0],
             vb.device(),
         )?);
         let local_rotary_emb = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
-            config,
-            config.local_rope_theta,
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            &rope[1],
             vb.device(),
         )?);
 
@@ -932,7 +926,7 @@ mod tests {
         assert_eq!(config.layers, vec![3, 6, 11, 22]);
     }
 
-    /// Test that RoPE can be computed for 32K positions with YaRN theta
+    /// Test that RoPE can be computed for 32K positions with checkpoint theta
     /// This verifies the mathematical foundation without requiring model weights
     #[test]
     fn test_32k_rope_computation() {
@@ -949,9 +943,10 @@ mod tests {
             layer_norm_eps: 1e-5,
             pad_token_id: 0,
             global_attn_every_n_layers: 3,
-            global_rope_theta: 160000.0, // YaRN-scaled
+            global_rope_theta: 160000.0, // checkpoint-configured
             local_attention: 128,
             local_rope_theta: 160000.0,
+            rope_options: RopeOptions::default(),
             intermediate_normalization: IntermediateNormalization::None,
         };
 
@@ -961,8 +956,14 @@ mod tests {
         assert_eq!(config.head_dim(), 64); // 768 / 12
 
         // Create RoPE embeddings for 32K positions
-        let rope = RotaryEmbedding::new(DType::F32, &config, config.global_rope_theta, &device)
-            .expect("Failed to create RoPE for 32K");
+        let rope = RotaryEmbedding::new(
+            DType::F32,
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            &Parameters::unscaled(config.global_rope_theta),
+            &device,
+        )
+        .expect("Failed to create RoPE for 32K");
 
         // Verify sin/cos tensors have correct shape
         assert_eq!(rope.sin.dims(), &[32768, 32]); // (max_seq_len, head_dim/2)
@@ -1050,6 +1051,7 @@ mod tests {
             global_rope_theta: 160000.0,
             local_attention: 8, // window = 4 each side
             local_rope_theta: 160000.0,
+            rope_options: RopeOptions::default(),
             intermediate_normalization: IntermediateNormalization::None,
         }
     }
@@ -1123,7 +1125,14 @@ mod tests {
         let wqkv = Tensor::randn(0f32, 0.2f32, (hidden * 3, hidden), device).unwrap();
         let wo = Tensor::randn(0f32, 0.2f32, (hidden, hidden), device).unwrap();
         let rotary = Arc::new(
-            RotaryEmbedding::new(DType::F32, config, config.global_rope_theta, device).unwrap(),
+            RotaryEmbedding::new(
+                DType::F32,
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                &Parameters::unscaled(config.global_rope_theta),
+                device,
+            )
+            .unwrap(),
         );
         MmBertAttention {
             qkv: Linear::new(wqkv, None),
@@ -1472,7 +1481,7 @@ mod integration_tests {
         );
         assert!(
             model.config().global_rope_theta >= 100000.0,
-            "Model should use YaRN-scaled RoPE theta"
+            "Model should use checkpoint-configured RoPE theta"
         );
 
         println!("Config verified:");
@@ -1481,7 +1490,7 @@ mod integration_tests {
             model.config().max_position_embeddings
         );
         println!(
-            "  - global_rope_theta: {} (YaRN)",
+            "  - global_rope_theta: {} (checkpoint theta)",
             model.config().global_rope_theta
         );
 
@@ -1574,7 +1583,7 @@ mod integration_tests {
         );
         assert_eq!(
             config.global_rope_theta, 160000.0,
-            "global_rope_theta should be 160000 (YaRN-scaled)"
+            "global_rope_theta should be 160000 (checkpoint-configured)"
         );
         assert_eq!(
             config.local_rope_theta, 160000.0,
@@ -1605,7 +1614,7 @@ mod integration_tests {
             config.max_position_embeddings
         );
         println!(
-            "   - global_rope_theta: {} (YaRN 4x scaling)",
+            "   - global_rope_theta: {} (checkpoint theta)",
             config.global_rope_theta
         );
         println!("   - vocab_size: {} (Gemma 2 tokenizer)", config.vocab_size);
@@ -1635,11 +1644,17 @@ mod early_exit_contract_tests {
             global_rope_theta: 160000.0,
             local_attention: 4,
             local_rope_theta: 10000.0,
+            rope_options: RopeOptions::default(),
             intermediate_normalization: IntermediateNormalization::None,
         };
         for dtype in [DType::F16, DType::BF16] {
-            let rotary =
-                RotaryEmbedding::new(dtype, &config, config.global_rope_theta, &Device::Cpu)?;
+            let rotary = RotaryEmbedding::new(
+                dtype,
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                &Parameters::unscaled(config.global_rope_theta),
+                &Device::Cpu,
+            )?;
             let cosine = rotary.cos.to_dtype(DType::F32)?.to_vec2::<f32>()?;
             let sine = rotary.sin.to_dtype(DType::F32)?.to_vec2::<f32>()?;
             for position in [255, 256, 257, 2047, 2048, 2049, 8191, 16383, 32766, 32767] {
@@ -1672,6 +1687,7 @@ mod early_exit_contract_tests {
             global_rope_theta: 10000.0,
             local_attention: 4,
             local_rope_theta: 10000.0,
+            rope_options: RopeOptions::default(),
             intermediate_normalization: IntermediateNormalization::None,
         };
         let mut encoder = MmBertEncoder::load(vb, &config)?;
@@ -1717,5 +1733,99 @@ mod early_exit_contract_tests {
         assert!(encoder.forward_to_layer(&ids, &mask, 0).is_err());
         assert!(encoder.forward_to_layer(&ids, &mask, 3).is_err());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod yarn_fixture_tests {
+    use super::*;
+    use crate::model_architectures::modernbert_rope::tests::{assert_tiny_fixture, fixture_dir};
+
+    #[test]
+    fn embedding_yarn_matches_official_tiny_backbone_in_both_config_formats(
+    ) -> candle_core::Result<()> {
+        let mut outputs = Vec::new();
+        for mode in ["tf4", "tf5"] {
+            let config = MmBertEmbeddingConfig::from_pretrained(fixture_dir().join(mode)).unwrap();
+            let vb = unsafe {
+                VarBuilder::from_mmaped_safetensors(
+                    &[fixture_dir().join("weights.safetensors.fixture")],
+                    DType::F32,
+                    &Device::Cpu,
+                )?
+            };
+            let model = MmBertEncoder::load(vb, &config)?;
+            outputs.push(assert_tiny_fixture(mode, |ids, mask| {
+                model.forward(ids, mask)
+            })?);
+        }
+        assert!(outputs[0]
+            .iter()
+            .zip(&outputs[1])
+            .all(|(a, b)| a.to_bits() == b.to_bits()));
+        Ok(())
+    }
+    #[test]
+    fn embedding_default_encoder_is_bitwise_unchanged() -> candle_core::Result<()> {
+        use crate::model_architectures::modernbert_rope::tests::{
+            assert_default_forward_unchanged, legacy_default_cache,
+        };
+        let mut config = MmBertEmbeddingConfig::from_pretrained(fixture_dir().join("tf4")).unwrap();
+        config.rope_options = RopeOptions::default();
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(
+                &[fixture_dir().join("weights.safetensors.fixture")],
+                DType::F32,
+                &Device::Cpu,
+            )?
+        };
+        let model = MmBertEncoder::load(vb, &config)?;
+        let mut previous = model.clone();
+        for layer in &mut previous.layers {
+            let theta = if layer.uses_local_attention {
+                config.local_rope_theta
+            } else {
+                config.global_rope_theta
+            };
+            layer.attn.rotary_emb = Arc::new(legacy_default_cache(
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                theta,
+            )?);
+        }
+        assert_default_forward_unchanged(
+            |ids, mask| model.forward(ids, mask),
+            |ids, mask| previous.forward(ids, mask),
+        )
+    }
+    #[test]
+    fn embedding_official_norm_eps_and_legacy_alias_are_validated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let raw = std::fs::read_to_string(fixture_dir().join("tf4/config.json")).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        value.as_object_mut().unwrap().remove("layer_norm_eps");
+        let load = |value: &serde_json::Value| {
+            std::fs::write(&path, value.to_string()).unwrap();
+            MmBertEmbeddingConfig::from_pretrained(dir.path())
+        };
+        value["norm_eps"] = serde_json::json!(1e-6);
+        assert_eq!(load(&value).unwrap().layer_norm_eps, 1e-6);
+        value["layer_norm_eps"] = serde_json::json!(1e-6);
+        assert_eq!(load(&value).unwrap().layer_norm_eps, 1e-6);
+        value.as_object_mut().unwrap().remove("norm_eps");
+        assert_eq!(load(&value).unwrap().layer_norm_eps, 1e-6);
+        value["norm_eps"] = serde_json::json!(1e-5);
+        assert!(load(&value).is_err());
+        value.as_object_mut().unwrap().remove("layer_norm_eps");
+        for invalid in [
+            serde_json::json!(0.0),
+            serde_json::json!(-1.0),
+            serde_json::json!("1e-5"),
+            serde_json::Value::Null,
+        ] {
+            value["norm_eps"] = invalid;
+            assert!(load(&value).is_err());
+        }
     }
 }

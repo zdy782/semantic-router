@@ -3,6 +3,7 @@
 //! ModernBERT is a modernized bidirectional encoder-only Transformer model
 //! using the context capacity and RoPE theta declared by each checkpoint.
 
+use crate::model_architectures::modernbert_rope::{Parameters, RopeOptions, RotaryEmbedding};
 use candle_core::{DType, Device, IndexOp, Result, Tensor, D};
 use candle_nn::{
     embedding, layer_norm_no_bias, linear, linear_no_bias, ops::softmax, Embedding, LayerNorm,
@@ -30,15 +31,31 @@ pub struct Config {
     pub num_attention_heads: usize,
     pub intermediate_size: usize,
     pub max_position_embeddings: usize,
+    #[serde(alias = "norm_eps")]
     pub layer_norm_eps: f64,
     pub pad_token_id: u32,
     pub global_attn_every_n_layers: usize,
     pub global_rope_theta: f64,
     pub local_attention: usize,
     pub local_rope_theta: f64,
+    #[serde(default, flatten)]
+    pub rope_options: RopeOptions,
     #[serde(default)]
     #[serde(flatten)]
     pub classifier_config: Option<ClassifierConfig>,
+}
+
+impl Config {
+    pub(crate) fn resolve_rope(&self) -> candle_core::Result<[Parameters; 2]> {
+        self.rope_options.resolve(
+            [self.global_rope_theta, self.local_rope_theta],
+            self.max_position_embeddings,
+            self.hidden_size,
+            self.num_attention_heads,
+            self.num_hidden_layers,
+            self.global_attn_every_n_layers,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Copy, Default)]
@@ -54,41 +71,6 @@ pub struct ClassifierConfig {
     pub id2label: HashMap<String, String>,
     pub label2id: HashMap<String, String>,
     pub classifier_pooling: ClassifierPooling,
-}
-
-#[derive(Debug, Clone)]
-struct RotaryEmbedding {
-    sin: Tensor,
-    cos: Tensor,
-}
-
-impl RotaryEmbedding {
-    fn new(dtype: DType, config: &Config, rope_theta: f64, dev: &Device) -> Result<Self> {
-        let dim = config.hidden_size / config.num_attention_heads;
-        let inv_freq: Vec<_> = (0..dim)
-            .step_by(2)
-            .map(|i| 1f32 / rope_theta.powf(i as f64 / dim as f64) as f32)
-            .collect();
-        let inv_freq_len = inv_freq.len();
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
-        let max_seq_len = config.max_position_embeddings;
-        // RoPE positions and angles stay FP32 even for a low-precision model.
-        // Otherwise BF16 merges adjacent positions above 256 (FP16 above 2048).
-        let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(DType::F32)?
-            .reshape((max_seq_len, 1))?;
-        let freqs = t.matmul(&inv_freq)?;
-        Ok(Self {
-            sin: freqs.sin()?.to_dtype(dtype)?,
-            cos: freqs.cos()?.to_dtype(dtype)?,
-        })
-    }
-
-    fn apply_rotary_emb_qkv(&self, q: &Tensor, k: &Tensor) -> Result<(Tensor, Tensor)> {
-        let q_embed = candle_nn::rotary_emb::rope(&q.contiguous()?, &self.cos, &self.sin)?;
-        let k_embed = candle_nn::rotary_emb::rope(&k.contiguous()?, &self.cos, &self.sin)?;
-        Ok((q_embed, k_embed))
-    }
 }
 
 #[derive(Clone)]
@@ -419,6 +401,7 @@ impl ModernBert {
 
     /// Load the root tensor namespace exported by HF ModernBertModel.
     pub fn load_backbone(vb: VarBuilder, config: &Config) -> Result<Self> {
+        let rope = config.resolve_rope()?;
         let word_embeddings = embedding(
             config.vocab_size,
             config.hidden_size,
@@ -431,14 +414,16 @@ impl ModernBert {
         )?;
         let global_rotary_emb = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
-            config,
-            config.global_rope_theta,
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            &rope[0],
             vb.device(),
         )?);
         let local_rotary_emb = Arc::new(RotaryEmbedding::new(
             vb.dtype(),
-            config,
-            config.local_rope_theta,
+            config.hidden_size / config.num_attention_heads,
+            config.max_position_embeddings,
+            &rope[1],
             vb.device(),
         )?);
 
@@ -628,6 +613,7 @@ mod tests {
             global_rope_theta: 160000.0,
             local_attention: 8, // window = 4 each side
             local_rope_theta: 160000.0,
+            rope_options: RopeOptions::default(),
             classifier_config: None,
         }
     }
@@ -637,7 +623,13 @@ mod tests {
         let mut config = tiny_config();
         config.max_position_embeddings = 32768;
         for dtype in [DType::F32, DType::F16, DType::BF16] {
-            let cache = RotaryEmbedding::new(dtype, &config, 160000.0, &Device::Cpu)?;
+            let cache = RotaryEmbedding::new(
+                dtype,
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                &Parameters::unscaled(160000.0),
+                &Device::Cpu,
+            )?;
             let sin = cache.sin.to_dtype(DType::F32)?.to_vec2::<f32>()?;
             let cos = cache.cos.to_dtype(DType::F32)?.to_vec2::<f32>()?;
             let tolerance = if dtype == DType::BF16 { 0.004 } else { 0.0005 };
@@ -659,7 +651,14 @@ mod tests {
         let wqkv = Tensor::randn(0f32, 0.2f32, (hidden * 3, hidden), device).unwrap();
         let wo = Tensor::randn(0f32, 0.2f32, (hidden, hidden), device).unwrap();
         let rotary = Arc::new(
-            RotaryEmbedding::new(DType::F32, config, config.global_rope_theta, device).unwrap(),
+            RotaryEmbedding::new(
+                DType::F32,
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                &Parameters::unscaled(config.global_rope_theta),
+                device,
+            )
+            .unwrap(),
         );
         ModernBertAttention {
             qkv: Linear::new(wqkv, None),
@@ -925,5 +924,45 @@ mod tests {
                 assert!(max_abs_diff(&actual, &reference) < 1e-4);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod default_rope_compatibility_tests {
+    use super::*;
+    use crate::model_architectures::modernbert_rope::tests::{
+        assert_default_forward_unchanged, fixture_dir, legacy_default_cache,
+    };
+
+    #[test]
+    fn traditional_default_encoder_is_bitwise_unchanged() -> Result<()> {
+        let raw = std::fs::read_to_string(fixture_dir().join("tf4/config.json")).unwrap();
+        let mut config: Config = serde_json::from_str(&raw).unwrap();
+        config.rope_options = RopeOptions::default();
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(
+                &[fixture_dir().join("weights.safetensors.fixture")],
+                DType::F32,
+                &Device::Cpu,
+            )?
+        };
+        let model = ModernBert::load_backbone(vb, &config)?;
+        let mut previous = model.clone();
+        for layer in &mut previous.layers {
+            let theta = if layer.uses_local_attention {
+                config.local_rope_theta
+            } else {
+                config.global_rope_theta
+            };
+            layer.attn.rotary_emb = Arc::new(legacy_default_cache(
+                config.hidden_size / config.num_attention_heads,
+                config.max_position_embeddings,
+                theta,
+            )?);
+        }
+        assert_default_forward_unchanged(
+            |ids, mask| model.forward(ids, mask),
+            |ids, mask| previous.forward(ids, mask),
+        )
     }
 }

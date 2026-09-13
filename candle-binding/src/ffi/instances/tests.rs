@@ -528,24 +528,44 @@ fn owned_load_and_head_binding_reject_budgets_below_actual_special_tokens() {
 }
 
 #[test]
-fn owned_backbone_and_head_reject_unsupported_rope_scaling() {
+fn owned_backbone_and_head_validate_rope_scaling_and_binding_identity() {
     let dir = fixture(&["safe", "unsafe"], 0);
     let encoder = load(options(&dir), "backbone").unwrap();
     update_fixture_config(&dir, |config| {
-        config["rope_scaling"] = json!({"rope_type":"yarn", "factor":4.0});
+        config["rope_scaling"] = json!({"rope_type":"dynamic", "factor":4.0});
     });
     let error = load(options(&dir), "backbone").err().unwrap();
-    assert!(error
-        .to_string()
-        .contains("unsupported ModernBERT RoPE scaling"));
+    assert!(error.to_string().contains("unsupported ModernBERT"));
     for task in ["sequence", "token"] {
         let error = bind_head(&encoder, dir.path().to_str().unwrap(), task)
             .err()
             .unwrap();
-        assert!(error
-            .to_string()
-            .contains("unsupported ModernBERT RoPE scaling"));
+        assert!(error.to_string().contains("unsupported ModernBERT"));
     }
+    update_fixture_config(&dir, |config| {
+        config["rope_scaling"] = json!({"rope_type":"yarn", "factor":4.0,
+            "original_max_position_embeddings":128,"truncate":true});
+    });
+    let yarn = load(options(&dir), "backbone").unwrap();
+    assert_ne!(encoder.info.resource_id, yarn.info.resource_id);
+    for task in ["sequence", "token"] {
+        let error = bind_head(&encoder, dir.path().to_str().unwrap(), task)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("incompatible"));
+        let head = bind_head(&yarn, dir.path().to_str().unwrap(), task).unwrap();
+        if task == "sequence" {
+            head.sequence("hello world").unwrap();
+        } else {
+            head.tokens("hello world").unwrap();
+        }
+    }
+    let direct = load(options(&dir), "sequence").unwrap();
+    let bound = bind_head(&yarn, dir.path().to_str().unwrap(), "sequence").unwrap();
+    assert_eq!(
+        value(direct.sequence("hello world").unwrap()),
+        value(bound.sequence("hello world").unwrap())
+    );
 }
 
 #[test]
