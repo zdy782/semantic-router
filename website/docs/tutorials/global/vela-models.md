@@ -110,6 +110,14 @@ GPU validation. Choose the graph and representation that match the deployment,
 and check the actual provider, precision and fallback evidence. Initial GPU
 compilation and warm request latency are separate measurements.
 
+The Embedding and Reranker repositories include FP32 ONNX graphs with shared
+external weights. The full representation uses `onnx/model.onnx`; reduced
+representations require their matching trained layer or layer/dimension graph.
+The downloader resolves a full-size selection from the model's encoder
+configuration, so an explicit full selection can use the primary graph.
+Replacing native weights also requires regenerating the corresponding ONNX
+artifacts before publishing the update.
+
 All models expose their supported input length, usage and comparable evaluation
 results in their model cards. Published comparisons use the previous mmBERT
 family on matched evaluation data. Quality scores, maximum accepted input length

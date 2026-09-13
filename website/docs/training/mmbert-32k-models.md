@@ -5,6 +5,13 @@ sidebar_label: mmBERT-32K Models
 
 # mmBERT-32K foundation, embedding, and reranking
 
+This page describes the previous mmBERT releases and their original training
+recipes. Vela uses the same bi-encoder and cross-encoder patterns with the
+published Vela Encoder base. Use the
+[current training overview](./training-overview#record-the-base-and-task-lineage)
+and [model catalog](./model-catalog) when adapting Vela; do not inherit the older
+base or dataset recipe from the commands below.
+
 Three models form one progressive text-retrieval family:
 
 ```text

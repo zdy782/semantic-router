@@ -21,8 +21,8 @@ Use this section in three steps:
 
 | You need to | Start with | Output |
 | --- | --- | --- |
-| Compare queries and documents efficiently | [Vela embedding architecture](./mmbert-32k-models#embedding-model-bi-encoder) | One normalized vector per input |
-| Re-score a short list with higher accuracy | [Vela reranking architecture](./mmbert-32k-models#reranking-model-cross-encoder) | An uncalibrated relevance logit for each query-document pair |
+| Compare queries and documents efficiently | [Bi-encoder architecture](./mmbert-32k-models#embedding-model-bi-encoder) | One normalized vector per input |
+| Re-score a short list with higher accuracy | [Cross-encoder architecture](./mmbert-32k-models#reranking-model-cross-encoder) | An uncalibrated relevance logit for each query-document pair |
 | Place text, images, and audio in one vector space | [Multimodal embeddings](./multimodal-embeddings) | A normalized cross-modal vector |
 | Detect intent, jailbreaks, feedback, modality, fact-check needs, or PII | [Classifier models](./classifier-models) | A class, probability distribution, or token labels |
 | Apply hierarchical prompt-safety policy | [Safety classifiers](./mmbert-safety-classifier) | `safe`/`unsafe`, then independent Hazard category scores |
@@ -65,6 +65,20 @@ and configuration. The training commands accept an explicit base ID and revision
 choose those together rather than inheriting an earlier mmBERT recipe's base.
 Compare the candidate against the original task-specific mmBERT model on matched
 data, while using the currently served Vela version as a regression reference.
+
+For continued embedding or reranker training, initialize from the published
+Vela task checkpoint and verify its shared-base provenance. Restore the complete
+encoder and every trained representation head. Starting a new optimization run
+resets the optimizer; resuming an interrupted run also restores its training
+state. These are separate operations in the
+[Vela representation training workflow](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_embeddings/mmbert_32k#train-a-new-task-from-a-standard-base).
+
+Retrieval supervision can be combined with teacher representation anchors and
+relations across a logical batch. Supervise each supported depth and dimension
+explicitly, and measure retrieval, similarity, multilingual transfer and long
+documents separately. Gradient accumulation alone does not create additional
+contrastive negatives. Keep unjudged retrieval candidates distinct from reviewed
+negative examples when constructing ranking losses.
 
 ## Adapter versus merged model
 
