@@ -96,7 +96,7 @@ global:
         pii:
           model_ref: pii_classifier
           use_mmbert_32k: true
-          pii_mapping_path: models/Vela-1.0-Encoder-307M-PII/pii_type_mapping.json
+          pii_mapping_path: models/Vela-1.0-Encoder-307M-PII/pii_mapping.json
           max_sequence_length: 0
           use_cpu: false
       hallucination_mitigation:

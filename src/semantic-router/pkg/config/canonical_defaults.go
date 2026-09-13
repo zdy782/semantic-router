@@ -263,7 +263,7 @@ func defaultClassifierModule() CanonicalClassifierModule {
 				Threshold:      0.9,
 				UseCPU:         true,
 				UseMmBERT32K:   true,
-				PIIMappingPath: "models/Vela-1.0-Encoder-307M-PII/pii_type_mapping.json",
+				PIIMappingPath: "models/Vela-1.0-Encoder-307M-PII/pii_mapping.json",
 			},
 		},
 		Preference: PreferenceModelConfig{

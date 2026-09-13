@@ -141,7 +141,7 @@ export const DEFAULT_SECTIONS: Record<RouterSystemKey, unknown> = {
       threshold: 0.9,
       use_cpu: true,
       use_mmbert_32k: true,
-      pii_mapping_path: 'models/Vela-1.0-Encoder-307M-PII/pii_type_mapping.json',
+      pii_mapping_path: 'models/Vela-1.0-Encoder-307M-PII/pii_mapping.json',
     },
     preference: {
       use_contrastive: false,
