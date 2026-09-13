@@ -1,5 +1,5 @@
 //! Runtime-selected GPU/compiler identity for the optional MIGraphX cache.
-//! Uses stable scalar HIP/HSA APIs; never guesses a hipDeviceProp_t layout.
+//! Uses stable scalar HIP and ROCr APIs; never guesses a hipDeviceProp_t layout.
 use serde::{Deserialize, Serialize};
 
 // MIGraphX loads its GPU target lazily. Bind these installed backend modules
@@ -128,7 +128,7 @@ mod linux {
     unsafe extern "C" fn agent_callback(agent: Handle, context: *mut c_void) -> u32 {
         let query = &mut *context.cast::<AgentQuery>();
         let mut device = 0_u32;
-        // hsa.h HSA_AGENT_INFO_DEVICE=17, HSA_DEVICE_TYPE_GPU=1.
+        // Public ROCr header: HSA_AGENT_INFO_DEVICE=17, HSA_DEVICE_TYPE_GPU=1.
         if (query.agent_info)(agent, 17, (&mut device as *mut u32).cast()) != 0 {
             query.failed = true;
             return 1;
@@ -194,7 +194,7 @@ mod linux {
     pub fn gpu_identity(device: i32) -> anyhow::Result<GpuIdentity> {
         anyhow::ensure!(device >= 0, "GPU device ordinal must be nonnegative");
         let hip = Library::open("libamdhip64.so")?;
-        let hsa = Library::open("libhsa-runtime64.so.1")?;
+        let rocr = Library::open("libhsa-runtime64.so.1")?;
         type Pci = unsafe extern "C" fn(*mut c_char, c_int, c_int) -> c_int;
         type Version = unsafe extern "C" fn(*mut c_int) -> c_int;
         type Initialize = unsafe extern "C" fn() -> u32;
@@ -215,12 +215,12 @@ mod linux {
                 hip.symbol::<Pci>(c"hipDeviceGetPCIBusId")?,
                 hip.symbol::<Version>(c"hipRuntimeGetVersion")?,
                 hip.symbol::<Version>(c"hipDriverGetVersion")?,
-                hsa.symbol::<Initialize>(c"hsa_init")?,
-                hsa.symbol::<Initialize>(c"hsa_shut_down")?,
-                hsa.symbol::<GetInfo>(c"hsa_agent_get_info")?,
-                hsa.symbol::<GetInfo>(c"hsa_isa_get_info_alt")?,
-                hsa.symbol::<Iterate>(c"hsa_iterate_agents")?,
-                hsa.symbol::<IterateIsas>(c"hsa_agent_iterate_isas")?,
+                rocr.symbol::<Initialize>(c"hsa_init")?,
+                rocr.symbol::<Initialize>(c"hsa_shut_down")?,
+                rocr.symbol::<GetInfo>(c"hsa_agent_get_info")?,
+                rocr.symbol::<GetInfo>(c"hsa_isa_get_info_alt")?,
+                rocr.symbol::<Iterate>(c"hsa_iterate_agents")?,
+                rocr.symbol::<IterateIsas>(c"hsa_agent_iterate_isas")?,
             )
         };
         let mut bus = [0_i8; 32];
