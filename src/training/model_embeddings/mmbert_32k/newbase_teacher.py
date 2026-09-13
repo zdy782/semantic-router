@@ -19,6 +19,7 @@ from .newbase_data import file_digest, read_jsonl, text_digest
 from .newbase_objectives import relational_cosine_loss
 
 _SHA256_HEX_LENGTH = 64
+_MATRIX_DIMENSIONS = 2
 
 
 def input_identity(component_ids, components) -> dict:
@@ -79,7 +80,12 @@ def validate_teacher_config(config: dict, task: str) -> None:
 
 @dataclass(frozen=True)
 class TeacherCache:
-    """A complete immutable cache for one corpus and one draw sequence."""
+    """A complete immutable cache for one corpus and one draw sequence.
+
+    Entry token_sha256 binds the student's complete input tokens. A teacher's
+    own tokenizer and prompt identities belong separately in manifest.teacher;
+    teacher vectors need not have the student's embedding dimension.
+    """
 
     entries: dict[str, dict]
     values: torch.Tensor
@@ -180,7 +186,7 @@ class TeacherCache:
         return self.values[indices].to(device).detach()
 
     def validate_tokens(self, tokenizer, components, maximum: int) -> None:
-        """Check every cached input before a trainer starts evaluation or updates."""
+        """Check complete student tokens before evaluation or optimizer updates."""
         if tokenizer.padding_side != "right" or tokenizer.pad_token_id is None:
             raise ValueError(
                 "Teacher inputs require an explicit right-padding tokenizer"
@@ -237,8 +243,17 @@ def embedding_teacher_loss(
     Semantic pairs retain their explicitly paired relation in addition to the
     unrelated off-diagonal relations. No relation changes an absolute label.
     """
-    if len(component_ids) != len(student) or teacher.shape != student.shape:
+    if (
+        student.ndim != _MATRIX_DIMENSIONS
+        or teacher.ndim != _MATRIX_DIMENSIONS
+        or len(component_ids) != len(student)
+        or len(teacher) != len(student)
+        or student.shape[1] == 0
+        or teacher.shape[1] == 0
+    ):
         raise ValueError("Embedding teacher and student input geometry differ")
+    if not torch.isfinite(student).all() or not torch.isfinite(teacher).all():
+        raise ValueError("Embedding teacher and student inputs must be finite")
     teacher = teacher.detach()
     if query_count is None:
         if len(student) % 2:

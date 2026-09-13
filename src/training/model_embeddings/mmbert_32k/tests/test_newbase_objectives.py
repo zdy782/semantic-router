@@ -12,6 +12,7 @@ try:
         multi_positive_loss,
         order_distillation,
         ranking_terms,
+        relational_cosine_loss,
     )
 except ImportError:
     torch = None
@@ -19,6 +20,45 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch")
 class NewBaseObjectivesTest(unittest.TestCase):
+    def test_cosine_relations_allow_different_model_dimensions(self):
+        torch.manual_seed(49)
+        left = torch.randn(3, 4, requires_grad=True)
+        right = torch.randn(4, 4, requires_grad=True)
+        teacher_left = torch.randn(3, 7, requires_grad=True)
+        teacher_right = torch.randn(4, 7, requires_grad=True)
+        valid = torch.tensor(
+            [[True, False, True, False], [False, True, False, False], [False] * 4]
+        )
+        actual = relational_cosine_loss(left, right, teacher_left, teacher_right, valid)
+        rows = []
+        for i in range(len(left)):
+            terms = [
+                (
+                    torch.nn.functional.cosine_similarity(left[i], right[j], dim=0)
+                    - torch.nn.functional.cosine_similarity(
+                        teacher_left[i], teacher_right[j], dim=0
+                    )
+                ).square()
+                for j in range(len(right))
+                if valid[i, j]
+            ]
+            if terms:
+                rows.append(torch.stack(terms).mean())
+        torch.testing.assert_close(actual, torch.stack(rows).mean())
+        actual.backward()
+        self.assertIsNone(teacher_left.grad)
+        self.assertIsNone(teacher_right.grad)
+        self.assertGreater(left.grad[:2].norm().item(), 0)
+        self.assertEqual(left.grad[2].norm().item(), 0)
+        self.assertEqual(right.grad[3].norm().item(), 0)
+        for invalid in (teacher_right[:, :6], teacher_right[:3], teacher_right[:, :0]):
+            with self.assertRaisesRegex(ValueError, "geometry"):
+                relational_cosine_loss(left, right, teacher_left, invalid, valid)
+        invalid = teacher_right.detach().clone()
+        invalid[3, 0] = float("nan")
+        with self.assertRaisesRegex(ValueError, "finite"):
+            relational_cosine_loss(left, right, teacher_left, invalid, valid)
+
     def test_shared_parent_preference_has_gradient_without_absolute_gold(self):
         components = {
             key: {"normalized_sha256": key, "parent_groups": ["matched-background"]}

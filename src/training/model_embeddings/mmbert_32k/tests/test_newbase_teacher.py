@@ -40,7 +40,7 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch, transformers and safetensors")
 class NewBaseTeacherTest(unittest.TestCase):
-    def cache(self, path, task, rows, components):
+    def cache(self, path, task, rows, components, embedding_dimensions=16):
         records = [{"id": str(index), **row} for index, row in enumerate(rows)]
         corpus = SimpleNamespace(
             records=records,
@@ -72,7 +72,9 @@ class NewBaseTeacherTest(unittest.TestCase):
                 }
             )
         torch.manual_seed(198)
-        values = torch.randn(len(entries), 16 if task == "embedding" else 1)
+        values = torch.randn(
+            len(entries), embedding_dimensions if task == "embedding" else 1
+        )
         if task == "embedding":
             values = torch.nn.functional.normalize(values, dim=-1)
         path.mkdir()
@@ -171,6 +173,37 @@ class NewBaseTeacherTest(unittest.TestCase):
             1,
         )
 
+    def test_semantic_pairs_keep_distinct_teacher_dimensions_and_finite_checks(self):
+        student = torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)
+        teacher = torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]], requires_grad=True)
+        components = {
+            key: {"normalized_sha256": key, "parent_groups": ["same-parent"]}
+            for key in ("a", "b")
+        }
+        loss = embedding_teacher_loss(
+            student, teacher, list(components), components, query_count=None
+        )
+        self.assertEqual(loss.item(), 1)
+        loss.backward()
+        self.assertGreater(student.grad.norm().item(), 0)
+        self.assertIsNone(teacher.grad)
+        for invalid in (teacher[:1], teacher[:, :0], teacher.flatten()):
+            with self.assertRaisesRegex(ValueError, "geometry"):
+                embedding_teacher_loss(
+                    student, invalid, list(components), components, query_count=None
+                )
+        for query_count in (None, 1):
+            invalid = teacher.detach().clone()
+            invalid[0, 0] = float("nan")
+            with self.assertRaisesRegex(ValueError, "finite"):
+                embedding_teacher_loss(
+                    student,
+                    invalid,
+                    list(components),
+                    components,
+                    query_count=query_count,
+                )
+
     def test_cache_rejects_wrong_membership_tokens_shape_and_file_identity(self):
         rows, components = batch_fixtures.NewBaseBatchesTest().examples()
         with tempfile.TemporaryDirectory() as directory:
@@ -217,7 +250,13 @@ class NewBaseTeacherTest(unittest.TestCase):
             ("reranker", reranker_step, "ranking"),
         ):
             with self.subTest(task=task), tempfile.TemporaryDirectory() as directory:
-                _, cache = self.cache(Path(directory) / "cache", task, rows, components)
+                _, cache = self.cache(
+                    Path(directory) / "cache",
+                    task,
+                    rows,
+                    components,
+                    embedding_dimensions=24,
+                )
                 model = fixture.model(task)
                 cache.values.requires_grad_(True)
                 options = {

@@ -76,15 +76,20 @@ def relational_cosine_loss(
 ) -> torch.Tensor:
     """Mean squared cosine discrepancy, with equal weight per eligible anchor.
 
-    Only relations are matched, so an orthogonal change of representation basis
-    is immaterial. The teacher supplies soft geometry rather than relevance gold.
+    Only relations are matched, so the two models may use different dimensions
+    and representation bases. The teacher supplies geometry, not relevance gold.
     """
     if (
         student_left.ndim != _MATRIX_DIMENSIONS
         or student_right.ndim != _MATRIX_DIMENSIONS
-        or teacher_left.shape != student_left.shape
-        or teacher_right.shape != student_right.shape
+        or teacher_left.ndim != _MATRIX_DIMENSIONS
+        or teacher_right.ndim != _MATRIX_DIMENSIONS
+        or len(teacher_left) != len(student_left)
+        or len(teacher_right) != len(student_right)
         or student_left.shape[1] != student_right.shape[1]
+        or teacher_left.shape[1] != teacher_right.shape[1]
+        or student_left.shape[1] == 0
+        or teacher_left.shape[1] == 0
         or valid.shape != (len(student_left), len(student_right))
         or valid.dtype != torch.bool
     ):
