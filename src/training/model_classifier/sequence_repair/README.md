@@ -1,4 +1,4 @@
-# Reproducible sequence-classifier repair
+# Sequence classifier training
 
 This module initializes, continues, evaluates, and freezes standard Hugging Face
 `ModernBertForSequenceClassification` checkpoints. Domain, FactCheck, and Modality
@@ -54,13 +54,16 @@ Transformers 4.57.6, PEFT 0.18.1, and Accelerate 1.10.1. Data preparation additi
 uses PyArrow and scikit-learn. Pin the complete environment for a reproduced run;
 do not install into a running inference service environment.
 
+Start each Vela task from the qualified Vela base and a fresh task head.
+`--base-id` and `--base-revision` are required for initialization, training and
+export; the local `--base` path does not implicitly identify its Hub repository.
 For a fresh task head and LoRA adapter:
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.initialize \
   --base artifacts/vela/base \
-  --base-id llm-semantic-router/mmbert-32k-yarn \
-  --base-revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
+  --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
   --contract artifacts/vela/factcheck/contract.json \
   --output artifacts/vela/factcheck-initial
 ```
@@ -93,7 +96,8 @@ results, then qualify the selected artifact on separate test data.
 ```bash
 python -m src.training.model_classifier.sequence_repair.train \
   --base artifacts/vela/base \
-  --base-revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
+  --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
   --adapter artifacts/vela/factcheck-initial \
   --contract artifacts/vela/factcheck/contract.json \
   --train artifacts/vela/factcheck/train.jsonl \
@@ -220,29 +224,6 @@ recorded and evaluation rejects an oversized input.
 
 ## Freeze, then evaluate the independent test
 
-Some historical adapters save only `classifier`, leaving the sequence `head`
-inherited from their original base. Before comparing that adapter on another
-encoder base, preserve its original task head in a separate adapter artifact:
-
-```bash
-python -m src.training.model_classifier.sequence_repair.complete_adapter \
-  --base artifacts/vela/original-base \
-  --adapter artifacts/vela/runs/domain-context/best-adapter \
-  --contract artifacts/vela/domain/contract.json \
-  --output artifacts/vela/domain-complete-head
-```
-
-This operation copies the existing head without training and checks CPU FP32
-logits before and after completion. It refuses adapters that already own `head`.
-Legacy adapters retain their inherited frozen head until this explicit operation;
-completion does not demonstrate a quality improvement. Training receipts record
-the effective head tensors and their trainable scope. Each saved adapter checks
-that its trainable head tensors survived serialization with identical bytes.
-Use the same completed adapter for both sides of a base-migration comparison;
-otherwise changing the base may also replace the task head. Select a base using
-short and long development retention, and record the migration separately from
-the original training receipt. A family name alone does not establish lineage.
-
 Export merges the selected adapter in FP32, checks short-input numerical
 agreement before/after merging, preserves the standard architecture and label
 mapping, and writes a `candidate-lock.json` with hashes. Supply the selected run's
@@ -263,7 +244,8 @@ type; it does not silently reinitialize a missing classifier.
 python -m src.training.model_classifier.sequence_repair.export \
   --runtime-task fact-check \
   --base artifacts/vela/base \
-  --base-revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
+  --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
   --adapter artifacts/vela/runs/factcheck-short/best-adapter \
   --run-manifest artifacts/vela/runs/factcheck-short/run.json \
   --contract artifacts/vela/factcheck/contract.json \
@@ -292,3 +274,26 @@ float32` disables GPU autocast for a precision-controlled comparison. Forward
 batch timings exclude tokenization and HTTP serving overhead and are not request
 latency. Native and ONNX execution need their own parity and serving validation.
 A short merge-equivalence check alone is not a quality or 32K-runtime test.
+
+## Historical adapter recovery
+
+Some historical adapters save only `classifier`, leaving the sequence `head`
+inherited from their original base. To reproduce an older adapter with an
+explicit task head, preserve that head in a separate adapter artifact:
+
+```bash
+python -m src.training.model_classifier.sequence_repair.complete_adapter \
+  --base artifacts/vela/original-base \
+  --adapter artifacts/vela/runs/domain-context/best-adapter \
+  --contract artifacts/vela/domain/contract.json \
+  --output artifacts/vela/domain-complete-head
+```
+
+This operation copies the existing head without training and checks CPU FP32
+logits before and after completion. It refuses adapters that already own `head`.
+Legacy adapters retain their inherited frozen head until this explicit operation;
+completion does not demonstrate a quality improvement. Training receipts record
+the effective head tensors and their trainable scope. Each saved adapter checks
+that its trainable head tensors survived serialization with identical bytes.
+Keep this recovery on the adapter's original base; a new Vela task starts with a
+fresh head and adapter.

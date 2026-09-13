@@ -147,8 +147,8 @@ Long-input support is task and engine specific. FactCheck's published 32K
 stress slice achieved 8/12 correct at 0.85. Feedback retains long-context
 false-positive limitations. The Embedding natural-document final reached
 21,816 tokens; exact 32K coverage also includes constructed and engineering
-fixtures. Consult each model's `TECHNICAL.md` for the measured scope and task
-trade-offs in the [Vela collection](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798).
+fixtures. Find each model's usage and capabilities in the
+[Vela collection](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798).
 
 CPU and AMD evidence should not be interchanged. The full-layer Embedding
 Candle CPU 32K run verifies functionality; it does not establish an interactive

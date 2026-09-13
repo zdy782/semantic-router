@@ -19,7 +19,40 @@ from src.training.model_classifier.user_feedback_classifier.vela_contract import
 
 class AnswerQualityContrastTests(unittest.TestCase):
     def setUp(self):
-        self.registry = json.loads(contrasts.DEFAULT_REGISTRY.read_text())
+        self.registry = {
+            "version": "unit-fixture",
+            "license": "CC0-1.0",
+            "label_rules": dict.fromkeys(VELA_LABEL2ID, "Supplied annotation"),
+            "input_protocol": "Complete current user text",
+            "authorship": "Synthetic unit fixture, not training data",
+            "evidence_scope": "Grouping and annotation transport only",
+            "precedence": "Preserve the supplied annotation",
+            "split_policy": "Keep each family in its declared partition",
+            "final_data_read": False,
+            "model_predictions_used": False,
+            "families": [
+                {
+                    "family_id": f"family_{index}",
+                    "split": (
+                        "train" if index < contrasts.FAMILY_COUNTS["train"] else "dev"
+                    ),
+                    "intent": f"Fixture {index}",
+                    "variants": [
+                        {
+                            "label": label,
+                            "en": f"Fixture {index}, variant {number}, English",
+                            "zh": f"样例 {index}, 变体 {number}, 中文",
+                            "rationale": f"Reviewed annotation {number}",
+                        }
+                        for number, label in enumerate(VELA_ID2LABEL.values())
+                    ],
+                }
+                for index in range(30)
+            ],
+        }
+        self.registry["family_plan_sha256"] = contrasts.sha256(
+            contrasts.json_bytes(contrasts.family_plan(self.registry))
+        )
 
     def test_each_bilingual_five_way_family_stays_in_one_partition(self):
         records = contrasts.build(self.registry)
@@ -44,34 +77,18 @@ class AnswerQualityContrastTests(unittest.TestCase):
                 )
         self.assertFalse(set(groups["train"]) & set(groups["dev"]))
 
-    def test_quality_judgments_are_distinct_from_quoted_or_new_tasks(self):
+    def test_supplied_annotations_and_provenance_are_preserved(self):
+        variants = self.registry["families"][0]["variants"]
+        variants[0]["en"] = "Your answer is accurate and clear."
+        variants[-1]["en"] = 'Translate this review: "The answer is accurate."'
         rows = [row for part in contrasts.build(self.registry).values() for row in part]
         lookup = {
             (row["group_id"].split(":")[-1], row["label"], row["language"]): row
             for row in rows
         }
-        self.assertIn("precise", lookup["fabric_translation", "SAT", "en"]["text"])
-        self.assertIn(
-            "accurate", lookup["fabric_translation", "NO_FEEDBACK", "en"]["text"]
-        )
-        self.assertIn(
-            "translate",
-            lookup["fabric_translation", "NO_FEEDBACK", "en"]["text"].lower(),
-        )
-        self.assertIn("imaginary", lookup["bird_calls", "NO_FEEDBACK", "en"]["text"])
-        self.assertIn("form", lookup["accessible_walk", "NO_FEEDBACK", "en"]["text"])
-        self.assertIn(
-            "accurate", lookup["fabric_translation", "WANT_DIFFERENT", "en"]["text"]
-        )
-        self.assertIn(
-            "Rewrite", lookup["fabric_translation", "WANT_DIFFERENT", "en"]["text"]
-        )
-        self.assertIn(
-            "do not yet understand",
-            lookup["observatory_tour", "NEED_CLARIFICATION", "en"]["text"],
-        )
-        self.assertIn(
-            "incorrect", lookup["podcast_outline", "WRONG_ANSWER", "en"]["text"]
+        self.assertEqual(lookup["family_0", "SAT", "en"]["text"], variants[0]["en"])
+        self.assertEqual(
+            lookup["family_0", "NO_FEEDBACK", "en"]["text"], variants[-1]["en"]
         )
         for row in rows:
             self.assertTrue(row["review_reason"].strip())
@@ -122,8 +139,10 @@ class AnswerQualityContrastTests(unittest.TestCase):
     def test_frozen_data_and_review_are_deterministic_and_never_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
             first, second = Path(directory) / "first", Path(directory) / "second"
-            manifest = contrasts.freeze(first)
-            self.assertEqual(manifest, contrasts.freeze(second))
+            registry_path = Path(directory) / "annotations.json"
+            registry_path.write_bytes(contrasts.json_bytes(self.registry))
+            manifest = contrasts.freeze(first, registry_path)
+            self.assertEqual(manifest, contrasts.freeze(second, registry_path))
             for name, digest in manifest["files"].items():
                 self.assertEqual(
                     (first / name).read_bytes(), (second / name).read_bytes()
@@ -132,7 +151,7 @@ class AnswerQualityContrastTests(unittest.TestCase):
                     hashlib.sha256((first / name).read_bytes()).hexdigest(), digest
                 )
             with self.assertRaises(FileExistsError):
-                contrasts.freeze(first)
+                contrasts.freeze(first, registry_path)
             contract = json.loads((first / "contract.json").read_text())
             self.assertEqual(contract["label2id"], VELA_LABEL2ID)
             self.assertEqual(

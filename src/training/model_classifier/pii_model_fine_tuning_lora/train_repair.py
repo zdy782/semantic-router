@@ -80,7 +80,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
-    parser.add_argument("--base-id")
+    parser.add_argument("--base-id", required=True)
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--adapter")
     parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -119,11 +119,8 @@ def main():
     parser.add_argument("--evaluate-initial", action="store_true")
     args = parser.parse_args()
     validate_method(args.method, args.adapter, args.fresh_head)
-    if args.method == "full" and not args.base_id:
-        raise ValueError("Full training requires an explicit base model identity")
     if args.method == "lora" and args.head_learning_rate is not None:
         raise ValueError("A separate head learning rate requires full training")
-    args.base_id = args.base_id or "llm-semantic-router/mmbert-32k-yarn"
     if (
         min(
             args.steps,

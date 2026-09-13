@@ -71,6 +71,8 @@ class JointEntrypointTests(unittest.TestCase):
                 "train",
                 "--base",
                 "fixture",
+                "--base-id",
+                "example/tiny-base",
                 "--base-revision",
                 "fixture",
                 "--method",

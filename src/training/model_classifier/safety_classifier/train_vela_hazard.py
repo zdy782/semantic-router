@@ -154,7 +154,7 @@ def main():
         "--source-weights",
         help="JSON object of positive source weights; overrides equal-source sampling",
     )
-    parser.add_argument("--base-id", default="llm-semantic-router/mmbert-32k-yarn")
+    parser.add_argument("--base-id", required=True)
     parser.add_argument("--length-balanced-sampling", action="store_true")
     parser.add_argument(
         "--selection",

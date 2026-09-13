@@ -7,8 +7,6 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-DEFAULT_CONFIG = Path(__file__).parent / "configs" / "vela-source-boundary-v1.json"
-
 
 def normalized(text):
     return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
@@ -88,7 +86,7 @@ def build_rows(config):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():

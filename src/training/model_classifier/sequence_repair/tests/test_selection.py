@@ -238,6 +238,8 @@ class BinarySelectionTests(unittest.TestCase):
                 "train",
                 "--base",
                 str(base),
+                "--base-id",
+                "example/tiny-base",
                 "--base-revision",
                 "fixture-revision",
                 "--adapter",

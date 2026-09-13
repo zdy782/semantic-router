@@ -10,9 +10,6 @@ from pathlib import Path
 from ..sequence_repair.data import assert_disjoint, normalized_text
 from .vela_contract import VELA_ID2LABEL, VELA_LABEL2ID
 
-DEFAULT_REGISTRY = (
-    Path(__file__).parent / "configs" / "vela-answer-quality-families-v1.json"
-)
 FAMILY_COUNTS = {"train": 20, "dev": 10}
 LANGUAGES = ("en", "zh")
 SOURCE = "authored_feedback_answer_quality_v1"
@@ -133,7 +130,7 @@ def summary(rows):
     }
 
 
-def freeze(output, registry_path=DEFAULT_REGISTRY):
+def freeze(output, registry_path):
     output, registry_path = Path(output), Path(registry_path)
     if output.exists():
         raise FileExistsError("Refusing to overwrite frozen data or evidence")
@@ -204,7 +201,7 @@ def freeze(output, registry_path=DEFAULT_REGISTRY):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
+    parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(freeze(args.output, args.registry), ensure_ascii=False, indent=2))

@@ -24,6 +24,8 @@ class TrainingOrderArgumentTests(unittest.TestCase):
             "train",
             "--base",
             "unused",
+            "--base-id",
+            "example/tiny-base",
             "--base-revision",
             "unused",
             "--method",
@@ -177,6 +179,8 @@ class SequenceTrainingOrderTests(unittest.TestCase):
                 "train",
                 "--base",
                 str(root / "base"),
+                "--base-id",
+                "example/tiny-base",
                 "--base-revision",
                 "fixture",
                 "--method",
@@ -301,6 +305,7 @@ class SequenceTrainingOrderTests(unittest.TestCase):
                     )
                     states[mode] = model.state_dict()
                     metadata = json.loads((output / "run.json").read_text())
+                    self.assertEqual(metadata["base_model"], "example/tiny-base")
                     trace_path = output / "actual-training-order.jsonl"
                     if mode == "sampled":
                         self.assertIsNone(metadata["training_order"])

@@ -24,6 +24,8 @@ class TrainingOrderArgumentTests(unittest.TestCase):
             "train",
             "--base",
             "unused",
+            "--base-id",
+            "example/tiny-base",
             "--base-revision",
             "unused",
             "--method",
@@ -170,6 +172,8 @@ class HazardTrainingOrderTests(unittest.TestCase):
                 "train",
                 "--base",
                 str(root / "base"),
+                "--base-id",
+                "example/tiny-base",
                 "--base-revision",
                 "fixture",
                 "--method",
@@ -253,6 +257,7 @@ class HazardTrainingOrderTests(unittest.TestCase):
                         )
                     )
                     run = json.loads((output / "run.json").read_text())
+                    self.assertEqual(run["base_model"], "example/tiny-base")
                     trace_path = output / "actual-training-order.jsonl"
                     if mode == "ordered":
                         trace = [

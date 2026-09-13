@@ -61,6 +61,8 @@ class HazardEvaluationPrecisionTests(unittest.TestCase):
                 "train",
                 "--base",
                 "fixture",
+                "--base-id",
+                "example/tiny-base",
                 "--base-revision",
                 "fixture",
                 "--adapter",

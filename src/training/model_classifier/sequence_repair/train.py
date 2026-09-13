@@ -186,7 +186,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
-    parser.add_argument("--base-id", default="llm-semantic-router/mmbert-32k-yarn")
+    parser.add_argument("--base-id", required=True)
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--method", choices=["lora", "full"], default="lora")

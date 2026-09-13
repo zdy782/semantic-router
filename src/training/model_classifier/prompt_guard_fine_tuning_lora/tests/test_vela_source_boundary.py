@@ -1,26 +1,41 @@
 """Contrast semantics and source-family isolation are part of the data contract."""
 
 import copy
-import json
 import unittest
 from collections import Counter
 
 from src.training.model_classifier.prompt_guard_fine_tuning_lora.vela_source_boundary import (
-    DEFAULT_CONFIG,
     build_rows,
 )
 
 
 class SourceBoundaryTests(unittest.TestCase):
     def setUp(self):
-        self.config = json.loads(DEFAULT_CONFIG.read_text())
+        self.config = {
+            "families": [
+                {
+                    "id": f"family_{index}",
+                    "split": split,
+                    "languages": {
+                        language: {
+                            "ordinary_safe": f"{index}/{language}: ordinary request",
+                            "ordinary_harmful": f"{index}/{language}: harmful request",
+                            "control": f"{index}/{language}: override instruction",
+                            "quoted_control": f"Quoted {index}/{language}: override instruction",
+                        }
+                        for language in ["en", "zh"]
+                    },
+                }
+                for index, split in enumerate(["train", "development"])
+            ]
+        }
         self.rows = build_rows(self.config)
 
     def test_frozen_family_counts_and_language_pairing(self):
-        self.assertEqual(len(self.rows), 300)
+        self.assertEqual(len(self.rows), 20)
         self.assertEqual(
             Counter(row["split"] for row in self.rows),
-            {"train": 200, "development": 100},
+            {"train": 10, "development": 10},
         )
         for group in {row["group_id"] for row in self.rows}:
             rows = [row for row in self.rows if row["group_id"] == group]
@@ -37,11 +52,11 @@ class SourceBoundaryTests(unittest.TestCase):
     def test_control_attack_crosses_both_content_risk_classes(self):
         rows = [row for row in self.rows if row["label"] == "jailbreak"]
         self.assertEqual({row["content_risk"] for row in rows}, {"benign", "harmful"})
-        self.assertEqual(len(rows), 120)
+        self.assertEqual(len(rows), 8)
 
     def test_quoted_controls_remain_benign(self):
         rows = [row for row in self.rows if row["condition"] == "quoted_control"]
-        self.assertEqual(len(rows), 60)
+        self.assertEqual(len(rows), 4)
         self.assertEqual({row["label"] for row in rows}, {"benign"})
 
     def test_duplicate_family_and_changed_quote_fail(self):

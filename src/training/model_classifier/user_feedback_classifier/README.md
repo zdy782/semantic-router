@@ -28,6 +28,9 @@ The data tools accept reviewed annotations as explicit inputs:
   --quote-policy structured-v3 --quote-review review.json --output filtered/`
   requires the review associated with that projection. Its remaining source
   labels are weak supervision, not reviewed gold.
+- `vela_answer_quality_contrasts --registry reviewed-families.json
+  --output contrasts/` freezes bilingual intent families and their supplied
+  annotations, retaining the declared family partitions and input hashes.
 
 Run these modules with
 `python -m src.training.model_classifier.user_feedback_classifier.<module>`.

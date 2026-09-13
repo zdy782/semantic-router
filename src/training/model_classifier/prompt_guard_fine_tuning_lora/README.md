@@ -1,10 +1,18 @@
-# PromptGuard
+# Vela Guard
 
 Vela detects prompt injection and jailbreak attempts independently of content
 safety. The current licensed-source builders are `vela_data.py` and
 `vela_authored.py`; training uses the explicit shared sequence loop. See the
 [Vela application recipes](../vela-applications.md) for output contracts,
 fixed sources, initialization, long-context evaluation and export.
+
+For reviewed source-boundary contrasts, run
+`python -m src.training.model_classifier.prompt_guard_fine_tuning_lora.vela_source_boundary
+--config reviewed-families.json --output contrasts/`. Supply the reviewed family
+definitions explicitly and retain them with the dataset release. The builder
+keeps ordinary requests, attacks, quotations and translations in their declared
+family partition. Training corpora and historical review snapshots are separate
+from the source checkout.
 
 ## Historical injection-specific v2
 
