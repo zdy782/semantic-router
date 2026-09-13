@@ -40,7 +40,7 @@ spec:
     # Embedding models configuration with mmBERT 2D Matryoshka
     embedding_models:
       # Path to mmBERT model (downloads automatically on startup, or run: make download-models)
-      mmbert_model_path: "models/mom-embedding-ultra"
+      mmbert_model_path: "models/Vela-1.0-Encoder-307M-Embedding"
       use_cpu: true
 
       # HNSW configuration for embedding-based classification
