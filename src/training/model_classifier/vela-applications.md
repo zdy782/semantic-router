@@ -2,8 +2,9 @@
 
 This guide covers Feedback, Guard, Safety, and Hazard. A recipe is a
 reproducible experiment; it does not certify a particular checkpoint. Model cards introduce the task, intended use, and place in the Vela family.
-Keep dataset revisions, training lineage, detailed evaluations, and measured
-limitations in the accompanying technical report.
+Keep dataset revisions, training lineage, and detailed evaluations with the
+release evidence. Model cards summarize measured capabilities and material
+limitations without embedding experiment logs.
 
 ## Output contracts
 
@@ -29,9 +30,9 @@ by assigning a confident training label.
 
 Vela adds `NO_FEEDBACK` at ID 4 while preserving historical IDs 0–3. An ordinary
 new task or supplied material is not satisfaction. The legacy four-way
-checkpoints stay unchanged. The five-way recipe preserves their trained head
-rows when initializing its new class, then trains all five jointly; adding a
-softmax term changes probabilities and requires new development checks.
+checkpoints stay unchanged. New Vela training initializes all five head rows from the qualified Vela
+base and trains them jointly with its encoder. Legacy adapter migration is a
+separate compatibility tool; it does not establish the lineage of a new release.
 `NO_FEEDBACK` does not match any of the four feedback rules. A low-confidence
 Vela result is an abstention, never a fabricated `SAT` prediction. The checkpoint
 still cannot recover context absent from its input, so mixed intentions and
@@ -224,52 +225,45 @@ candidate; installing a CPU or CUDA wheel does not enable ROCm.
 New Vela runs start from `llm-semantic-router/Vela-1.0-Encoder-307M` at
 revision `ccd22e6ba42f86681578229f9dfd468295da3def`. Download that revision
 to `/models/encoder` and retain its file hashes in the training receipt.
-Initialize a fresh adapter and trainable prediction head:
-
-```bash
-python -m src.training.model_classifier.sequence_repair.initialize \
-  --base /models/encoder --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
-  --contract /artifacts/task/contract.json --output /artifacts/initial
-```
-
-Use the actual parent ID and revision when the encoder changes. A reused
-adapter must also retain its previous training lineage; sharing a model name
-is not evidence that adapters from different parents are equivalent.
+Initialize a fresh task head and train the complete encoder. Use the actual
+parent ID and immutable revision; changing metadata on an old adapter does not
+transfer it to a new base.
 
 The [shared trainer](sequence_repair/README.md) handles softmax tasks:
 
 ```bash
-python -m src.training.model_classifier.vela_partition \
-  --input /artifacts/task/validation.jsonl --tokenizer /models/encoder \
-  --max-length 2048 --output /artifacts/validation-2048
 python -m src.training.model_classifier.sequence_repair.train \
   --base /models/encoder --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
   --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
-  --adapter /artifacts/initial --contract /artifacts/task/contract.json \
+  --method full --fresh-head --contract /artifacts/task/contract.json \
   --train /artifacts/task/train.jsonl \
-  --dev /artifacts/validation-2048/within-budget.jsonl \
-  --output /artifacts/run --steps 1200 --batch-size 8 --accumulate 4 \
-  --max-length 2048 --learning-rate 0.00003 --eval-every 200 \
+  --dev /artifacts/task/development.jsonl \
+  --output /artifacts/run --steps 1200 --batch-size 16 --accumulate 1 \
+  --max-length 32768 --microbatch-token-budget 32768 \
+  --learning-rate 0.00001 --head-learning-rate 0.0001 \
+  --evaluation-dtype float32 --eval-every 1200 \
   --balanced-sampling --source-balanced-sampling --selection source-macro-f1
 ```
 
-Hazard instead uses `safety_classifier.train_vela_hazard` with the same base,
-adapter, contract and budget arguments. For new runs, pass the admitted training
-`rows.jsonl` and separately admitted development rows described above, keeping
-raw crosswalk data for historical reproduction. Its selection choices are
-`macro-ap`, `source-macro-ap`, `fp-budget-macro-f1`, and
-`joint-fp-budget-macro-f1`; it implements masked BCE and samples safe
-negatives plus positive categories. Do not pass Hazard data through the
-single-label trainer or use softmax to decode its logits.
+These are example experiment settings. Freeze task-specific sampling, budgets,
+and development gates before training; they are not universal release criteria.
+An optional `--head-learning-rate` separates the fresh head's rate from the
+encoder rate while sharing the schedule. Full runs save complete `best-model`
+and `last-model` checkpoints with their `training-origin.json`. Declare which
+checkpoint may be selected before reading development results.
 
-Both trainers also support `--method full` without `--adapter`. Set `--base` to
-the actual encoder checkpoint and use `--fresh-head` to initialize a new task;
-all encoder and task-head parameters then train together. An optional
-`--head-learning-rate` separates the head rate from the encoder rate while
-sharing the schedule. Full runs save `best-model` and `last-model`, with the
-complete weights and their `training-origin.json`. This is a distinct experiment
-from LoRA continuation and requires its own development and final evaluation.
+Hazard instead uses `safety_classifier.train_vela_hazard` with the same base,
+full-training, contract and budget arguments. Pass the admitted training
+`rows.jsonl` and separately admitted development rows described above, keeping
+raw source crosswalks for historical reproduction. Its selection choices are
+`macro-ap`, `source-macro-ap`, `fp-budget-macro-f1`, and
+`joint-fp-budget-macro-f1`; it implements masked BCE and samples safe negatives
+plus positive categories. Do not pass Hazard data through the single-label
+trainer or decode its logits with softmax.
+
+Both trainers retain explicit LoRA continuation for compatible existing
+experiments. Such a run must use its actual original base and adapter lineage;
+it cannot substitute for training a new Vela release from the qualified base.
 
 For deployment with a false-alarm budget, use `--selection fp-budget-macro-f1
 --selection-false-positive-budget 0.05`. At each development checkpoint it fits

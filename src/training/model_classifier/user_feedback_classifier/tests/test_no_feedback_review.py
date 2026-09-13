@@ -1,11 +1,16 @@
 import hashlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from src.training.model_classifier.user_feedback_classifier.vela_data import (
     TRAIN_AND_VALIDATION_PERCENT,
     TRAIN_PERCENT,
 )
 from src.training.model_classifier.user_feedback_classifier.vela_no_feedback import (
+    main,
     project_review,
 )
 
@@ -51,6 +56,41 @@ class NoFeedbackReviewTests(unittest.TestCase):
                 for row in rows
             )
         )
+
+    def test_cli_consumes_an_explicit_review_artifact(self):
+        review, source = self.fixture()
+        source_bytes = json.dumps(source).encode()
+        review.update(
+            source="fixture",
+            revision="fixed-revision",
+            source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+            policy="Exact reviewed rows only",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "source.json").write_bytes(source_bytes)
+            (root / "review.json").write_text(json.dumps(review))
+            argv = [
+                "vela_no_feedback",
+                "--source",
+                str(root / "source.json"),
+                "--review",
+                str(root / "review.json"),
+                "--output",
+                str(root / "output"),
+            ]
+            with patch("sys.argv", argv), patch("builtins.print"):
+                main()
+            manifest = json.loads((root / "output/manifest.json").read_text())
+            self.assertEqual(manifest["reviewed_rows"], len(review["items"]))
+            self.assertEqual(
+                manifest["review_sha256"],
+                hashlib.sha256((root / "review.json").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                sum(item["rows"] for item in manifest["files"].values()),
+                len(review["items"]),
+            )
 
     def test_changed_text_and_repartition_are_refused(self):
         for field, value in [("text_sha256", "wrong"), ("split", "test")]:

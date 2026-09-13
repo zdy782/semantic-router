@@ -1,210 +1,136 @@
-# User Feedback Classifier
+# Vela Feedback
 
-For the Vela generation, see the [application recipes](../vela-applications.md).
-They preserve historical recipes below while defining the new data, label,
-training and independent evaluation contracts.
+Vela Feedback classifies the current user turn as `SAT`, `NEED_CLARIFICATION`,
+`WRONG_ANSWER`, `WANT_DIFFERENT`, or `NO_FEEDBACK`. An independent request is not
+feedback merely because it contains words such as “explain” or “wrong”. Quoted
+text and supplied code belong to the task being discussed, not automatically to
+the user's assessment of an earlier answer.
 
-The historical pipeline below trains a four-class classifier for a user's
-follow-up message:
+## Prepare training data
 
-| Label | Meaning |
-|---|---|
-| `SAT` | expresses satisfaction |
-| `NEED_CLARIFICATION` | asks for clarification or more explanation |
-| `WRONG_ANSWER` | says the previous answer is incorrect |
-| `WANT_DIFFERENT` | requests another option or approach |
+Keep training, development, and final evaluation separate by conversation,
+source document, and authored family. Translations and long-context variants
+retain their parent's partition. Review complete user inputs against the same
+label definitions; exclude unresolved cases instead of assigning an arbitrary
+class. Include natural independent requests alongside all four feedback types.
 
-The model consumes the follow-up text only. That keeps inference simple, but it
-also means ambiguous replies such as “yes” or “not that one” may require
-conversation context outside this classifier.
+The data tools accept reviewed annotations as explicit inputs:
 
-Ordinary new questions have no valid label in this four-class taxonomy. The
-caller must establish that the current turn is feedback on a preceding answer;
-a high softmax confidence does not establish that applicability. In particular,
-requests such as “explain photosynthesis” or “give me different dinner ideas”
-can resemble clarification or revision feedback. The development-only
-`vela_applicability` diagnostic reports these forced classifications without
-inventing a SAT label or an accuracy score. A previous assistant turn is a
-necessary routing gate, but does not by itself distinguish a new topic.
+- `vela_no_feedback --source source.json --review review.json --output reviewed/`
+  materializes exact reviewed rows and verifies their source and partition.
+- `vela_natural_negatives --previous corpus/ --wildfeedback source.json
+  --review review.json --output expanded/` appends reviewed training requests
+  without rewriting development data.
+- `vela_current_turn --previous corpus/ --wildfeedback source.json
+  --review review.json --output refined/` applies exact reviewed group overrides
+  and reports excluded weak supervision.
+- `vela_weak_supervision_v2 --input train.jsonl --wildfeedback source.json
+  --quote-policy structured-v3 --quote-review review.json --output filtered/`
+  requires the review associated with that projection. Its remaining source
+  labels are weak supervision, not reviewed gold.
 
-Vela extends the same checkpoint with `NO_FEEDBACK=4`, preserving IDs 0–3.
-Its training combines reviewed ordinary user tasks with all four feedback
-intentions. A source `NEWTOPIC` tag alone is not a reliable negative label:
-some such utterances are actual thanks or corrections, so the included review
-receipt records exclusions. The model still cannot infer missing context.
-`vela_applicability` reports non-feedback accuracy only for the five-class
-contract; legacy four-class results retain their diagnostic-only interpretation.
+Run these modules with
+`python -m src.training.model_classifier.user_feedback_classifier.<module>`.
+Store annotation artifacts and dataset revisions with the dataset release.
+Historical review snapshots and training outputs do not belong in the source
+checkout. Authored family definitions remain generator inputs; correlated
+variants do not constitute independent evaluation examples.
 
-The weak-label projection preserves its historical `ascii-v2` quote policy by
-default. New corpora can select `--quote-policy structured-v3` to also remove
-curly or Chinese quotation spans and Markdown block quotes from keyword-based
-supervision. The original input remains intact. A pinned row/text-hash review
-retains genuine feedback outside quotations and excludes confirmed ambiguous
-projections; a quotation alone is not evidence that an example is mislabeled.
-This creates a new training corpus and never rewrites development or test gold.
+## Train from the Vela base
 
-## Train the five-class Vela contract
+Start a new release from the qualified Vela base with a fresh five-class head.
+Do not initialize it from a classifier adapter trained on a previous base.
+Download the base at an immutable revision and keep its file hashes with the
+training run.
 
-Prepare separate training and development JSONL files using the source recipes
-above. Each row needs `id`, `text`, `label`, `group_id`, and `source`; long rows
-also record their measured `length_bucket`. Keep translations, template variants,
-and context variants in the same group. Include reviewed `NO_FEEDBACK` examples
-and all four feedback intentions. Retain the old weak development data as a
-separate diagnostic instead of silently treating its labels as gold.
+The contract file contains the exact mapping and native pooling choice:
 
-Initialize from a frozen, compatible four-class adapter, then train the entire
-five-class head jointly. The initializer preserves the original four logits,
-but the fifth softmax term changes their probabilities before any training.
+```json
+{
+  "label2id": {
+    "SAT": 0,
+    "NEED_CLARIFICATION": 1,
+    "WRONG_ANSWER": 2,
+    "WANT_DIFFERENT": 3,
+    "NO_FEEDBACK": 4
+  },
+  "id2label": {
+    "0": "SAT",
+    "1": "NEED_CLARIFICATION",
+    "2": "WRONG_ANSWER",
+    "3": "WANT_DIFFERENT",
+    "4": "NO_FEEDBACK"
+  },
+  "classifier_pooling": "cls",
+  "problem_type": "single_label_classification"
+}
+```
+
+Each JSONL row supplies `id`, `text`, `label`, `group_id`, and `source`. Record
+measured `length_bucket` for context evaluation. Freeze the data recipe and
+training budget before comparing development scores.
 
 ```bash
-python -m src.training.model_classifier.user_feedback_classifier.initialize_vela_five_class \
-  --adapter /artifacts/four-class-adapter \
-  --contract /artifacts/four-class-contract.json \
-  --output /artifacts/five-class-initial
-
 python -m src.training.model_classifier.sequence_repair.train \
   --base /artifacts/vela-base \
   --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision 5fe5bbb1a88b7fdcc93bb5b9d546c574564eb114 \
-  --adapter /artifacts/five-class-initial \
-  --contract /artifacts/five-class-initial/contract.json \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --method full --fresh-head \
+  --contract /artifacts/feedback-contract.json \
   --train /artifacts/feedback-train.jsonl \
   --dev /artifacts/feedback-development.jsonl \
-  --output /artifacts/feedback-five-class-run \
-  --steps 800 --batch-size 4 --accumulate 2 --learning-rate 0.00001 \
+  --output /artifacts/feedback-run \
+  --steps 1600 --batch-size 16 --accumulate 1 \
+  --learning-rate 0.00001 --head-learning-rate 0.0001 \
   --max-length 32768 --microbatch-token-budget 32768 \
   --balanced-sampling --length-balanced-sampling \
-  --selection macro-f1 --eval-every 100
+  --evaluation-dtype float32 --selection macro-f1 --eval-every 1600
 ```
 
-These are explicit experiment budgets, not a quality guarantee. Select only on
-development data, including each original class and non-feedback false positives.
-Use the shared exporter with `--runtime-task feedback` to write the five-class
-runtime mapping, then evaluate the frozen candidate on independent final data.
+These are explicit experiment settings, not a quality guarantee or the sampling
+recipe of a particular published checkpoint. To replay a frozen source mixture,
+replace the sampling flags with `--training-order order.json`; the shared trainer
+verifies the complete order against eligible records and source hashes. See
+[sequence training](../sequence_repair/README.md) for its format.
 
-## Historical four-class training
+## Evaluate and export
 
-```bash
-pip install -r requirements.txt
+Measure per-class precision and recall, non-feedback false positives, source and
+language slices, and each supported context length. Include natural follow-up
+requests, quotations, code, sarcasm, and independent questions. Keep the original
+weak development data as a diagnostic; do not treat it as independent gold or
+select on final evaluation.
 
-python train_feedback_detector.py \
-  --model_name llm-semantic-router/mmbert-32k-yarn \
-  --data_source llm-semantic-router/feedback-detector-dataset \
-  --output_dir models/feedback-detector \
-  --max_samples 2000 \
-  --epochs 1
-```
+Position capacity and task accuracy are separate. A checkpoint that accepts
+32K tokens must also preserve its task decisions with relevant evidence at
+different positions. Record actual token counts and truncation, and compare
+native FP32 inference with each exported engine on the same inputs.
 
-Use the short run to verify data loading and output. Remove the sample cap and
-tune on validation data for a full run. `--use_lora`, `--lora_rank`,
-`--lora_alpha`, and `--merge_lora` control adapter training and export; see
-`python train_feedback_detector.py --help` for current defaults.
+Export the qualified complete checkpoint with the shared exporter and
+`--runtime-task feedback`. Regenerate ONNX graphs from its actual weights.
+Never copy graphs from an older model into a new release.
+
+Optional development-only applicability calibration is available through
+`calibrate_vela_bias`. It changes the actual classifier bias, reruns native FP32
+inference, and exports only a candidate satisfying its declared constraints.
+Freeze any calibration before final evaluation; a softmax score is not itself
+a validated probability of user intent.
 
 ## Inference
 
 ```python
 from inference_feedback import FeedbackDetector
 
-detector = FeedbackDetector("models/feedback-detector")
-result = detector.classify("Could you explain that another way?")
+detector = FeedbackDetector(
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback",
+    max_length=32768,
+)
+result = detector.classify("Could you clarify your previous explanation?")
 print(result.label, result.confidence, result.all_scores)
 ```
 
-The helper defaults to an explicit 512-token budget, including special tokens.
-It rejects over-budget inputs instead of silently truncating them. Set
-`max_length` up to the checkpoint's real position capacity when using a verified
-long-context checkpoint; capacity alone does not establish feedback quality.
-It accepts either the exact legacy four-label mapping or the exact Vela
-five-label mapping. `NO_FEEDBACK` is returned as itself with all five scores,
-and is never converted to satisfaction. Router abstention policy remains
-separate from the model's predicted label and score.
-
-`classify_batch()` accepts a list of follow-up messages. Treat confidence as a
-model score, not a calibrated probability, unless calibration has been measured
-on the deployment distribution.
-
-## Evaluation and Use
-
-Before connecting feedback labels to routing or online learning, measure the
-confusion matrix and per-class precision/recall on held-out conversations.
-Inspect short, multilingual, sarcastic, and context-dependent replies. Routing
-policy should define the consequence of each label and should not update model
-experience from a low-confidence prediction without safeguards.
-
-Published checkpoints and datasets should have their own model or dataset card
-with revisions, split policy, base model, metrics, and limitations. Links in a
-README are not a substitute for that evidence.
-
-## Feedback repair v2
-
-The historical 98.83% validation score does not establish generalization: its
-SAT validation texts overlapped training templates. The historical JSONL export
-also includes non-feedback statements and assistant responses labelled SAT.
-The repair curriculum excludes both sources rather than treating those labels
-as ground truth.
-
-The four output IDs remain `SAT=0`, `NEED_CLARIFICATION=1`, `WRONG_ANSWER=2`, and
-`WANT_DIFFERENT=3`. Classify the current user's feedback. A statement that needs
-unavailable conversation context should not be forced into an unambiguous gold
-label. In particular, asking for explanation differs from requesting a different
-style or approach.
-
-```bash
-python -m src.training.model_classifier.user_feedback_classifier.prepare_repair_data \
-  --output-dir /tmp/feedback-repair-v2
-python -m src.training.model_classifier.user_feedback_classifier.train_feedback_detector \
-  --model_name llm-semantic-router/mmbert-32k-yarn \
-  --model_revision 72a23a6640489471eb4ff7ad3ec5bc80af8a27de \
-  --data_source /tmp/feedback-repair-v2 --output_dir /tmp/feedback-v2 \
-  --use_lora --merge_lora --lora_rank 32 --lora_alpha 64 \
-  --epochs 8 --batch_size 16 --lr 0.0001 --max_length 2048
-```
-
-This authored curriculum separates expression families and topics between
-training and validation. Translations and topic substitutions are correlated
-examples, not thousands of independent user judgments. Choose checkpoints on
-validation, then compare with the original checkpoint on an independently
-frozen final set. Do not select a checkpoint by the old overlapping validation
-score or claim production accuracy from authored tests alone.
-
-The 32K backbone's position capacity differs from task accuracy at that length.
-Record evaluated token counts and truncation. `FeedbackDetector` defaults to a
-512-token resource budget and accepts an explicit `max_length` up to the actual
-checkpoint capacity. It validates the output mapping instead of silently
-renaming arbitrary classifier outputs. Export fresh ONNX graphs for changed
-weights; never copy an old graph into the new model repository.
-
-### Calibrate Vela's applicability bias
-
-For a five-class Vela checkpoint, `NO_FEEDBACK` is an explicit class with ID 4.
-If a development experiment uses applicability calibration, adjust the actual
-classifier bias so PyTorch and exported inference engines consume the same
-weights. The calibration command tests the fixed grid `0, 0.125, …, 1`, picks
-its smallest feasible value, and verifies the changed model with a second FP32
-forward. The input checkpoint remains unchanged.
-
-```bash
-python -m src.training.model_classifier.user_feedback_classifier.calibrate_vela_bias \
-  --model ./feedback-uncalibrated \
-  --development ./data/development.jsonl ./data/context-development.jsonl \
-  --output ./feedback-calibration \
-  --device cuda
-```
-
-Supply development records using the shared sequence schema: `id`, `group_id`,
-`text`, exact `label`, `source`, and `length_bucket`. The model sees only the
-current user turn. The default experiment requires all five classes and the
-256/4K/8K/16K/32K development buckets; `--required-lengths` records an explicitly
-chosen alternative scope. Every source must reach present-label macro F1 0.85,
-every numeric context bucket macro F1 0.80, and `NO_FEEDBACK` precision and recall
-0.90. Missing support fails qualification.
-
-The output retains every grid result and both actual forward evaluations. A
-qualified candidate is written to `model/` with the complete mapping; if no grid
-point qualifies, evidence is retained and no model is exported. Do not calibrate
-on a final test, expand the grid after seeing its results, or interpret a
-calibrated softmax score as a verified probability of user intent. Freeze the
-result before independently testing ordinary follow-up requests, each feedback
-class, and long contexts. When using a LoRA artifact, apply the same change to
-its saved classifier head and verify that merging reproduces the calibrated
-checkpoint.
+The helper accepts an explicit token budget up to the checkpoint's position
+capacity and rejects oversized input. Its default resource budget is 512 tokens.
+It supports both the legacy four-label mapping and Vela's five-label mapping;
+`NO_FEEDBACK` remains a distinct result. Router confidence thresholds and the
+consequence of a predicted label are separate routing policy decisions.

@@ -170,7 +170,12 @@ def main():
     parser.add_argument(
         "--quote-policy", choices=["ascii-v2", "structured-v3"], default="ascii-v2"
     )
+    parser.add_argument("--quote-review", type=Path)
     args = parser.parse_args()
+    if (args.quote_policy == "structured-v3") != (args.quote_review is not None):
+        parser.error(
+            "--quote-review is required only with --quote-policy structured-v3"
+        )
     if args.output.exists():
         raise ValueError("Refusing overwrite of a versioned training corpus")
     source = args.wildfeedback.read_bytes()
@@ -182,7 +187,7 @@ def main():
     quote_review = {}
     quote_review_sha256 = None
     if args.quote_policy == "structured-v3":
-        review_path = Path(__file__).parent / "configs/vela-quote-review-v1.json"
+        review_path = args.quote_review
         reviewed = json.loads(review_path.read_text())["items"]
         quote_review = {row["id"]: row for row in reviewed}
         if len(quote_review) != len(reviewed):

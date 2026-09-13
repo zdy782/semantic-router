@@ -203,7 +203,8 @@ def main():
     parser.add_argument(
         "--review",
         type=Path,
-        default=Path(__file__).parent / "configs/vela-current-turn-review-v1.json",
+        required=True,
+        help="Path to the independently reviewed annotation artifact",
     )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
