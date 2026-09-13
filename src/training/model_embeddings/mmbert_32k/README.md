@@ -69,6 +69,111 @@ separately, with thresholds selected on development data. The BGE/AllNLI and
 BGE/Quora/FEVER loaders in this repository do not load PAWS-X, so this
 dataset-specific placeholder rule is not applied to those sources.
 
+## Train a new task from a standard Base
+
+[`newbase_training.py`](newbase_training.py) trains the complete ModernBERT
+encoder from an explicit local Hugging Face Base snapshot. It preserves the
+Base's standard configuration, including its RoPE settings. An embedding task
+uses masked mean pooling and normalized dimension prefixes; a reranker creates
+fresh CLS scoring heads. The default `ExitSpec` supervises all 20 combinations
+of layers `[3, 6, 11, 22]` and dimensions `[768, 512, 256, 128, 64]` in each
+update. No previous task weights or external teacher are needed. Other exit
+sets must include the encoder's full depth and width.
+
+Prepare separate dataset directories, each containing `components.jsonl`,
+`records.jsonl`, and a `manifest.json` with its `split` and both file SHA256s.
+[`FrozenCorpus`](newbase_data.py) checks complete text hashes, normalized text
+hashes, component references, and parent groups. Each retrieval record names a
+query, all known positives, judged negatives, unjudged candidates, and its
+explicit `candidate_component_ids`. Every candidate must belong to one of
+those relevance partitions. Semantic-pair records instead contain two
+`pair_component_ids` and a `[0,1]` label. Keep source licensing and split/group
+exclusion in the data producer; loading a valid manifest does not establish
+those properties.
+
+Freeze batches before training with
+[`prepare_stream`](newbase_stream.py). A stream specification contains `seed`,
+`cycles`, and a `sources` mapping. Each source specifies `steps_per_cycle`,
+`batch_queries`, and `strata`, a mapping from stratum names to record IDs.
+Sampling cycles through independent parent groups and preserves the supplied
+candidate lists:
+
+```python
+from pathlib import Path
+import json
+from src.training.model_embeddings.mmbert_32k.newbase_data import FrozenCorpus
+from src.training.model_embeddings.mmbert_32k.newbase_stream import prepare_stream
+
+corpus = FrozenCorpus.load(Path("/data/retrieval/train"), "train")
+specification = json.loads(Path("/data/retrieval/stream.json").read_text())
+prepare_stream(corpus, specification, Path("/data/retrieval/draws"))
+```
+
+The training JSON uses these fields. Paths point to local files; hashes bind
+the exact model, data, stream, and imported code used by the run.
+
+| Fields | Meaning |
+| --- | --- |
+| `task`, `run_id`, `seed` | `embedding` or `reranker`, a run name, and initialization/RNG seed. |
+| `base_directory`, `base_files` | Standard Base snapshot and relative filename-to-SHA256 mapping. |
+| `train_directory`, `development_directory`, `train_manifest_sha256`, `development_manifest_sha256` | Separate training and development corpora; optional `train_split`/`development_split` default to `train`/`validation`. |
+| `draws_directory`, `draws_sha256`, `steps` | Frozen stream and its exact number of optimizer updates. |
+| `code_root`, `execution_lock_path`, `execution_lock_sha256` | Code snapshot and JSON `files` mapping of relative Python paths to SHA256s; every imported task module must be included. |
+| `exits` | `layers`, `dimensions`, `layer_weights`, and `dimension_weights`; each weight vector sums to one. `ExitSpec().to_dict()` gives the default 20 exits. |
+| `objectives` | Per-source explicit loss configurations described below. |
+| `optimizer` | `warmup_steps`; optional `encoder_lr`, `head_lr`, `weight_decay`, `betas`, `eps`, and `minimum_lr_ratio` for AdamW with cosine decay. |
+| `training_precision`, `gradient_checkpointing`, `gradient_clip_norm` | FP32 master weights with `float32` or `bfloat16` forward, optional non-reentrant checkpointing, and clipping norm. |
+| `source_maximum_tokens`, `training_token_budget`, `evaluation_token_budget` | Per-source complete-input limit and padded microbatch budgets. Inputs are never truncated. |
+| `eval_steps`, `maximum_seconds` | Evaluation steps start at zero; optional elapsed-time limit stops before the next update. A running update or evaluation may exceed that limit. |
+| `evaluation`, `selection` | Optional reporting slices and numeric development selection policy. Selection also requires `baseline_path` and `baseline_sha256`. |
+| `provenance`, `expected_initial_state_sha256` | Optional lineage metadata and an exact initial tensor-state check. |
+
+Embedding objective `kind` is `retrieval`, `cosent`, or `paraphrase`. Retrieval
+supports multi-positive contrastive supervision and optional
+`distillation_weight` from the current, detached full exit to smaller exits.
+`cosent` uses graded pair ordering; `paraphrase` uses binary labels and an
+explicit margin. Reranker `kind: ranking` combines configurable
+`pairwise_weight`, `bce_weight`, `preference_weight`, and `lambda_weight`.
+Unjudged alternatives can contribute preference supervision, but are excluded
+from BCE and LambdaLoss; `positive_bce_judged: false` also excludes an
+unjudged composite positive from those absolute relevance terms. See
+[`ObjectiveConfig`](newbase_batches.py) for scales, temperature, candidate
+limits, and defaults. Source names do not select the loss implicitly.
+
+Run from the repository root with an environment that supports the Base's
+actual Transformers configuration and accelerator. Expose one assigned device
+for GPU training. The configuration hash below is the SHA256 of the JSON file:
+
+```bash
+export PYTHONPATH="$PWD"
+python -m src.training.model_embeddings.mmbert_32k.newbase_training \
+  --config /data/retrieval/task.json --config-sha256 CONFIG_SHA256 \
+  --output /data/retrieval/run --device cuda
+
+python -m src.training.model_embeddings.mmbert_32k.newbase_scoring \
+  --model /data/retrieval/run/step-100 --task embedding \
+  --known-dev /data/retrieval/validation --split validation \
+  --output /data/retrieval/evaluation --device cpu --token-budget 32768
+```
+
+Use `--task reranker` for a reranker checkpoint. Evaluation runs in FP32,
+reports every configured exit, and writes aggregate `metrics.json` and numeric
+per-record scores. Optional `--evaluation-config` names source/language/length
+slices or semantic metrics. Selection constraints and score weights are
+explicit configuration, with identical dataset support and precision required
+for baseline comparisons.
+
+Each `step-N` saves the complete updated encoder, tokenizer, exit/representation
+metadata, and `newbase_checkpoint.json`. Rerankers additionally save every
+head in `classification_heads.safetensors` and `matryoshka_config.json`.
+`NewBaseTask.resume()` verifies hashes and reloads all exits. Training
+checkpoints also preserve optimizer, scheduler, RNG, and evaluation history;
+use `--resume /data/retrieval/run/step-N` with the same configuration and a new
+output directory to continue the same stream. The
+[two-step CPU example](tests/test_newbase_training.py) exercises a complete
+configuration, training, checkpoint creation, and exact next-update resume.
+Export and engine qualification remain separate from this training interface.
+
 ## Install
 
 Use a Python environment with a compatible PyTorch build, then install the
