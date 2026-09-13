@@ -20,6 +20,7 @@ import sys
 import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
+from reshape_dimensions import copy_reshape_dimensions
 from stable_pooling import stabilize_mean_pooling
 
 WHERE_INPUT_COUNT = 3
@@ -1001,6 +1002,8 @@ def rewrite(
 
     del graph.node[:]
     graph.node.extend(kept)
+    shape_copies = copy_reshape_dimensions(graph)
+    print(f"  Replaced {shape_copies} proved dimension-copy shape concatenations")
     pooling_repairs = stabilize_mean_pooling(graph)
     print(f"  Stabilized {pooling_repairs} FP16 masked mean-pooling paths")
 
