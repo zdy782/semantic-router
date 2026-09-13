@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::model_architectures::attention::chunked_sdpa::{
-    chunked_sdpa, prepare_padding_mask, ChunkedSdpaConfig, ATTN_QUERY_BLOCK,
+    chunked_sdpa, chunked_sdpa_cpu_softmax, prepare_padding_mask, ChunkedSdpaConfig,
+    ATTN_QUERY_BLOCK,
 };
 
 // Flash Attention support (optional, requires flash-attn feature)
@@ -185,7 +186,9 @@ impl ModernBertAttention {
         // sliding window. It also accepts only native F16/BF16 tensors: enabling
         // the optional kernel must never reduce a model's requested precision.
         // All other cases use the memory-bounded exact kernel.
-        let xs = if can_use_flash_attention(
+        let xs = if hidden_states.device().is_cpu() && q.dtype() == DType::F32 {
+            chunked_sdpa_cpu_softmax(&q, &k, &v, Some(pad_mask), &cfg)?
+        } else if can_use_flash_attention(
             self.use_flash_attn,
             hidden_states.device().is_cuda(),
             uses_local_attention,
@@ -895,6 +898,54 @@ mod tests {
                     block,
                     diff
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_cpu_attention_preserves_mixed_padding_across_query_blocks() {
+        let device = Device::Cpu;
+        let mut config = tiny_config();
+        config.hidden_size = 8;
+        config.num_attention_heads = 2;
+        let seq_len = ATTN_QUERY_BLOCK + 1;
+        config.max_position_embeddings = seq_len;
+        let attn = make_test_attention(&config, &device);
+        let hidden = Tensor::randn(0f32, 1f32, (2, seq_len, config.hidden_size), &device).unwrap();
+        let mut mask = vec![1f32; 2 * seq_len];
+        mask[2 * seq_len - 7..].fill(0.0);
+        let raw_mask = Tensor::from_vec(mask, (2, seq_len), &device).unwrap();
+        let pad_mask = prepare_padding_mask(&raw_mask, DType::F32).unwrap();
+        let window = config.local_attention / 2;
+        for uses_local in [false, true] {
+            let actual = attn
+                .forward(
+                    &hidden,
+                    &pad_mask,
+                    uses_local,
+                    window,
+                    ATTN_QUERY_BLOCK,
+                    true,
+                )
+                .unwrap();
+            let reference =
+                dense_reference_attention(&attn, &hidden, &raw_mask, uses_local, window);
+            assert!(max_abs_diff(&actual, &reference) < 1e-4);
+            for batch in 0..2 {
+                let input = hidden.narrow(0, batch, 1).unwrap().contiguous().unwrap();
+                let mask = raw_mask.narrow(0, batch, 1).unwrap().contiguous().unwrap();
+                let mask = prepare_padding_mask(&mask, DType::F32).unwrap();
+                let single = attn
+                    .forward(
+                        &input,
+                        &mask,
+                        uses_local,
+                        window,
+                        ATTN_QUERY_BLOCK,
+                        batch == 1,
+                    )
+                    .unwrap();
+                assert!(max_abs_diff(&actual.narrow(0, batch, 1).unwrap(), &single) < 1e-4);
             }
         }
     }
