@@ -5,10 +5,12 @@ These fixtures contain a randomly initialized two-layer ModernBERT backbone
 arrays. They contain no trained checkpoint, tokenizer, dataset or task examples.
 The 79,672-byte `weights.safetensors.fixture` file is ordinary safetensors with a
 fixture suffix and a binary Git attribute. Both reference versions use identical
-weight bytes. The two official versions also produced byte-identical numerical
-outputs, stored once in `rope.json` and `tiny-output.json`. Their manifests
-retain the original generator and implementation hashes and each refer to
-the shared outputs. No numerical values were changed during deduplication.
+weight bytes. The two official versions also produced bitwise-identical numerical
+outputs, stored once in `reference.safetensors.fixture`. The small `rope.json` and
+`tiny-output.json` files retain each case's configuration, inputs, tensor names
+and shapes. The 27 named F32 tensors preserve all 16,928 original numerical
+values without decimal rounding, compression or quantization. Their manifests
+bind the generator, official implementation and shared output files by SHA-256.
 The reference configurations use only the official `norm_eps` spelling.
 Separate loader tests cover the legacy alias and reject conflicting values.
 
@@ -21,7 +23,8 @@ python generate_modernbert_rope_fixtures.py --mode tf5 --output /tmp/rope-refere
 
 Use [the repository generator](../../scripts/generate_modernbert_rope_fixtures.py)
 under Transformers 4.57.6 and 5.3.0 respectively. Copy the output directory;
-the second run rejects any difference in the shared references. No model download
+the second run rejects any difference in tensor names, shapes, dtypes, bits or
+shared case descriptions. No model download
 or accelerator is needed. The stored fixtures used PyTorch 2.10.0 on CPU;
 regeneration with another math library can vary in floating-point rounding.
 

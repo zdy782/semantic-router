@@ -47,6 +47,10 @@ RECIPES = [
         {"rope_type": "yarn", "factor": 1.0, "original_max_position_embeddings": 8192},
     ),
 ]
+REFERENCE_FIELDS = {
+    "rope.json": ("inv_freq", "cos", "sin", "q", "k", "rotated_q", "rotated_k"),
+    "tiny-output.json": ("valid_hidden", "masked_mean"),
+}
 
 
 def write_json(path, value):
@@ -67,6 +71,36 @@ def write_shared(path, value):
             raise ValueError(f"Official reference versions disagree: {path.name}")
     else:
         path.write_text(encoded, encoding="utf-8")
+
+
+def write_references(output, references):
+    """Keep case metadata readable and store every official F32 bit losslessly."""
+    tensors = {}
+    for filename, fields in REFERENCE_FIELDS.items():
+        for index, case in enumerate(references[filename]["cases"]):
+            for field in fields:
+                tensor = torch.tensor(case[field], dtype=torch.float32)
+                if not torch.isfinite(tensor).all():
+                    raise ValueError("Reference values must be finite float32")
+                name = f"{Path(filename).stem}.{index}.{field}"
+                tensors[name] = tensor.contiguous()
+                case[field] = {"tensor": name, "shape": list(tensor.shape)}
+    path = output / "reference.safetensors.fixture"
+    if path.exists():
+        previous = load_file(path)
+        if set(previous) != set(tensors) or any(
+            previous[name].dtype != tensor.dtype
+            or previous[name].shape != tensor.shape
+            or not torch.equal(
+                previous[name].view(torch.int32), tensor.view(torch.int32)
+            )
+            for name, tensor in tensors.items()
+        ):
+            raise ValueError("Official reference versions disagree: tensor bits")
+    else:
+        save_file(tensors, path)
+    for filename, value in references.items():
+        write_shared(output / filename, value)
 
 
 def cache_goldens(mode):
@@ -209,14 +243,16 @@ def main():
                 "masked_mean": pooled.tolist(),
             }
         )
-    write_shared(
-        output / "tiny-output.json",
+    write_references(
+        output,
         {
-            "cases": cases,
-            "compared_positions": "valid tokens and their masked mean; padded query hidden states are outside this assertion",
+            "tiny-output.json": {
+                "cases": cases,
+                "compared_positions": "valid tokens and their masked mean; padded query hidden states are outside this assertion",
+            },
+            "rope.json": {"cases": cache_goldens(args.mode)},
         },
     )
-    write_shared(output / "rope.json", {"cases": cache_goldens(args.mode)})
     source = Path(inspect.getsourcefile(ModernBertRotaryEmbedding))
 
     utility = Path(inspect.getsourcefile(rope_utils))
@@ -238,6 +274,9 @@ def main():
                 "config.json": digest(variant / "config.json"),
                 "../rope.json": digest(output / "rope.json"),
                 "../tiny-output.json": digest(output / "tiny-output.json"),
+                "../reference.safetensors.fixture": digest(
+                    output / "reference.safetensors.fixture"
+                ),
             },
             "configuration_path": (
                 "direct official TF4 constructor"

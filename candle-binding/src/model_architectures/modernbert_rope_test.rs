@@ -153,7 +153,17 @@ fn read_reference(name: &str) -> Value {
 }
 
 fn floats(value: &Value) -> Vec<f32> {
-    serde_json::from_value(value.clone()).unwrap()
+    let bytes = std::fs::read(fixture_dir().join("reference.safetensors.fixture")).unwrap();
+    let tensors = safetensors::SafeTensors::deserialize(&bytes).unwrap();
+    let tensor = tensors.tensor(value["tensor"].as_str().unwrap()).unwrap();
+    let shape: Vec<usize> = serde_json::from_value(value["shape"].clone()).unwrap();
+    assert_eq!(tensor.dtype(), safetensors::Dtype::F32);
+    assert_eq!(tensor.shape(), shape);
+    tensor
+        .data()
+        .chunks_exact(std::mem::size_of::<f32>())
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect()
 }
 
 fn assert_close(actual: &[f32], expected: &[f32], atol: f32, rtol: f32, scope: &str) {
@@ -185,6 +195,31 @@ fn fixture_identity_is_frozen() {
             assert_eq!(format!("{:x}", Sha256::digest(bytes)), *expected);
         }
     }
+    let bytes = std::fs::read(fixture_dir().join("reference.safetensors.fixture")).unwrap();
+    let tensors = safetensors::SafeTensors::deserialize(&bytes).unwrap();
+    let mut referenced = std::collections::BTreeSet::new();
+    for name in ["rope.json", "tiny-output.json"] {
+        for case in read_reference(name)["cases"].as_array().unwrap() {
+            for value in case.as_object().unwrap().values() {
+                if let Some(key) = value.get("tensor").and_then(Value::as_str) {
+                    assert!(
+                        referenced.insert(key.to_owned()),
+                        "duplicate tensor reference"
+                    );
+                    assert!(floats(value).iter().all(|value| value.is_finite()));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        referenced,
+        tensors
+            .names()
+            .into_iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        "all reference tensors must be consumed"
+    );
 }
 
 #[test]
@@ -222,11 +257,9 @@ fn official_yarn_frequency_cache_and_rotated_qk_goldens() -> Result<()> {
                         .to_dtype(DType::F32)?
                         .flatten_all()?
                         .to_vec1::<f32>()?;
-                    let expected: Vec<Vec<f32>> =
-                        serde_json::from_value(case[name].clone()).unwrap();
                     assert_close(
                         &actual,
-                        &expected.concat(),
+                        &floats(&case[name]),
                         tolerance,
                         0.0,
                         &format!("{mode}/{case_index}/{dtype:?}/{name}"),
@@ -300,11 +333,9 @@ pub(crate) fn assert_tiny_fixture(
             5e-5,
             &format!("{mode}/tiny{index}/valid-hidden"),
         );
-        let expected_mean: Vec<Vec<f32>> =
-            serde_json::from_value(case["masked_mean"].clone()).unwrap();
         assert_close(
             &means,
-            &expected_mean.concat(),
+            &floats(&case["masked_mean"]),
             5e-5,
             5e-5,
             &format!("{mode}/tiny{index}/masked-mean"),
