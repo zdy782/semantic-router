@@ -16,6 +16,9 @@ const (
 	PurposeFeedbackDetection      ModelPurpose = "feedback-detection"      // Detect user feedback type
 	PurposeModalityDetection      ModelPurpose = "modality-detection"      // Classify prompts into text/image/both modalities
 	PurposeEmbedding              ModelPurpose = "embedding"               // Generate text embeddings
+	PurposeSafety                 ModelPurpose = "safety"                  // Detect unsafe content
+	PurposeHazard                 ModelPurpose = "hazard"                  // Identify independent content hazards
+	PurposeReranking              ModelPurpose = "reranking"               // Rank query-document pairs
 	PurposeSemanticSimilarity     ModelPurpose = "semantic-similarity"     // Compute semantic similarity
 )
 
@@ -80,7 +83,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M",
-		Revision:                "225bb8021e0e7839e6045b253caadcb19e96bb25",
+		Revision:                "fe9ccc074b781bc0e2e13c2c8d26f2640410636a",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M"},
 		Purpose:                 PurposeEncoder,
@@ -93,7 +96,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-FactCheck",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck",
-		Revision:                "e4869536922d693c9213f68ecf7b3c9ff610f3e2",
+		Revision:                "32484ae69fd200487389c9d253e1c6783de7a401",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-FactCheck"},
 		Purpose:                 PurposeHallucinationSentinel,
@@ -106,11 +109,11 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Domain",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Domain",
-		Revision:                "938773f3f7b67392c3aba6f2a344b251de881ecf",
+		Revision:                "e18f9d3a91457249416e64bbc58236ebe350c7a5",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Domain"},
 		Purpose:                 PurposeDomainClassification,
-		Description:             "Identify a request's subject across 14 domains for routing to relevant expertise. Supports 32K input; the published ONNX variant is FP32 with batch size 1.",
+		Description:             "Identify a request's subject across 14 domains for routing to relevant expertise. Supports up to 32K input.",
 		ParameterSize:           "307M encoder + classifier",
 		NumClasses:              14,
 		MaxContextLength:        32768,
@@ -119,11 +122,11 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-PII",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-PII",
-		Revision:                "fe0d5700d4498110fd2a6de71243d95dee4ca657",
+		Revision:                "6d3300c4bd7975f30a664503f6c725cf1fbbad48",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-PII"},
 		Purpose:                 PurposePIIDetection,
-		Description:             "Locate personal information across 17 entity types with 35 BIO labels. Supports 32K input; overlapping windows are recommended for long scans. The published ONNX variant is FP32 with batch size 1.",
+		Description:             "Locate personal information across 17 entity types with 35 BIO labels. Supports up to 32K input, with overlapping windows for long scans.",
 		ParameterSize:           "307M encoder + classifier",
 		NumClasses:              35,
 		MaxContextLength:        32768,
@@ -132,11 +135,11 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Modality",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Modality",
-		Revision:                "994b999048f349bfb62fc92578db86ca4e853205",
+		Revision:                "5384b8997e3cbb79ca3a670e869577f4e4f4997e",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Modality"},
 		Purpose:                 PurposeModalityDetection,
-		Description:             "Classify written requests into text generation, image generation, or both. This is a text classifier. Supports 32K input; the published ONNX variant is FP32 with batch size 1.",
+		Description:             "Classify written requests into text generation, image generation, or both. This is a text classifier. Supports up to 32K input.",
 		ParameterSize:           "307M encoder + classifier",
 		NumClasses:              3,
 		MaxContextLength:        32768,
@@ -145,11 +148,11 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Feedback",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback",
-		Revision:                "e7a4f126b4b19810a4dd90ad2019f86acd32e920",
+		Revision:                "47434a7fd7c245c0c7c17564a000b3c56ccfec41",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Feedback"},
 		Purpose:                 PurposeFeedbackDetection,
-		Description:             "Recognize satisfaction, clarification, corrections, alternative requests, and messages without feedback. Supports 32K input; the published ONNX variant is FP32 with batch size 1.",
+		Description:             "Recognize satisfaction, clarification, corrections, alternative requests, and messages without feedback. Supports up to 32K input.",
 		ParameterSize:           "307M encoder + classifier",
 		NumClasses:              5,
 		MaxContextLength:        32768,
@@ -158,7 +161,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Embedding",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding",
-		Revision:                "5e639f1a709168f6f1cf69cd519f3aa9221bfbef",
+		Revision:                "4cd14064da151af4508d5ce1b1c2327f7c3fa30f",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Embedding"},
 		Purpose:                 PurposeEmbedding,
@@ -167,6 +170,57 @@ var DefaultModelRegistry = []ModelSpec{
 		EmbeddingDim:            768,
 		MaxContextLength:        32768,
 		Tags:                    []string{"vela", "embedding", "multilingual", "long-context", "2d-matryoshka", "early-exit"},
+	},
+	{
+		LocalPath:               "models/Vela-1.0-Encoder-307M-Guard",
+		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Guard",
+		Revision:                "ab27ec4efe2bdc45336df2d35abb6f687e41214e",
+		DownloadExcludePatterns: velaTrainingArtifactPatterns,
+		Aliases:                 []string{"Vela-1.0-Encoder-307M-Guard"},
+		Purpose:                 PurposeJailbreakDetection,
+		Description:             "Detect prompt injection and jailbreak attacks across multilingual requests.",
+		ParameterSize:           "307M encoder + classifier",
+		MaxContextLength:        32768,
+		Tags:                    []string{"vela", "multilingual", "long-context", "guard", "prompt-injection", "classification"},
+		NumClasses:              2,
+	},
+	{
+		LocalPath:               "models/Vela-1.0-Encoder-307M-Safety",
+		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Safety",
+		Revision:                "6e70e725a5f4d86da10f5be5e4dfd1da0358bb85",
+		DownloadExcludePatterns: velaTrainingArtifactPatterns,
+		Aliases:                 []string{"Vela-1.0-Encoder-307M-Safety"},
+		Purpose:                 PurposeSafety,
+		Description:             "Identify unsafe content independently of prompt attacks.",
+		ParameterSize:           "307M encoder + classifier",
+		MaxContextLength:        32768,
+		Tags:                    []string{"vela", "multilingual", "long-context", "safety", "classification"},
+		NumClasses:              2,
+	},
+	{
+		LocalPath:               "models/Vela-1.0-Encoder-307M-Hazard",
+		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Hazard",
+		Revision:                "75b152b312f3a4e94dee4c1ea01d06251034907d",
+		DownloadExcludePatterns: velaTrainingArtifactPatterns,
+		Aliases:                 []string{"Vela-1.0-Encoder-307M-Hazard"},
+		Purpose:                 PurposeHazard,
+		Description:             "Identify 12 independent content hazards using the published operating point and overlapping windows.",
+		ParameterSize:           "307M encoder + classifier",
+		MaxContextLength:        32768,
+		Tags:                    []string{"vela", "multilingual", "long-context", "hazard", "multi-label-classification"},
+		NumClasses:              12,
+	},
+	{
+		LocalPath:               "models/Vela-1.0-Encoder-307M-Reranker",
+		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker",
+		Revision:                "b6305795b0a297b16957e9c48b0defb19ecd595b",
+		DownloadExcludePatterns: velaTrainingArtifactPatterns,
+		Aliases:                 []string{"Vela-1.0-Encoder-307M-Reranker"},
+		Purpose:                 PurposeReranking,
+		Description:             "Rank multilingual query-document pairs with selectable encoder depth and representation size.",
+		ParameterSize:           "307M encoder + reranker",
+		MaxContextLength:        32768,
+		Tags:                    []string{"vela", "multilingual", "long-context", "reranker", "2d-matryoshka", "early-exit"},
 	},
 	// Domain/Intent Classification
 	{

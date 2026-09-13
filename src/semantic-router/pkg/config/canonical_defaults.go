@@ -225,6 +225,7 @@ func defaultCanonicalEmbeddingModels() CanonicalEmbeddingModels {
 
 func defaultCanonicalModelModules() CanonicalModelModules {
 	return CanonicalModelModules{
+		Safety:                  SafetyModelsConfig{Safety: SequenceHeadModelConfig{ModelRef: "safety", UseCPU: true}},
 		PromptGuard:             defaultPromptGuardModule(),
 		Classifier:              defaultClassifierModule(),
 		Complexity:              ComplexityModelConfig{}.WithDefaults(),
@@ -238,10 +239,10 @@ func defaultPromptGuardModule() CanonicalPromptGuardModule {
 		ModelRef: "prompt_guard",
 		PromptGuardConfig: PromptGuardConfig{
 			Enabled:              true,
-			Threshold:            0.7,
+			Threshold:            0.5,
 			UseCPU:               true,
 			Variant:              PromptGuardVariantMmBERT32K,
-			JailbreakMappingPath: "models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json",
+			JailbreakMappingPath: "models/Vela-1.0-Encoder-307M-Guard/jailbreak_type_mapping.json",
 		},
 	}
 }
@@ -278,7 +279,7 @@ func defaultHallucinationModule() CanonicalHallucinationModule {
 		FactCheck: CanonicalFactCheckModule{
 			ModelRef: "fact_check_classifier",
 			FactCheckModelConfig: FactCheckModelConfig{
-				Threshold:    0.85,
+				Threshold:    0.95,
 				UseCPU:       true,
 				UseMmBERT32K: true,
 			},
@@ -320,7 +321,9 @@ func defaultFeedbackDetectorModule() CanonicalFeedbackDetectorModule {
 // DefaultSystemModels returns stable capability bindings for built-in runtime models.
 func DefaultSystemModels() CanonicalSystemModels {
 	return CanonicalSystemModels{
-		PromptGuard:            "models/mmbert32k-jailbreak-detector-merged",
+		Safety:                 "models/Vela-1.0-Encoder-307M-Safety",
+		Hazard:                 "models/Vela-1.0-Encoder-307M-Hazard",
+		PromptGuard:            "models/Vela-1.0-Encoder-307M-Guard",
 		DomainClassifier:       "models/Vela-1.0-Encoder-307M-Domain",
 		PIIClassifier:          "models/Vela-1.0-Encoder-307M-PII",
 		FactCheckClassifier:    "models/Vela-1.0-Encoder-307M-FactCheck",

@@ -21,20 +21,23 @@ Use this section in three steps:
 
 | You need to | Start with | Output |
 | --- | --- | --- |
-| Compare queries and documents efficiently | [mmBERT-32K embedder](./mmbert-32k-models#embedding-model-bi-encoder) | One normalized vector per input |
-| Re-score a short list with higher accuracy | [mmBERT-32K reranker](./mmbert-32k-models#reranking-model-cross-encoder) | An uncalibrated relevance logit for each query-document pair |
+| Compare queries and documents efficiently | [Vela embedding architecture](./mmbert-32k-models#embedding-model-bi-encoder) | One normalized vector per input |
+| Re-score a short list with higher accuracy | [Vela reranking architecture](./mmbert-32k-models#reranking-model-cross-encoder) | An uncalibrated relevance logit for each query-document pair |
 | Place text, images, and audio in one vector space | [Multimodal embeddings](./multimodal-embeddings) | A normalized cross-modal vector |
 | Detect intent, jailbreaks, feedback, modality, fact-check needs, or PII | [Classifier models](./classifier-models) | A class, probability distribution, or token labels |
 | Apply hierarchical prompt-safety policy | [Safety classifiers](./mmbert-safety-classifier) | `safe`/`unsafe`, then independent Hazard category scores |
 | Learn which provider model should answer | [ML-based model selection](./ml-model-selection) | A provider-model choice |
 | Compare models already in a provider pool | [Model performance evaluation](./model-performance-eval) | Per-model and per-category scores |
 
-The [model catalog](./model-catalog) maps existing MoM artifacts to their
-training workflows. Vela is the text-router model family; its task name is
-**Guard**, while the public configuration keeps `prompt_guard` and `jailbreak`.
-Check each published artifact for its supported runtime, labels and evaluation
-scope. Guard, Safety and Hazard release qualification is still in progress;
-configuration support alone does not announce their availability.
+The [Vela collection](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798)
+contains the shared Encoder, Domain, Guard, Safety, Hazard, PII, FactCheck,
+Feedback, Modality, Embedding and Reranker models. The [model catalog](./model-catalog)
+also retains the previous mmBERT releases for comparison. Guard detects prompt
+attacks; Safety and Hazard describe content risks. The public configuration
+keeps the signal names `prompt_guard` and `jailbreak`.
+
+See [Vela runtime configuration](/docs/tutorials/global/vela-models) for the
+current default models, operating thresholds and inference contracts.
 
 ## Understand the three common architectures
 
@@ -56,11 +59,12 @@ A base encoder is a training dependency, not a routing signal. Record the exact
 base revision, tokenizer, training data versions and task-head initialization.
 A shared family name or architecture does not establish shared weight ancestry.
 
-The next Vela lineage starts from `jhu-clsp/mmBERT-base`: a new Vela Encoder is
-being rebuilt directly from that checkpoint, then downstream tasks will train
-or migrate from its fixed revision and be re-evaluated. Until that work is
-complete, existing releases retain their documented ancestry and results.
-Do not describe them as migrated by changing names or model cards.
+Vela 1.0 task models share the published `Vela-1.0-Encoder-307M` base.
+For a new Vela run, pin that base's immutable revision and retain its tokenizer
+and configuration. The training commands accept an explicit base ID and revision;
+choose those together rather than inheriting an earlier mmBERT recipe's base.
+Compare the candidate against the original task-specific mmBERT model on matched
+data, while using the currently served Vela version as a regression reference.
 
 ## Adapter versus merged model
 

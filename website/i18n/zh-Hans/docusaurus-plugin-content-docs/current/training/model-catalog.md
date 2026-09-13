@@ -9,14 +9,31 @@ translation:
 
 # 当前模型目录 {#current-model-catalog}
 
-本目录覆盖当前
-[MoM 多语言嵌入集合](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-embed)
-中的全部 5 个产物，以及
-[分类器集合](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-class)
-中的全部 14 个产物。
-一行代表一个逻辑架构，并列出其所有已发布形态。
+## Vela 1.0 {#vela-10}
 
-## 嵌入与重排序产物 {#embedding-and-reranking-artifacts}
+Vela 是当前的 Router 模型家族，十一个模型共享已发布的 Vela Encoder 基座。各任务仓库包含推理所需文件；训练和评测工具保留在本代码仓库。
+
+| 模型 | 用途 |
+| --- | --- |
+| [Encoder](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M) | 新任务适配的共享基座 |
+| [Domain](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Domain) | 14 类请求主题 |
+| [Guard](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Guard) | 提示注入与越狱攻击 |
+| [Safety](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Safety) | 不安全内容 |
+| [Hazard](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Hazard) | 12 类独立内容风险 |
+| [PII](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-PII) | 17 类个人信息实体 |
+| [FactCheck](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck) | 是否需要事实核查 |
+| [Feedback](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Feedback) | 四类反馈和 NO_FEEDBACK |
+| [Modality](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Modality) | 文本、图像或混合输出意图 |
+| [Embedding](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Embedding) | 多语言检索，20 种层数与维度组合 |
+| [Reranker](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Reranker) | 查询文档相关性，20 个层数与维度打分头 |
+
+默认值、输入预算、硬件与实际验证见 [Vela 运行时配置](/docs/tutorials/global/vela-models)。模型卡片提供 quickstart，以及相对旧 mmBERT 家族的匹配评测。
+
+## 旧 mmBERT 和多模态模型 {#previous-mmbert-and-multimodal-models}
+
+以下表格保留此前的[嵌入](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-embed)和[分类器](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-class)集合及其原始训练工作流。对应基座和数据配方描述的是这些旧版本，并非当前 Vela 的训练血缘。多模态模型与 Vela 1.0 分开发布。
+
+### 旧嵌入与重排序产物 {#earlier-embedding-and-reranking-artifacts}
 
 | 逻辑模型 | 已发布产物 | 架构 | 训练方法 |
 | --- | --- | --- | --- |
@@ -28,7 +45,7 @@ translation:
 
 数据流、目标、配置和命令见 [mmBERT-32K 模型](./mmbert-32k-models) 和[多模态嵌入](./multimodal-embeddings)。
 
-## 分类器产物 {#classifier-artifacts}
+### 旧分类器产物 {#earlier-classifier-artifacts}
 
 下面前六个分类器使用多语言 mmBERT-32K/ModernBERT 编码器。两个已发布的安全产物使用 `jhu-clsp/mmBERT-base`；当前安全工作流可以训练 32K 后继产物。序列分类器为请求预测一个标签；PII 模型为每个 token 预测一个 BIO 标签。
 
@@ -45,7 +62,7 @@ translation:
 
 前六个任务见[分类器模型](./classifier-models)，两级安全流水线见[安全分类器](./mmbert-safety-classifier)。
 
-## 选择发布形态 {#choose-a-release-shape}
+## 选择旧模型发布形态 {#choose-an-earlier-release-shape}
 
 当运行时期望独立 Transformers 模型时，使用合并产物。当运行时可以加载 PEFT adapter 且你想要更小的任务专用产物时，使用 LoRA 产物。两种形态都必须保留训练时使用的同一分词器、标签顺序、基础模型兼容性和预处理契约。
 

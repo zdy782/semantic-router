@@ -131,13 +131,17 @@ LEGACY_MODEL_REGISTRY = {
 # Immutable native releases. Keep these in sync with config/registry.go; tests
 # compare every entry, including releases outside this classifier evaluator.
 VELA_RELEASE_REVISIONS = {
-    "llm-semantic-router/Vela-1.0-Encoder-307M": "225bb8021e0e7839e6045b253caadcb19e96bb25",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck": "e4869536922d693c9213f68ecf7b3c9ff610f3e2",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Domain": "938773f3f7b67392c3aba6f2a344b251de881ecf",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "fe0d5700d4498110fd2a6de71243d95dee4ca657",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "994b999048f349bfb62fc92578db86ca4e853205",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "e7a4f126b4b19810a4dd90ad2019f86acd32e920",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding": "5e639f1a709168f6f1cf69cd519f3aa9221bfbef",
+    "llm-semantic-router/Vela-1.0-Encoder-307M": "fe9ccc074b781bc0e2e13c2c8d26f2640410636a",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck": "32484ae69fd200487389c9d253e1c6783de7a401",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Domain": "e18f9d3a91457249416e64bbc58236ebe350c7a5",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "6d3300c4bd7975f30a664503f6c725cf1fbbad48",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "5384b8997e3cbb79ca3a670e869577f4e4f4997e",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "47434a7fd7c245c0c7c17564a000b3c56ccfec41",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker": "b6305795b0a297b16957e9c48b0defb19ecd595b",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Hazard": "75b152b312f3a4e94dee4c1ea01d06251034907d",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Safety": "6e70e725a5f4d86da10f5be5e4dfd1da0358bb85",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Guard": "ab27ec4efe2bdc45336df2d35abb6f687e41214e",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding": "4cd14064da151af4508d5ce1b1c2327f7c3fa30f",
 }
 
 MODEL_REGISTRY = deepcopy(LEGACY_MODEL_REGISTRY)
@@ -150,8 +154,7 @@ for _role, _suffix in {
     _entry = MODEL_REGISTRY[_role]
     _entry["id"] = f"llm-semantic-router/Vela-1.0-Encoder-307M-{_suffix}"
     _entry["revision"] = VELA_RELEASE_REVISIONS[_entry["id"]]
-    # Published lora/ variants require their own reproduction contract. They
-    # are not independent *-lora repositories or generic base+adapter loads.
+    # Vela releases are self-contained task models.
     del _entry["lora_id"]
 MODEL_REGISTRY["feedback"]["labels"].append("NO_FEEDBACK")
 

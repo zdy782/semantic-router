@@ -2,161 +2,146 @@
 
 ## Overview
 
-Router uses Vela for its built-in Domain, PII, FactCheck, Feedback and text
-Embedding models. The reference configuration also selects Vela Modality.
-The inference selectors remain `mmbert` and `mmbert32k`; they identify the
-architecture, not the model release. Built-in downloads use immutable revisions
-from the Router model registry.
+[Vela 1.0](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798)
+is the model family for intelligent routing. Its eleven models share the Vela
+307M encoder base and cover routing, prompt protection, content safety, retrieval
+and reranking. The Router registry pins each release to an immutable revision.
+
+| Model | Role |
+| --- | --- |
+| Encoder | Shared base for adapting new routing tasks |
+| Domain | Request subject across 14 domains |
+| Guard | Prompt injection and jailbreak detection |
+| Safety | Unsafe content detection |
+| Hazard | Twelve independent content risk categories |
+| PII | Personal information spans across 17 entity types |
+| FactCheck | Whether a request needs factual verification |
+| Feedback | Four feedback types and a neutral `NO_FEEDBACK` class |
+| Modality | Text, image, or combined output intent from a written request |
+| Embedding | Multilingual retrieval and semantic matching |
+| Reranker | Relevance scoring for query-document pairs |
+
+The full model name is `Vela-1.0-Encoder-307M`, followed by the task suffix.
+Modality classifies text requests; Vela 1.0 does not contain multimodal encoders.
+FactCheck requests verification and does not verify the truth of an answer.
 
 ## What Problem Does It Solve?
 
-A shared model family supplies task-specific routing signals while keeping
-model identity, input policy and serving thresholds explicit. Upgrading weights
-does not by itself justify processing longer inputs on every request.
+A shared model family supplies task-specific signals and retrieval components
+with explicit model identities, input budgets and serving policies.
 
 ## When to Use
 
-Use the built-in defaults for ordinary routing. Preserve an explicit older model
-when reproducing its behavior, and opt into long-context inference only for
-workloads whose measured quality and latency justify processing complete text.
+Use Vela for built-in routing tasks or adapt the shared Encoder for a new task.
+Choose input length and representation size against your workload's quality
+and latency requirements.
 
-This migration preserves the existing input policies. A classifier
-`max_sequence_length` of `0` retains the 512-token budget; routing signals keep
-their representative sampling and PII keeps its overlapping scans. Embedding
-defaults to 22 layers and 768 dimensions, with `full_context: false`. FactCheck
-uses the Vela development-selected threshold of **0.85**. Feedback retains its
-**0.7** confidence policy and supports the `NO_FEEDBACK` class without emitting
-a feedback match.
+## Defaults and input budgets
 
-Guard keeps its existing model while Vela Guard, Safety and Hazard complete
-release qualification. Safety and Hazard already have recipe-scoped runtime
-bindings and a [Safety signal](../signal/learned/safety.md); compatible artifacts
-can be configured explicitly.
+Built-in Domain, Guard, Safety, PII, FactCheck, Feedback and semantic Embedding
+now use Vela. The reference configuration also selects Vela Modality, Hazard and
+Reranker. Only models required by a recipe are loaded. The base encoder is a
+training parent and is not loaded as an additional routing signal.
 
-Vela Reranker is integrated with the vectorstore RAG plugin. Bind a local pair
-scorer through `rag.reranker` and enable the plugin's `rerank` setting, as shown
-in [neural reranking](/docs/tutorials/plugin/rag#neural-reranking). It scores retrieved
-query/document pairs during a live request. Route preview reports routing
-signals and their latency; actual reranker timing comes from the RAG request
-trace. An encoder Base is a training parent, not an additional routing signal.
+Default operating thresholds are **0.5** for Guard, **0.95** for FactCheck and
+**0.7** for Feedback. `NO_FEEDBACK` emits no feedback match. Safety is independent
+of Guard, so an unsafe content request need not be classified as a prompt attack.
+Hazard uses per-label thresholds from its artifact-bound operating point; a
+single threshold does not represent its published decision policy.
+
+An input budget is a deployment choice. A module `max_sequence_length` of `0`
+keeps the conservative 512-token policy. Embedding defaults to 22 layers,
+768 dimensions and `full_context: false`. Explicit model bindings can accept
+up to **32,768 tokens**, including special tokens, with `overflow: reject`.
+A rejected input is not silently shortened.
 
 ## Configuration
 
-### Keep an explicit older model
-
-Existing model paths and aliases keep their original repositories. An explicit
-configuration is not automatically rewritten to Vela. When selecting an older
-classifier, keep its corresponding mapping path, input budget and threshold
-together. For example, this override preserves the older Domain model:
+The following excerpt binds Domain to a CPU deployment with a 32K budget. Apply
+it to an existing configuration containing providers, signals and decisions.
 
 ```yaml
+routing:
+  model_bindings:
+    domain_classifier:
+      deployment: vela-domain
+      contract: label_distribution.v1
+      adapter: modernbert
+      mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json
+
 global:
   model_catalog:
-    system:
-      domain_classifier: models/mmbert32k-intent-classifier-merged
-    modules:
-      classifier:
-        domain:
-          category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json
-          max_sequence_length: 0
-          threshold: 0.5
+    deployments:
+      vela-domain:
+        artifact: models/Vela-1.0-Encoder-307M-Domain
+        provider: candle
+        device: cpu
+        precision: fp32
+        input:
+          max_tokens: 32768
+          overflow: reject
 ```
 
-Changing embedding weights changes the vector space even when both models
-produce 768 dimensions. Local mmBERT response caches and memory use the loaded
-representation identity to isolate persistent data. Existing vector stores
-require compatible embeddings or reindexing; old data is not silently adopted
-or deleted. See [stores and tools](/docs/tutorials/global/stores-and-tools).
+Use the same deployment and consumer-binding structure for other classifiers.
+PII returns `token_spans.v1`. Embedding uses the `mmbert` adapter and
+`embedding.v1`; Reranker uses `vela_reranker` and `relevance_scores.v1`. These
+adapter names describe inference architectures and are independent of release
+names. See [in-process inference](/docs/installation/runtime/in-process) for the full contract.
 
-### Opt into long-context inference
+For Hazard, bind the independent classifier contract `label_scores.v1` and pin
+`operating_point.json` with its SHA-256. The policy binds the weights, tokenizer,
+execution settings, overlapping windows and twelve thresholds. Decisions select
+labels without replacing those thresholds. The reference configuration includes
+this complete pattern.
 
-Apply the following `global.model_catalog` settings to an existing, complete
-deployment configuration. Keep its providers, signals and decisions. This is a
-configuration excerpt, not a standalone routing recipe. Only enable the model
-modules your decisions use.
+PII's overlapping scan and Hazard's windowed policy differ from whole-document
+classification. Select the policy appropriate to the task, and measure latency
+with the input lengths your application will send.
 
-```yaml
-global:
-  model_catalog:
-    embeddings:
-      semantic:
-        mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
-        use_cpu: false
-        embedding_config:
-          model_type: mmbert
-          target_layer: 22
-          target_dimension: 768
-          full_context: true
-    system:
-      domain_classifier: models/Vela-1.0-Encoder-307M-Domain
-      pii_classifier: models/Vela-1.0-Encoder-307M-PII
-      fact_check_classifier: models/Vela-1.0-Encoder-307M-FactCheck
-      feedback_detector: models/Vela-1.0-Encoder-307M-Feedback
-    modules:
-      classifier:
-        domain:
-          model_ref: domain_classifier
-          variant: mmbert32k
-          category_mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json
-          max_sequence_length: 32768
-          use_cpu: false
-        pii:
-          model_ref: pii_classifier
-          use_mmbert_32k: true
-          pii_mapping_path: models/Vela-1.0-Encoder-307M-PII/pii_mapping.json
-          max_sequence_length: 0
-          use_cpu: false
-      hallucination_mitigation:
-        fact_check:
-          model_ref: fact_check_classifier
-          use_mmbert_32k: true
-          threshold: 0.85
-          max_sequence_length: 32768
-          use_cpu: false
-      feedback_detector:
-        model_ref: feedback_detector
-        use_mmbert_32k: true
-        threshold: 0.7
-        max_sequence_length: 32768
-        use_cpu: false
-      modality_detector:
-        enabled: true
-        method: classifier
-        confidence_threshold: 0.7
-        classifier:
-          model_path: models/Vela-1.0-Encoder-307M-Modality
-          max_sequence_length: 32768
-          use_cpu: false
-```
+## Inference engines and hardware
 
-Validate the complete file, then use the existing AMD local-image flow:
+Native Vela artifacts run through Candle. CPU execution is validated, including
+32K inputs. CUDA remains an available Candle backend; NVIDIA performance must be
+measured on the target hardware.
+
+ONNX is the portable inference format for the ORT provider. AMD GPU acceleration
+uses the ROCm MIGraphX execution provider, so a CPU-only ONNX session is not AMD
+GPU validation. Choose the graph and representation that match the deployment,
+and check the actual provider, precision and fallback evidence. Initial GPU
+compilation and warm request latency are separate measurements.
+
+All models expose their supported input length, usage and comparable evaluation
+results in their model cards. Published comparisons use the previous mmBERT
+family on matched evaluation data. Quality scores, maximum accepted input length
+and inference performance measure different properties.
+
+## Verify live routing and reranking
+
+Route Preview returns actual signal values, decisions and per-signal latency:
 
 ```bash
-vllm-sr config validate --config config.yaml
-vllm-sr serve --config config.yaml --platform amd --image-pull-policy never
+curl http://localhost:8080/api/v1/routing/preview?trace=true \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","text":"Help me debug this Python program."}'
 ```
 
-These settings send full selected routing text to Domain, FactCheck, Feedback,
-Modality and Embedding. Native token budgets include special tokens, and
-over-budget inference is rejected rather than silently truncated. PII remains
-on its existing scan policy; setting its budget above 512 opts into one-pass
-whole-document inference and changes that detection policy. Model capacity does
-not guarantee entity recall, calibrated confidence, or bounded route latency.
+Use the public model name declared by your entrypoint. Check `/ready` before
+sending requests and inspect the returned signal values and evaluation trace.
 
-Long-input support is task and engine specific. FactCheck's published 32K
-stress slice achieved 8/12 correct at 0.85. Feedback retains long-context
-false-positive limitations. The Embedding natural-document final reached
-21,816 tokens; exact 32K coverage also includes constructed and engineering
-fixtures. Find each model's usage and capabilities in the
-[Vela collection](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798).
+Reranking executes inside the vectorstore RAG plugin after routing. Bind
+`rag.reranker` and enable `rerank` as described in
+[neural reranking](/docs/tutorials/plugin/rag#neural-reranking). Verify it through
+a real chat request with indexed documents. Its request trace records candidate
+count, reranker identity, relevance scores and reranking latency; routing Preview
+does not execute the RAG plugin.
 
-CPU and AMD evidence should not be interchanged. The full-layer Embedding
-Candle CPU 32K run verifies functionality; it does not establish an interactive
-routing latency. Controlled eight-thread CPU runs at 512 and 2K tokens measured
-1.26× and 1.62× speedups after the attention softmax optimization. Feedback's
-qualified AMD FP32 ONNX graph measured about 2.65 seconds at 32K, with a
-short-input regression relative to its previous graph. These measurements use
-different models and workloads. CPU configurations can retain
-`use_cpu: true`, but should keep bounded routing inputs unless their measured
-latency budget permits full documents. CUDA execution paths remain available;
-this release's AMD measurements do not establish NVIDIA hardware performance.
+## Preserve an earlier deployment
+
+Explicit older model paths and aliases retain their original repositories.
+Select the matching mapping file, threshold and input policy when reproducing
+an earlier classifier. Upgrading to Vela does not rewrite explicit model choices.
+
+Changing embedding weights or representation changes the vector space. Response
+caches and memory isolate data by representation identity. Existing vector stores
+require compatible embeddings or reindexing; old data is not silently adopted
+or deleted. See [stores and tools](./stores-and-tools.md).

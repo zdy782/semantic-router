@@ -5,14 +5,40 @@ sidebar_label: Model Catalog
 
 # Current model catalog
 
-This catalog covers all five artifacts in the current
-[MoM multilingual embedding collection](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-embed)
-and all 14 artifacts in the
-[classifier collection](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-class).
-A row represents one logical architecture and lists all of its published
-release shapes.
+## Vela 1.0
 
-## Embedding and reranking artifacts
+Vela is the current router model family. All eleven models share the published
+Vela Encoder base. Each task release contains the files needed for inference;
+training and evaluation tools live in this repository.
+
+| Model | Purpose |
+| --- | --- |
+| [Encoder](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M) | Shared base for task adaptation |
+| [Domain](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Domain) | 14 request domains |
+| [Guard](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Guard) | Prompt injection and jailbreak attacks |
+| [Safety](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Safety) | Unsafe content |
+| [Hazard](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Hazard) | 12 independent content hazards |
+| [PII](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-PII) | 17 personal-information entity types |
+| [FactCheck](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck) | Need for factual verification |
+| [Feedback](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Feedback) | Four feedback types plus NO_FEEDBACK |
+| [Modality](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Modality) | Text, image or combined output intent |
+| [Embedding](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Embedding) | Multilingual retrieval with 20 layer/dimension combinations |
+| [Reranker](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Reranker) | Pair relevance with 20 layer/dimension scoring heads |
+
+See [Vela runtime configuration](/docs/tutorials/global/vela-models) for defaults,
+input budgets, hardware and live verification. Model cards provide quickstarts
+and matched comparisons with the previous mmBERT family.
+
+## Previous mmBERT and multimodal models
+
+The following tables preserve the earlier
+[embedding](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-embed)
+and [classifier](https://huggingface.co/collections/llm-semantic-router/mom-multilingual-class)
+collections and their original training workflows. Their base models and data
+recipes describe those releases, not the current Vela training lineage.
+Multimodal models remain separate from Vela 1.0.
+
+### Earlier embedding and reranking artifacts
 
 | Logical model | Published artifact | Architecture | Training method |
 | --- | --- | --- | --- |
@@ -26,10 +52,10 @@ See [mmBERT-32K models](./mmbert-32k-models) and
 [multimodal embeddings](./multimodal-embeddings) for the data flow, objectives,
 configuration, and commands.
 
-## Classifier artifacts
+### Earlier classifier artifacts
 
 The first six classifiers below use the multilingual mmBERT-32K/ModernBERT
-encoder. The two published safety artifacts use `jhu-clsp/mmBERT-base`; the
+encoder. The two earlier safety artifacts use `jhu-clsp/mmBERT-base`; the
 current safety workflow can train 32K successor artifacts. Sequence
 classifiers predict one label for the request; the PII model predicts a BIO
 label for each token.
@@ -49,7 +75,7 @@ See [classifier models](./classifier-models) for the first six tasks and
 [safety classifiers](./mmbert-safety-classifier) for the two-level safety
 pipeline.
 
-## Choose a release shape
+## Choose an earlier release shape
 
 Use a merged artifact when the runtime expects a standalone Transformers model.
 Use a LoRA artifact when the runtime can load PEFT adapters and you want a

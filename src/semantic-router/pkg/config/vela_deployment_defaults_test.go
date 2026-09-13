@@ -14,12 +14,15 @@ func TestVelaDeploymentDownloadsMatchRegistryPinsAndPaths(t *testing.T) {
 		t.Run(asset, func(t *testing.T) {
 			data := string(mustReadRepoFile(t, asset))
 			matches := pattern.FindAllStringSubmatch(data, -1)
-			want := 3
+			want := 4
 			if strings.Contains(asset, "kserve") {
-				want = 2
+				want = 3
 			}
 			if len(matches) != want {
 				t.Fatalf("found %d pinned preloads, want %d", len(matches), want)
+			}
+			if !strings.Contains(data, "Vela-1.0-Encoder-307M-Guard") || strings.Contains(data, "mmbert32k-jailbreak-detector-merged") {
+				t.Fatal("deployment still preloads the old default Guard")
 			}
 			for _, match := range matches {
 				spec := GetModelByPath("models/" + match[2])

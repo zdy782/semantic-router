@@ -32,7 +32,7 @@ BASE_REVISION=ccd22e6ba42f86681578229f9dfd468295da3def
 mkdir -p "$WORK/sources"
 hf download "$BASE_MODEL_ID" --revision "$BASE_REVISION" --local-dir "$WORK/base"
 hf download llm-semantic-router/Vela-1.0-Encoder-307M-PII config.json \
-  --revision fe0d5700d4498110fd2a6de71243d95dee4ca657 --local-dir "$WORK/reference"
+  --revision 6d3300c4bd7975f30a664503f6c725cf1fbbad48 --local-dir "$WORK/reference"
 curl --fail --location \
   https://raw.githubusercontent.com/microsoft/presidio-research/f3ff907eba57b8d380711ce7ca82a42696cd0490/data/synth_dataset_v2.json \
   --output "$WORK/sources/presidio.json"

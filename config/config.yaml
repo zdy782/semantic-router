@@ -153,6 +153,13 @@ routing:
   strategy: priority
   # Optional recipe-local consumer bindings to named model deployments.
   model_bindings:
+    classifier.content-risk:
+      deployment: content-risk
+      contract: label_scores.v1
+      adapter: modernbert
+      operating_point:
+        path: operating_point.json
+        sha256: ecd674d79dec8b201d5397b79e47d9bf27f7a1b86c3eee745815805bb0d05b7b
     rag.reranker:
       deployment: document-ranker
       contract: relevance_scores.v1
@@ -301,17 +308,9 @@ routing:
     safety:
       - name: unsafe-content
         description: Content risk, independent of prompt attacks.
-        model: external-safety
         labels: [safe, unsafe]
         unsafe_labels: [unsafe]
         threshold: 0.5
-        hazard:
-          model: external-hazard
-          labels: [violence, criminal_activity, sexual_content, child_exploitation,
-                   hate, harassment_abuse, regulated_substances, weapons,
-                   self_harm, privacy, specialized_advice, misinformation]
-          categories: [privacy]
-          threshold: 0.6
 
     fact_check:
       - name: needs_fact_check
@@ -665,11 +664,17 @@ routing:
         modality: audio
 
     classifiers:
+      - name: content-risk
+        description: Independent content hazards with model-specific operating points.
+        type: local
+        labels: [violence, criminal_activity, sexual_content, child_exploitation,
+                 hate, harassment_abuse, regulated_substances, weapons,
+                 self_harm, privacy, specialized_advice, misinformation]
       - name: generic-safety-score
         description: Generic binary safety classification head.
         type: local
-        model_path: models/mmbert32k-jailbreak-detector-merged
-        labels: [SAFE, JAILBREAK]
+        model_path: models/Vela-1.0-Encoder-307M-Safety
+        labels: [safe, unsafe]
         use_cpu: true
       - name: tool-risk
         description: Prompted tool execution risk labeler.
@@ -1431,6 +1436,20 @@ routing:
             reasoning, coding, or multi-step analysis.
           timeout_seconds: 5
 
+    - name: content_privacy_route
+      description: Route requests that cross the Hazard privacy operating point.
+      priority: 126
+      rules:
+        operator: AND
+        on_unknown: fail_request
+        conditions:
+          - type: classifier
+            name: content-risk
+            label: privacy
+      modelRefs:
+        - model: qwen3-8b
+          use_reasoning: false
+
     - name: classifier_band_route
       description: Route a bounded generic classifier score to a local model.
       priority: 125
@@ -1440,7 +1459,7 @@ routing:
         conditions:
           - type: classifier
             name: generic-safety-score
-            label: JAILBREAK
+            label: unsafe
             predicate:
               gte: 0.5
       modelRefs:
@@ -2231,6 +2250,14 @@ global:
   model_catalog:
     # Named physical deployments and their shared admission budgets.
     deployments:
+      content-risk:
+        artifact: models/Vela-1.0-Encoder-307M-Hazard
+        provider: candle
+        device: cpu
+        precision: fp32
+        input:
+          max_tokens: 32768
+          overflow: reject
       document-ranker:
         artifact: models/Vela-1.0-Encoder-307M-Reranker
         provider: candle
@@ -2275,7 +2302,7 @@ global:
     system:
       safety: models/Vela-1.0-Encoder-307M-Safety
       hazard: models/Vela-1.0-Encoder-307M-Hazard
-      prompt_guard: models/mmbert32k-jailbreak-detector-merged
+      prompt_guard: models/Vela-1.0-Encoder-307M-Guard
       domain_classifier: models/Vela-1.0-Encoder-307M-Domain
       pii_classifier: models/Vela-1.0-Encoder-307M-PII
       fact_check_classifier: models/Vela-1.0-Encoder-307M-FactCheck
@@ -2457,11 +2484,6 @@ global:
           model_id: models/Vela-1.0-Encoder-307M-Safety
           use_cpu: true
           max_sequence_length: 0
-        hazard:
-          model_ref: hazard
-          model_id: models/Vela-1.0-Encoder-307M-Hazard
-          use_cpu: true
-          max_sequence_length: 0
       prompt_compression:
         enabled: true
         # Built-in profile for scoring/preserve defaults: default, coding, medical,
@@ -2481,8 +2503,8 @@ global:
       prompt_guard:
         enabled: true
         model_ref: prompt_guard
-        model_id: models/mmbert32k-jailbreak-detector-merged
-        threshold: 0.7
+        model_id: models/Vela-1.0-Encoder-307M-Guard
+        threshold: 0.5
         use_cpu: true
         variant: mmbert32k
         max_sequence_length: 0
@@ -2491,7 +2513,7 @@ global:
         window:
           size: 512
           overlap: 255
-        jailbreak_mapping_path: models/mmbert32k-jailbreak-detector-merged/jailbreak_type_mapping.json
+        jailbreak_mapping_path: models/Vela-1.0-Encoder-307M-Guard/jailbreak_type_mapping.json
         positive_labels: [jailbreak]
         # allow (default) tolerates a classifier-backend failure and treats the
         # affected content as not matching; block treats it as a match instead,
@@ -2560,7 +2582,7 @@ global:
           model_ref: fact_check_classifier
           max_sequence_length: 0
           model_id: models/Vela-1.0-Encoder-307M-FactCheck
-          threshold: 0.85
+          threshold: 0.95
           use_cpu: true
           use_mmbert_32k: true
         detector:

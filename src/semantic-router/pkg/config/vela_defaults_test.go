@@ -9,6 +9,8 @@ func TestVelaDefaultsUsePublishedPathsWithoutChangingInputPolicies(t *testing.T)
 	cfg := DefaultGlobalConfig()
 	paths := map[string]string{
 		"Domain":    cfg.CategoryModel.ModelID,
+		"Guard":     cfg.PromptGuard.ModelID,
+		"Safety":    cfg.SafetyModels.Safety.ModelID,
 		"PII":       cfg.PIIModel.ModelID,
 		"FactCheck": cfg.HallucinationMitigation.FactCheckModel.ModelID,
 		"Feedback":  cfg.FeedbackDetector.ModelID,
@@ -30,17 +32,17 @@ func TestVelaDefaultsUsePublishedPathsWithoutChangingInputPolicies(t *testing.T)
 	if cfg.EmbeddingConfig.FullContext || cfg.EmbeddingConfig.TargetLayer != 22 || cfg.EmbeddingConfig.TargetDimension != 768 {
 		t.Fatal("embedding input/representation defaults changed")
 	}
-	if cfg.HallucinationMitigation.FactCheckModel.Threshold != float32(.85) {
+	if cfg.HallucinationMitigation.FactCheckModel.Threshold != float32(.95) {
 		t.Fatal("FactCheck did not use its frozen Vela operating point")
 	}
 	if cfg.FeedbackDetector.Threshold != float32(.7) {
 		t.Fatal("Feedback abstention changed")
 	}
-	if cfg.PromptGuard.ModelID != "models/mmbert32k-jailbreak-detector-merged" {
-		t.Fatal("unqualified PromptGuard was promoted")
+	if cfg.PromptGuard.Threshold != float32(.5) {
+		t.Fatal("Guard did not use its frozen Vela operating point")
 	}
-	if cfg.SafetyModels.Safety.ModelID != "" || cfg.SafetyModels.Hazard.ModelID != "" {
-		t.Fatal("unqualified Safety/Hazard received defaults")
+	if cfg.SafetyModels.Hazard.ModelID != "" {
+		t.Fatal("Hazard must use an explicit binding with its artifact operating point")
 	}
 }
 

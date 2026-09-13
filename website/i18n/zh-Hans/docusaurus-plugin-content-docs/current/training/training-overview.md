@@ -21,15 +21,17 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 
 | 你需要 | 从这里开始 | 输出 |
 | --- | --- | --- |
-| 高效比较查询和文档 | [mmBERT-32K embedder](./mmbert-32k-models#embedding-model-bi-encoder) | 每个输入一个规范化向量 |
-| 以更高准确率重打分短列表 | [mmBERT-32K reranker](./mmbert-32k-models#reranking-model-cross-encoder) | 每个查询-文档对的相关性分数 |
+| 高效比较查询和文档 | [Vela embedding 架构](./mmbert-32k-models#embedding-model-bi-encoder) | 每个输入一个规范化向量 |
+| 以更高准确率重打分短列表 | [Vela reranking 架构](./mmbert-32k-models#reranking-model-cross-encoder) | 每个查询-文档对的相关性分数 |
 | 将文本、图像和音频放入同一向量空间 | [多模态嵌入](./multimodal-embeddings) | 规范化的跨模态向量 |
 | 检测意图、越狱、反馈、模态、事实核查需求或 PII | [分类器模型](./classifier-models) | 类别、概率分布或 token 标签 |
 | 应用分层提示词安全策略 | [安全分类器](./mmbert-safety-classifier) | `safe`/`unsafe`，随后是危害类别 |
 | 学习应由哪个 provider 模型作答 | [基于 ML 的模型选择](./ml-model-selection) | 一个 provider 模型选择 |
 | 比较 provider 池中已有模型 | [模型性能评测](./model-performance-eval) | 按模型和按类别的分数 |
 
-[模型目录](./model-catalog)列出当前 MoM 多语言嵌入和分类器集合中的每一个产物，并将发布变体映射到其训练工作流。
+[Vela 集合](https://huggingface.co/collections/llm-semantic-router/vela-10-router-models-6aa555ba70cc6997d6d67798)包含共享 Encoder、Domain、Guard、Safety、Hazard、PII、FactCheck、Feedback、Modality、Embedding 和 Reranker。[模型目录](./model-catalog)同时保留旧 mmBERT 版本供对照。Guard 检测提示词攻击，Safety 和 Hazard 描述内容风险；公共配置保留 `prompt_guard` 和 `jailbreak` 信号名。
+
+当前默认模型、阈值和推理契约见 [Vela 运行时配置](/docs/tutorials/global/vela-models)。
 
 ## 理解三种常见架构 {#understand-the-three-common-architectures}
 
@@ -42,6 +44,12 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 | Encoder plus task head | 编码一个请求，然后预测序列或 token 标签 | 在线路由和策略信号 |
 
 多模态模型用独立的文本、图像和音频塔扩展 bi-encoder 模式，其输出被投影到共享空间。目录和家族页面说明精确的塔、维度、标签和目标。
+
+## 记录基座和任务血缘 {#record-the-base-and-task-lineage}
+
+基座编码器是训练依赖，不是路由信号。记录准确的基座 revision、tokenizer、训练数据版本和任务头初始化；同一名称或架构不能证明权重具有共同来源。
+
+Vela 1.0 任务模型共享已发布的 `Vela-1.0-Encoder-307M` 基座。新的 Vela 训练应固定该基座的不可变 revision，并保留 tokenizer 和配置。训练命令接受显式的 base ID 与 revision，应配套选择，避免沿用旧 mmBERT 配方的基座。候选模型以原任务的 mmBERT 模型和匹配数据进行对比，同时用当前 Vela 版本检查回归。
 
 ## Adapter 与合并模型 {#adapter-versus-merged-model}
 
@@ -61,7 +69,7 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 ### 2. 准备版本化数据 {#2-prepare-versioned-data}
 
 保持训练、验证和测试划分分开。记录数据集修订、许可证、预处理、标签定义和合成数据规则。
-划分前先去重，避免近乎相同的样本泄漏到评测中。
+按原始文档、对话或其他独立组划分，并审计精确与近似重复。未知标签应与负样本分开；部分审阅的 Hazard 数据需保留逐标签监督掩码。来源标签和生成标签在成为训练目标前需要任务审阅。
 
 ### 3. 从冒烟运行开始 {#3-start-with-a-smoke-run}
 
@@ -80,6 +88,8 @@ Semantic Router 在把请求发给 LLM 之前使用小型、任务专用的模�
 | 模型选择 | 端到端回答质量、成本、延迟，以及相对 oracle 的 regret |
 
 始终保留留出测试集。按语言、领域、输入长度以及部署关心的失败模式切片结果。
+
+训练、评测和导出必须保持 pooling、归一化、标签激活、token 窗口和精度一致。Safety、Guard 保留完整分类分布；Hazard 返回独立 sigmoid 分数；Reranker 返回原始相关性 logit。除数值一致性外，还应验证导出引擎的任务指标，尤其是分数间隔很小、会改变决策或排序时。
 
 ### 5. 导出并集成 {#5-export-and-integrate}
 

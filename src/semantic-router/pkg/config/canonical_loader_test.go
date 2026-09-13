@@ -571,7 +571,7 @@ global:
 	if !cfg.PIIModel.UseMmBERT32K {
 		t.Fatal("expected sparse PII override to keep mmBERT-32K enabled")
 	}
-	if cfg.PromptGuard.ModelID != "models/mmbert32k-jailbreak-detector-merged" {
+	if cfg.PromptGuard.ModelID != "models/Vela-1.0-Encoder-307M-Guard" {
 		t.Fatalf("expected sparse prompt-guard override to keep default system model, got %q", cfg.PromptGuard.ModelID)
 	}
 	if cfg.PromptGuard.Variant != PromptGuardVariantMmBERT32K {

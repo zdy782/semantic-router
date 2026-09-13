@@ -165,10 +165,10 @@ spec:
           from huggingface_hub import snapshot_download
 
           models = [
-              ("llm-semantic-router/Vela-1.0-Encoder-307M-Domain", "Vela-1.0-Encoder-307M-Domain", "938773f3f7b67392c3aba6f2a344b251de881ecf"),
-              ("llm-semantic-router/Vela-1.0-Encoder-307M-PII", "Vela-1.0-Encoder-307M-PII", "fe0d5700d4498110fd2a6de71243d95dee4ca657"),
-              ("llm-semantic-router/mmbert32k-jailbreak-detector-merged", "mmbert32k-jailbreak-detector-merged", "main"),
-              ("llm-semantic-router/Vela-1.0-Encoder-307M-Embedding", "Vela-1.0-Encoder-307M-Embedding", "5e639f1a709168f6f1cf69cd519f3aa9221bfbef")
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-Domain", "Vela-1.0-Encoder-307M-Domain", "e18f9d3a91457249416e64bbc58236ebe350c7a5"),
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-PII", "Vela-1.0-Encoder-307M-PII", "6d3300c4bd7975f30a664503f6c725cf1fbbad48"),
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-Guard", "Vela-1.0-Encoder-307M-Guard", "ab27ec4efe2bdc45336df2d35abb6f687e41214e"),
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-Embedding", "Vela-1.0-Encoder-307M-Embedding", "4cd14064da151af4508d5ce1b1c2327f7c3fa30f")
           ]
 
           cache_dir = "/app/cache/hf"

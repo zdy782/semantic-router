@@ -15,6 +15,11 @@ func TestVelaReleaseRegistryContracts(t *testing.T) {
 		classes int
 	}{
 		{"Vela-1.0-Encoder-307M", PurposeEncoder, 0},
+		{"Vela-1.0-Encoder-307M-Guard", PurposeJailbreakDetection, 2},
+		{"Vela-1.0-Encoder-307M-Safety", PurposeSafety, 2},
+		{"Vela-1.0-Encoder-307M-Hazard", PurposeHazard, 12},
+		{"Vela-1.0-Encoder-307M-Embedding", PurposeEmbedding, 0},
+		{"Vela-1.0-Encoder-307M-Reranker", PurposeReranking, 0},
 		{"Vela-1.0-Encoder-307M-Domain", PurposeDomainClassification, 14},
 		{"Vela-1.0-Encoder-307M-PII", PurposePIIDetection, 35},
 		{"Vela-1.0-Encoder-307M-FactCheck", PurposeHallucinationSentinel, 2},
