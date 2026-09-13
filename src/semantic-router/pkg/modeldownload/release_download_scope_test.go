@@ -112,7 +112,16 @@ func TestVelaEmbeddingReleasePreservesCompiledRuntimeArtifacts(t *testing.T) {
 	}
 	want := []string{"config.json", "tokenizer.json"}
 	if provider, _ := config.DefaultModelExecution(true); provider == "ort" {
-		want = append(want, "onnx/layer-22/model.onnx", "onnx/layer-22/model.onnx.data", "onnx/layer-6/model.onnx", "onnx/layer-6/model.onnx.data")
+		for _, graph := range []string{"onnx/layer-22/model.onnx", "onnx/layer-6/model.onnx"} {
+			if !requiresGraphAlternative(spec, graph) || revisionArtifactExcluded(graph, spec.ExcludePatterns) {
+				t.Fatalf("required layer alternative is missing or excluded: %s", graph)
+			}
+		}
+		// Tensor dependencies follow the selected graph's actual external-data
+		// references; their filenames are not required to be model.onnx.data.
+		if !spec.CheckONNX {
+			t.Fatal("selected ONNX graphs would skip external tensor checks")
+		}
 		if revisionArtifactExcluded("onnx/layer-6/model_fa_fp16.onnx", spec.ExcludePatterns) {
 			t.Fatal("AMD optimized graph was excluded")
 		}

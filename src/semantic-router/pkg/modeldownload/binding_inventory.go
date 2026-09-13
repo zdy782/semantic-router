@@ -191,6 +191,9 @@ func (i *modelInventory) addScope(cfg *config.RouterConfig, plan *config.ModelBi
 func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.ResolvedModelBinding) error {
 	path := config.ResolveModelPath(spec.Deployment.Artifact)
 	files := []string{"config.json", "tokenizer.json"}
+	if spec.Binding.Contract == config.RelevanceScoresContract {
+		files = append(files, "matryoshka_config.json")
+	}
 	groups := [][]string{}
 	excludes := []string(nil)
 	if spec.Deployment.Provider == "ort" {
@@ -207,6 +210,8 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 			if err := i.addFile(head, path, spec.Deployment.Revision); err != nil {
 				return err
 			}
+		} else if spec.Binding.Contract == config.RelevanceScoresContract {
+			groups = append(groups, rerankerGraphFiles(spec.Binding.PairScorer))
 		} else {
 			groups = append(groups, []string{"*.onnx", "onnx/*.onnx", "onnx/layer-*/*.onnx"})
 		}
@@ -223,7 +228,11 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 				}
 				for _, layer := range layers {
 					if layer > 0 && layer != 22 {
-						files = append(files, fmt.Sprintf("onnx/layer-%d/model.onnx", layer))
+						groups = append(groups, []string{
+							fmt.Sprintf("onnx/layer-%d/model.onnx", layer),
+							fmt.Sprintf("onnx/model_layer_%d.onnx", layer),
+							fmt.Sprintf("model_layer_%d.onnx", layer),
+						})
 					}
 				}
 			}
@@ -233,7 +242,7 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		// ONNX export already exists. Sharded safetensors remain valid.
 		groups = append(groups, []string{"*.safetensors", "*.safetensors.index.json", "pytorch_model*.bin"})
 		if spec.Binding.Contract == config.RelevanceScoresContract {
-			files = append(files, "classification_heads.safetensors", "matryoshka_config.json")
+			files = append(files, "classification_heads.safetensors")
 			groups = [][]string{{"model.safetensors", "model.safetensors.index.json"}}
 		}
 		excludes = slices.Clone(onnxWeightExcludePatterns)
@@ -258,6 +267,29 @@ func (i *modelInventory) addDeployment(cfg *config.RouterConfig, spec config.Res
 		return i.addFile(spec.Binding.OperatingPoint.ResolvePath(path), path, spec.Deployment.Revision)
 	}
 	return nil
+}
+
+func rerankerGraphFiles(selection *config.PairScorerSelection) []string {
+	layer, dimension := "*", "*"
+	if selection == nil || (selection.Layer == 0 && selection.Dimension == 0) {
+		return []string{"onnx/model.onnx"}
+	}
+	if selection.Layer > 0 {
+		layer = fmt.Sprint(selection.Layer)
+	}
+	if selection.Dimension > 0 {
+		dimension = fmt.Sprint(selection.Dimension)
+	}
+	files := []string{
+		fmt.Sprintf("onnx/model_layer_%s_dim_%s.onnx", layer, dimension),
+		fmt.Sprintf("onnx/layer-%s/dim-%s/model.onnx", layer, dimension),
+	}
+	if layer == "*" || dimension == "*" {
+		// The owner resolves the missing coordinate from actual metadata and
+		// accepts the primary graph only when that selection is full-sized.
+		files = append(files, "onnx/model.onnx")
+	}
+	return files
 }
 
 func (i *modelInventory) addFile(path, artifact, revision string) error {
