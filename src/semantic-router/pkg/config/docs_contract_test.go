@@ -150,6 +150,10 @@ var configContractRequiredDocs = []docNeedles{
 		needles: apiserverDocNeedles,
 	},
 	{
+		path:    repoRel("website", "i18n", "zh-Hans", "docusaurus-plugin-content-docs", "current", "api", "apiserver.md"),
+		needles: apiserverDocNeedles,
+	},
+	{
 		path: repoRel("website", "docs", "troubleshooting", "common-errors.md"),
 		needles: []string{
 			"backend_refs:",
@@ -576,10 +580,9 @@ var latestTutorialAllowedDirectories = map[string]bool{
 	"projection": true,
 }
 
-// currentTranslationFallbackDocs are deliberately absent from the latest
-// zh-Hans overrides. Docusaurus serves the canonical current English page when
-// an override is missing; historical versioned translations remain untouched.
-var currentTranslationFallbackDocs = []string{
+// Retired cookbook overrides must not shadow the current tutorial hierarchy.
+// Current translated API, training and troubleshooting pages remain supported.
+var retiredCookbookTranslationDocs = []string{
 	repoRel("website", "i18n", "zh-Hans", "docusaurus-plugin-content-docs", "current", "cookbook", "classifier-tuning.md"),
 	repoRel("website", "i18n", "zh-Hans", "docusaurus-plugin-content-docs", "current", "cookbook", "pii-policy.md"),
 	repoRel("website", "i18n", "zh-Hans", "docusaurus-plugin-content-docs", "current", "cookbook", "vllm-endpoints.md"),
@@ -611,7 +614,7 @@ func TestLatestTutorialTaxonomyMatchesConfigHierarchy(t *testing.T) {
 	assertSignalTutorialDocsMatchConfigHierarchy(t, root)
 	assertAlgorithmTutorialDocsMatchConfigHierarchy(t, root)
 	assertPluginTutorialDocsMatchConfigHierarchy(t, root)
-	assertPathsDoNotExist(t, root, currentTranslationFallbackDocs)
+	assertPathsDoNotExist(t, root, retiredCookbookTranslationDocs)
 }
 
 func TestConfigProposalIsReachableFromSidebar(t *testing.T) {
