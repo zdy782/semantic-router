@@ -24,7 +24,7 @@ use super::onnx_artifacts::capture_onnx;
 use super::runtime_identity::{
     json_digest, tokenizer_digest, ArtifactDigest, ArtifactSnapshot, RuntimeIdentity,
 };
-use crate::core::instance_options::{InstanceOptions, Overflow, Provider};
+use crate::core::instance_options::{CustomOpsProfile, InstanceOptions, Overflow, Provider};
 use crate::core::unified_error::{errors, UnifiedError, UnifiedResult};
 use crate::model_architectures::embedding::pooling::{
     l2_normalize, mean_pool_3d, truncate_dimension,
@@ -379,16 +379,14 @@ impl MmBertEmbeddingModel {
         }
         tokenizer.with_padding(None);
 
-        // An explicit owned graph is authoritative. Implicit selection requires
-        // the full encoder and uses portable graphs for owned CPU/MIGraphX.
+        // Owned selection follows the explicit execution profile, never legacy
+        // environment variables. An explicitly named graph remains authoritative.
         let onnx_candidates = if options.is_some_and(|o| o.model_file.is_some()) {
             vec![]
+        } else if let Some(options) = options {
+            Self::owned_primary_candidates(&model_path, config.num_hidden_layers, options)?
         } else {
-            Self::find_onnx_models(
-                &model_path,
-                config.num_hidden_layers,
-                use_cpu || options.is_some(),
-            )?
+            Self::find_onnx_models(&model_path, config.num_hidden_layers, use_cpu)?
         };
         let onnx_candidates = match options {
             Some(options) => vec![options.select_graph(onnx_candidates)?],
@@ -468,6 +466,92 @@ impl MmBertEmbeddingModel {
             execution_sequence_length,
             reject_overflow: options.is_none_or(|o| o.overflow == Overflow::Reject),
         })
+    }
+
+    fn owned_primary_candidates<P: AsRef<Path>>(
+        model_path: P,
+        full_layer: usize,
+        options: &InstanceOptions,
+    ) -> UnifiedResult<Vec<std::path::PathBuf>> {
+        let ck = options.provider == Provider::Rocm
+            && options.custom_ops_profile == CustomOpsProfile::CkFlashAttention;
+        let names: &[&str] = if ck {
+            &["model_fa_fp16.onnx", "model_fa.onnx"]
+        } else {
+            &[
+                "model.onnx",
+                "encoder.onnx",
+                "mmbert.onnx",
+                "model_optimized.onnx",
+                "model_sdpa_fp16.onnx",
+            ]
+        };
+        let root = model_path.as_ref();
+        let directories = [
+            root.to_path_buf(),
+            root.join("onnx"),
+            root.join(format!("onnx/layer-{full_layer}")),
+        ];
+        let mut paths: Vec<_> = directories
+            .iter()
+            .flat_map(|directory| names.iter().map(|name| directory.join(name)))
+            .filter(|path| path.is_file())
+            .collect();
+        if !ck {
+            let flat = format!("model_layer_{full_layer}.onnx");
+            paths.extend(
+                [root.join(&flat), root.join("onnx").join(flat)]
+                    .into_iter()
+                    .filter(|path| path.is_file()),
+            );
+        }
+        if paths.is_empty() {
+            return Err(errors::model_load(
+                &root.display().to_string(),
+                "no full-layer graph matches the owned execution profile; specify model_file for a custom graph",
+            ));
+        }
+        Ok(paths)
+    }
+
+    fn owned_layer_candidates(
+        root: &Path,
+        layer: usize,
+        primary_path: &Path,
+    ) -> UnifiedResult<Vec<std::path::PathBuf>> {
+        let name = primary_path.file_name().ok_or_else(|| {
+            errors::config_error("model_file", "the selected graph has no filename")
+        })?;
+        let flat_primary = name
+            .to_str()
+            .is_some_and(|value| value.starts_with("model_layer_") && value.ends_with(".onnx"));
+        let nested_name = if flat_primary {
+            std::ffi::OsStr::new("model.onnx")
+        } else {
+            name
+        };
+        let mut paths = vec![root.join(format!("onnx/layer-{layer}")).join(nested_name)];
+        // Preserve the established flat portable layout. Custom/CK filenames
+        // must match the selected primary exactly; a different CK variant may
+        // use different encoder precision despite registering the same library.
+        if name == "model.onnx" || flat_primary {
+            let flat = format!("model_layer_{layer}.onnx");
+            paths.extend([root.join(&flat), root.join("onnx").join(flat)]);
+        }
+        if !paths.iter().any(|path| path.is_file())
+            && Self::layer_candidates(root, layer, false, true)
+                .iter()
+                .any(|path| path.is_file())
+        {
+            return Err(errors::config_error(
+                "layer_graph",
+                &format!(
+                    "layer {layer} has graphs but none match selected primary {}",
+                    name.to_string_lossy()
+                ),
+            ));
+        }
+        Ok(paths)
     }
 
     /// Find ONNX model candidates in priority order.
@@ -860,9 +944,12 @@ impl MmBertEmbeddingModel {
             if layer == primary_layer {
                 continue;
             }
-            for path in
-                Self::layer_candidates(model_dir, layer, use_cpu || options.is_some(), legacy_fa)
-            {
+            let candidates = if options.is_some() {
+                Self::owned_layer_candidates(model_dir, layer, primary_path)?
+            } else {
+                Self::layer_candidates(model_dir, layer, use_cpu, legacy_fa)
+            };
+            for path in candidates {
                 if !path.is_file() {
                     continue;
                 }
@@ -1243,6 +1330,119 @@ impl MmBertEmbeddingModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owned_primary_selection_uses_typed_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let full = root.path().join("onnx/layer-22");
+        std::fs::create_dir_all(&full).unwrap();
+        for name in ["model.onnx", "model_fa_fp16.onnx", "model_fa.onnx"] {
+            std::fs::write(full.join(name), []).unwrap();
+        }
+        for provider in [Provider::Cpu, Provider::Migraphx, Provider::Rocm] {
+            let options = InstanceOptions {
+                provider,
+                ..Default::default()
+            };
+            let paths =
+                MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap();
+            assert_eq!(paths, vec![full.join("model.onnx")]);
+        }
+        let options = InstanceOptions {
+            provider: Provider::Rocm,
+            custom_ops_profile: CustomOpsProfile::CkFlashAttention,
+            ..Default::default()
+        };
+        let paths =
+            MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap();
+        assert_eq!(
+            paths,
+            vec![full.join("model_fa_fp16.onnx"), full.join("model_fa.onnx")]
+        );
+    }
+
+    #[test]
+    fn owned_ck_selection_rejects_portable_and_early_substitutes() {
+        let root = tempfile::tempdir().unwrap();
+        let early = root.path().join("onnx/layer-6");
+        std::fs::create_dir_all(&early).unwrap();
+        std::fs::write(early.join("model_fa_fp16.onnx"), []).unwrap();
+        std::fs::write(root.path().join("model.onnx"), []).unwrap();
+        std::fs::write(root.path().join("custom.onnx"), []).unwrap();
+        let options = InstanceOptions {
+            provider: Provider::Rocm,
+            custom_ops_profile: CustomOpsProfile::CkFlashAttention,
+            ..Default::default()
+        };
+        assert!(MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).is_err());
+        let explicit = InstanceOptions {
+            model_path: root.path().to_string_lossy().into_owned(),
+            model_file: Some("custom.onnx".into()),
+            ..options
+        };
+        assert_eq!(
+            explicit.select_graph(vec![]).unwrap(),
+            root.path().join("custom.onnx")
+        );
+    }
+
+    #[test]
+    fn owned_companion_selection_preserves_selected_graph_variant() {
+        let root = tempfile::tempdir().unwrap();
+        let early = root.path().join("onnx/layer-6");
+        std::fs::create_dir_all(&early).unwrap();
+        std::fs::write(early.join("model.onnx"), []).unwrap();
+        std::fs::write(early.join("model_fa.onnx"), []).unwrap();
+        let primary = root.path().join("onnx/layer-22/model_fa_fp16.onnx");
+        // Registering the same CK library does not make attention-only and
+        // whole-encoder half graphs interchangeable.
+        assert!(MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary).is_err());
+        std::fs::write(early.join("model_fa_fp16.onnx"), []).unwrap();
+        assert_eq!(
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary).unwrap(),
+            vec![early.join("model_fa_fp16.onnx")]
+        );
+        let portable = root.path().join("onnx/layer-22/model.onnx");
+        let paths =
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &portable).unwrap();
+        assert_eq!(paths[0], early.join("model.onnx"));
+        assert!(paths
+            .iter()
+            .all(|path| !path.to_string_lossy().contains("_fa")));
+        // An unavailable optional exit is not advertised as a loaded session.
+        assert!(
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 11, &primary)
+                .unwrap()
+                .iter()
+                .all(|path| !path.exists())
+        );
+    }
+
+    #[test]
+    fn owned_portable_selection_preserves_flat_full_and_exit_layout() {
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join("model_layer_22.onnx");
+        let early = root.path().join("model_layer_6.onnx");
+        std::fs::write(&early, []).unwrap();
+        let options = InstanceOptions::default();
+        assert!(MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).is_err());
+        std::fs::write(&primary, []).unwrap();
+        assert_eq!(
+            MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap(),
+            vec![primary.clone()]
+        );
+        assert!(
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary)
+                .unwrap()
+                .contains(&early)
+        );
+        assert!(
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary)
+                .unwrap()
+                .iter()
+                .all(|path| !path.ends_with("model_layer_22.onnx"))
+        );
+    }
 
     #[test]
     fn cpu_layer_candidates_exclude_custom_gpu_graphs() {
