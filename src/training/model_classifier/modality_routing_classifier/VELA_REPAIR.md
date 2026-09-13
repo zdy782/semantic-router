@@ -32,20 +32,42 @@ python -m src.training.model_classifier.modality_routing_classifier.prepare_vela
   --output artifacts/vela/modality-v1
 
 python -m src.training.model_classifier.modality_routing_classifier.extend_contracts \
-  --corpus artifacts/vela/modality-v1 --output artifacts/vela/modality-v2
+  --corpus artifacts/vela/modality-v1 \
+  --registry artifacts/vela/annotations/output-contracts.json \
+  --output artifacts/vela/modality-expanded
 ```
 
-The extension adds train-only wording diversity for existing-picture analysis,
-editable source output, completed image assets, and explicitly separate image
-plus explanation. It recovers captions only from frozen training records and
-verifies their source hashes; dev/test requests remain unchanged. These authored
-output contracts are not naturally observed user instructions. Report their
-quality separately from the human-authored Aya source, whose available reviewed
-examples cover AR rather than all three labels.
+The optional extension requires an explicit registry. `source_templates` maps
+each language to the original AR template list, indexed by the source row's
+`template_family` suffix. `contracts` maps the same languages to supplied
+AR, DIFFUSION, and BOTH template lists. Each template has exactly one `{}`
+caption field. A minimal structural example is:
 
-Initialize a fresh adapter and head on the pinned encoder; use the old Modality
-weights only as a baseline. Continue with the shared runner and inspect confusion
-between AR, DIFFUSION, and BOTH across languages. Training loss near zero is not a
+```json
+{
+  "version": 1,
+  "source_templates": {"en": ["Describe: {}"]},
+  "contracts": {
+    "en": {
+      "AR": ["Explain in text: {}"],
+      "DIFFUSION": ["Generate an image: {}"],
+      "BOTH": ["Generate an image and explain it in text: {}"]
+    }
+  }
+}
+```
+
+Use the actual source wrappers and reviewed task instructions for a dataset;
+the example is not a training corpus. The builder verifies each recovered
+caption's hash, retains its source parent, and appends variants only to train.
+Development and test requests retain their content and labels. Registry labels
+are supplied judgments, not proof of independent review or natural user
+requests. Keep the registry and its hash with the dataset artifacts.
+
+Initialize a fresh complete head on the Vela Base at an immutable revision;
+use `--method full --fresh-head` with the shared runner and explicitly provide
+`--base-id llm-semantic-router/Vela-1.0-Encoder-307M` and `--base-revision`.
+Inspect confusion between AR, DIFFUSION, and BOTH across languages. Training loss near zero is not a
 reason to select a checkpoint if unseen development wording regresses. The
 context workflow provides task-bearing head/middle/tail stress and retains source
 groups. Freeze the candidate and its actual base lineage before final test

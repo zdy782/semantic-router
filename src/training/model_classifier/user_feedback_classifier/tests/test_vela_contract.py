@@ -1,7 +1,5 @@
-# Torch is optional for contract-only checks.
 # ruff: noqa: PLC0415
 
-import importlib.util
 import unittest
 
 from src.training.model_classifier.user_feedback_classifier.data_contract import (
@@ -40,36 +38,6 @@ class VelaContractTests(unittest.TestCase):
             checkpoint_labels({**ID2LABEL, 4: "OTHER"}, VELA_LABEL2ID)
         with self.assertRaises(ValueError):
             checkpoint_labels(VELA_ID2LABEL, {**VELA_LABEL2ID, "SAT": 1})
-
-    @unittest.skipUnless(importlib.util.find_spec("torch"), "optional Torch dependency")
-    def test_head_extension_preserves_every_old_tensor_and_class_row(self):
-        import torch
-
-        from src.training.model_classifier.user_feedback_classifier.initialize_vela_five_class import (
-            extend_state,
-        )
-
-        key = "base_model.model.classifier."
-        state = {
-            key + "weight": torch.arange(12).reshape(4, 3).float(),
-            key + "bias": torch.arange(4).float(),
-            "encoder.lora_A": torch.ones(2, 3),
-        }
-        new = extend_state(state, 13)
-        torch.testing.assert_close(
-            new[key + "weight"][:4], state[key + "weight"], rtol=0, atol=0
-        )
-        torch.testing.assert_close(
-            new[key + "bias"][:4], state[key + "bias"], rtol=0, atol=0
-        )
-        torch.testing.assert_close(
-            new["encoder.lora_A"], state["encoder.lora_A"], rtol=0, atol=0
-        )
-        self.assertEqual(new[key + "weight"].shape, (5, 3))
-        self.assertEqual(state[key + "weight"].shape, (4, 3))
-        torch.testing.assert_close(
-            new[key + "weight"], extend_state(state, 13)[key + "weight"], rtol=0, atol=0
-        )
 
 
 if __name__ == "__main__":

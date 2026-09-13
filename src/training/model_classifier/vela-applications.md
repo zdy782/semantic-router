@@ -306,12 +306,22 @@ evaluation, together with counts and checksums for both files.
 
 ## Long-context development
 
-`vela_context_curriculum` places training payloads inside original background
-paragraphs while retaining their labels and groups. `vela_context_probes`
-provides separate authored development stress cases. Neither generator
-creates a natural benchmark. Use independent backgrounds and semantic families
-for final evaluation, include benign quotations and negations, and report
-English and Chinese separately before claiming multilingual robustness.
+`vela_context_curriculum_v2` places supplied training payloads inside explicit
+background paragraphs while retaining their labels and source groups. Its
+Hazard strata count each observed positive category; unknown categories are
+not treated as positives. Supply at least two reviewed backgrounds per language:
+
+```bash
+python -m src.training.model_classifier.vela_context_curriculum_v2 \
+  --input artifacts/vela/guard/train.jsonl --task sequence \
+  --backgrounds artifacts/vela/training-backgrounds.json \
+  --tokenizer artifacts/vela/base --output artifacts/vela/guard/context-train.jsonl
+```
+
+Backgrounds are a JSON object mapping language codes to lists of text. The
+builder creates training variants, not a natural benchmark. Independently
+prepare development and final backgrounds and semantic families, including
+benign quotations and negations. Report language coverage explicitly.
 
 Measure actual tokens, not characters or padding length. Evaluate 4K, 8K, 16K
 and 32K inputs at the head, middle and tail. A 32K encoder config states position

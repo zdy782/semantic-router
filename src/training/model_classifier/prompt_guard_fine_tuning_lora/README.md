@@ -14,32 +14,36 @@ keeps ordinary requests, attacks, quotations and translations in their declared
 family partition. Training corpora and historical review snapshots are separate
 from the source checkout.
 
-## Historical injection-specific v2
+## Train from Vela Base
 
-The old entry point mixed harmful content with instruction attacks through the
-`toxicity` label and harmful-request templates. It now requires an explicit
-`--legacy-toxic-training` flag for historical reproduction. The historical candidate recipe uses `jailbreak_data_v2.py` and `train_v2.py`;
-its ToxicChat source has a noncommercial license and is excluded from Vela training.
-
-V2 keeps IDs `benign=0` and `jailbreak=1`, but `benign` means no annotated
-instruction attack; it does not mean the requested content is safe. Content
-risk belongs to the separate safety classifier. Data preparation verifies the
-pinned toxic-chat and SALAD files, uses toxic-chat's `jailbreaking` annotation,
-and pairs each SALAD attack with its original request. Connected question and
-normalized-text groups are split before balancing or train-only augmentation.
-The source-question split does not claim that all attack methods are unseen.
+Use the [shared sequence trainer](../sequence_repair/README.md) with a fresh
+complete classification head and the explicit `benign=0`, `jailbreak=1` label
+contract. The base identity and immutable revision are required:
 
 ```bash
-python src/training/model_classifier/prompt_guard_fine_tuning_lora/jailbreak_data_v2.py \
-  --toxic-train /data/toxic-chat_annotation_train.csv \
-  --salad /data/attack_enhanced_set.json --output-dir /data/jailbreak-v2
-python src/training/model_classifier/prompt_guard_fine_tuning_lora/train_v2.py \
-  --data-dir /data/jailbreak-v2 --output-dir /models/jailbreak-v2 \
-  --max-length 2048 --epochs 5
+python -m src.training.model_classifier.sequence_repair.train \
+  --base artifacts/vela/base \
+  --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
+  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --method full --fresh-head \
+  --contract artifacts/vela/guard/contract.json \
+  --train artifacts/vela/guard/train.jsonl \
+  --dev artifacts/vela/guard/dev.jsonl \
+  --output artifacts/vela/guard/run --steps 600
 ```
 
-Freeze a candidate using validation before evaluating external final tests.
-Report injection precision/recall, content-risk versus injection four-quadrant
-results, and quoted or negated attack false positives. Do not report toxicity
-accuracy as injection accuracy, or infer long-context quality from the 32K
-backbone name. Changed merged weights require newly exported inference graphs.
+Choose the training budget and development criteria before the run. `benign`
+means no instruction attack, not that the requested content is safe. Include
+harmful requests without attacks, harmless instruction attacks, and quoted or
+negated attacks in the appropriate task partitions. Do not use toxicity labels
+as prompt-attack labels. ToxicChat's noncommercial data is excluded from Vela
+training.
+
+Freeze the candidate using development data before final evaluation. Measure
+attack recall, benign false positives, source and language coverage, and actual
+context lengths. Position capacity alone does not establish task accuracy.
+Regenerate inference graphs from each selected checkpoint's actual weights.
+
+The legacy `jailbreak_bert_finetuning_lora.py` interface remains available only
+for explicit checkpoint inference and adapter export compatibility. Historical
+training code and fixed candidate corpora are not Vela training entrypoints.

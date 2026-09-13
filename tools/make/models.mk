@@ -348,7 +348,6 @@ clean-mmbert: ## Remove downloaded mmBERT models
 # Training configuration (optimized for mmBERT-32K LoRA fine-tuning)
 # Hyperparameters validated on 2026-02-02:
 #   - Intent Classifier: 92% accuracy (MMLU-Pro + supplement data)
-#   - Jailbreak Detector: 97.7% training accuracy (toxic-chat + salad-data)
 #   - PII Detector: 97.2% training accuracy (AI4Privacy + Presidio combined dataset)
 #   - Feedback Detector: 98.8% accuracy (4-class, requires higher rank)
 TRAIN_EPOCHS ?= 5
@@ -388,7 +387,7 @@ LORA_DIR := $(TRAINING_DIR)/model_classifier
 # Output directories for 32K models
 MMBERT32K_MODELS_DIR := models/mmbert32k
 
-train-mmbert32k-all: ## Train all mmBERT-32K models (LoRA + Merged)
+train-mmbert32k-all: ## Train remaining legacy mmBERT-32K tasks (Guard retired)
 	@echo "🚀 Training all mmBERT-32K models..."
 	@echo "   Base model: llm-semantic-router/mmbert-32k-yarn"
 	@echo "   Epochs: $(TRAIN_EPOCHS), Batch size: $(TRAIN_BATCH_SIZE)"
@@ -396,7 +395,6 @@ train-mmbert32k-all: ## Train all mmBERT-32K models (LoRA + Merged)
 	@$(MAKE) train-mmbert32k-feedback
 	@$(MAKE) train-mmbert32k-intent
 	@$(MAKE) train-mmbert32k-pii
-	@$(MAKE) train-mmbert32k-jailbreak
 	@$(MAKE) train-mmbert32k-factcheck
 	@echo ""
 	@echo "All mmBERT-32K models trained successfully!"
@@ -496,23 +494,12 @@ train-mmbert32k-pii-presidio-only: ## Train PII Detector with Presidio only (leg
 		--no-ai4privacy
 	@echo "Presidio-only PII training complete"
 
-train-mmbert32k-jailbreak: ## Train Jailbreak Detector (toxic-chat + salad-data)
-	@echo "Training Jailbreak Detector with mmBERT-32K..."
-	@mkdir -p $(MMBERT32K_MODELS_DIR)
-	python $(LORA_DIR)/prompt_guard_fine_tuning_lora/jailbreak_bert_finetuning_lora.py \
-		--mode train \
-		--model mmbert-32k \
-		--lora-rank $(LORA_RANK) \
-		--lora-alpha $(LORA_ALPHA) \
-		--epochs $(TRAIN_EPOCHS) \
-		--batch-size $(TRAIN_BATCH_SIZE) \
-		--learning-rate $(TRAIN_LR) \
-		--max-samples $(MAX_SAMPLES)
-	@echo "Jailbreak Detector training complete (97.7% accuracy expected)"
-	@# Move to organized directory
-	@if [ -d "lora_jailbreak_classifier_mmbert-32k_r$(LORA_RANK)_model" ]; then \
-		mv lora_jailbreak_classifier_mmbert-32k_r$(LORA_RANK)_model $(MMBERT32K_MODELS_DIR)/jailbreak-detector-lora; \
-	fi
+train-mmbert32k-jailbreak: ## Retired: use the explicit Vela Guard sequence trainer
+	@echo "Legacy Guard training is retired. Use the Vela Base with:"
+	@echo "  python -m src.training.model_classifier.sequence_repair.train --method full --fresh-head"
+	@echo "Supply --base, --base-id, --base-revision, --contract, --train, --dev, and --output explicitly."
+	@echo "See src/training/model_classifier/prompt_guard_fine_tuning_lora/README.md."
+	@exit 2
 
 train-mmbert32k-factcheck: ## Train Fact Check Classifier
 	@echo "Training Fact Check Classifier with mmBERT-32K..."
