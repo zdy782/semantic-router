@@ -140,6 +140,35 @@ class NewBaseObjectivesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unjudged"):
             ranking_terms(scores, labels, valid, valid)
 
+    def test_filtered_unknown_keeps_soft_targets_without_hard_preference(self):
+        scores = torch.tensor([[0.2, -0.5, 5.0, 0.8]], requires_grad=True)
+        labels = torch.tensor([[1.0, 0.0, -1.0, -1.0]])
+        valid, judged = torch.ones_like(labels, dtype=torch.bool), labels >= 0
+        legacy = ranking_terms(scores, labels, valid, judged)
+        explicit = ranking_terms(
+            scores, labels, valid, judged, preference_mask=labels == -1
+        )
+        for name in legacy:
+            torch.testing.assert_close(legacy[name], explicit[name], atol=0, rtol=0)
+        filtered = ranking_terms(
+            scores,
+            labels,
+            valid,
+            judged,
+            preference_mask=torch.tensor([[False, False, False, True]]),
+        )
+        for name in ("bce", "pairwise"):
+            torch.testing.assert_close(legacy[name], filtered[name], atol=0, rtol=0)
+        sum(filtered.values()).backward(retain_graph=True)
+        self.assertEqual(scores.grad[0, 2].item(), 0)
+        self.assertGreater(scores.grad[0, 3].item(), 0)
+        scores.grad.zero_()
+        order_distillation(scores, torch.zeros_like(scores), valid).backward()
+        self.assertNotEqual(scores.grad[0, 2].item(), 0)
+        for mask in (valid, valid.float(), valid[:, :2]):
+            with self.assertRaisesRegex(ValueError, "preferences"):
+                ranking_terms(scores, labels, valid, judged, preference_mask=mask)
+
     def test_lambda_unknown_removal_preserves_discounts_and_gradients(self):
         scores = torch.tensor([[0.1, 100.0, -0.2, 0.5]], requires_grad=True)
         labels = torch.tensor([[1.0, -1.0, 0.0, 0.0]])

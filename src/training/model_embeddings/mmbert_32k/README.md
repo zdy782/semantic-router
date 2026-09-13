@@ -38,6 +38,13 @@ of layers `[3, 6, 11, 22]` and dimensions `[768, 512, 256, 128, 64]` in each
 update. No previous task weights or external teacher are needed. Other exit
 sets must include the encoder's full depth and width.
 
+To continue a compatible task checkpoint with a new optimizer, set
+`initialization: "continued_task"` and bind its complete loader files through
+`base_directory` and `base_files`. This verifies all encoder tensors and reranker
+heads without reinitializing them, and records continuation separately from a
+fresh Base initialization. `--resume` instead restores an existing optimizer,
+scheduler, RNG state and position in the same stream.
+
 Prepare separate dataset directories, each containing `components.jsonl`,
 `records.jsonl`, and a `manifest.json` with its `split` and both file SHA256s.
 [`FrozenCorpus`](newbase_data.py) checks complete text hashes, normalized text
@@ -47,13 +54,19 @@ explicit `candidate_component_ids`. Every candidate must belong to one of
 those relevance partitions. Semantic-pair records instead contain two
 `pair_component_ids` and a `[0,1]` label. Keep source licensing and split/group
 exclusion in the data producer; loading a valid manifest does not establish
-those properties.
+those properties. Single-text representation records use `component_id` and
+no relevance or pair label.
 
 Related, unjudged documents are masked as contrastive alternatives by default.
 For a deliberately ordered pair that shares source parents, the producer can
 set `contrastive_preference_component_ids` to an explicit subset of its
 unjudged candidates. This enables that contrastive comparison while preserving
 the unknown relevance label; it does not admit the pair to BCE or Lambda loss.
+For reranking, optional `unjudged_preference_component_ids` selects which
+unjudged candidates the positive should outrank under the weak preference loss.
+An empty list disables that term for the query; omission retains all unjudged
+alternatives. Excluded candidates remain in the complete pool for soft teacher
+targets. This field cannot change human judgments.
 
 Freeze batches before training with
 [`prepare_stream`](newbase_stream.py). A stream specification contains `seed`,
@@ -83,7 +96,7 @@ the exact model, data, stream, and imported code used by the run.
 | `train_directory`, `development_directory`, `train_manifest_sha256`, `development_manifest_sha256` | Separate training and development corpora; optional `train_split`/`development_split` default to `train`/`validation`. |
 | `draws_directory`, `draws_sha256`, `steps` | Frozen stream and its exact number of optimizer updates. |
 | `code_root`, `execution_lock_path`, `execution_lock_sha256` | Code snapshot and JSON `files` mapping of relative Python paths to SHA256s; every imported task module must be included. |
-| `exits` | `layers`, `dimensions`, `layer_weights`, and `dimension_weights`; each weight vector sums to one. `ExitSpec().to_dict()` gives the default 20 exits. |
+| `exits` | `layers`, `dimensions`, `layer_weights`, and `dimension_weights`; each weight vector sums to one. Optional `exit_weights` replaces their product with a positive matrix summing to one. `ExitSpec().to_dict()` gives the default 20 exits. |
 | `objectives` | Per-source explicit loss configurations described below. |
 | `optimizer` | `warmup_steps`; optional `encoder_lr`, `head_lr`, `weight_decay`, `betas`, `eps`, and `minimum_lr_ratio` for AdamW with cosine decay. |
 | `training_precision`, `gradient_checkpointing`, `gradient_clip_norm` | FP32 master weights with `float32` or `bfloat16` forward, optional non-reentrant checkpointing, and clipping norm. |
@@ -126,6 +139,15 @@ negative pairs; semantic batches also retain their explicitly paired relation.
 Both objectives leave the original supervised losses and relevance masks
 unchanged. Teacher tensors are detached. Omitting the configuration, or setting
 its weight to zero, preserves the original loss computation.
+
+An independent embedding `anchor` configuration uses `objective: "pointwise_cosine"`
+with the same cache identity fields and a same-width teacher. It matches absolute
+unit-vector coordinates at every exit, explicitly normalizing each Matryoshka
+prefix. The loss is mean squared vector distance divided by two, without an
+additional division by width. Per-source `anchor_scale` adjusts its contribution.
+The `representation` objective supports single-text batches with anchors and/or
+full-logical-batch relations; microbatch accumulation alone does not enlarge the
+relation pool. Different-width teachers remain valid for relation distillation.
 
 Generate the cache only from the frozen training stream. Its `manifest.json`
 contains `complete: true`, `task`, `source_split`, `train_manifest_sha256`,

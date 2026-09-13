@@ -156,12 +156,16 @@ def ranking_terms(
     labels: torch.Tensor,
     valid: torch.Tensor,
     judged: torch.Tensor,
+    *,
+    preference_mask: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Per-query RankNet/BCE and explicitly separate unjudged preferences.
 
     labels=1 marks a source-supported relevant candidate, labels=0 a judged
     negative, and labels=-1 an unjudged alternative. ``judged`` controls BCE:
     weak source-paper pairs may opt out without inventing negative judgments.
+    An optional preference mask selects unjudged alternatives for weak ranking;
+    excluded alternatives remain available to separately computed soft targets.
     """
     _validate_scores(scores, valid)
     if labels.shape != scores.shape or judged.shape != scores.shape:
@@ -175,6 +179,14 @@ def ranking_terms(
     positive = (labels == 1) & valid
     negative = (labels == 0) & valid & judged
     unknown = (labels == -1) & valid
+    if preference_mask is not None:
+        if (
+            preference_mask.shape != scores.shape
+            or preference_mask.dtype != torch.bool
+            or (preference_mask & ~unknown).any()
+        ):
+            raise ValueError("Weak preferences must select valid unjudged candidates")
+        unknown = preference_mask
     if not positive.any(dim=1).all():
         raise ValueError("Every training query requires a positive")
     values = scores.float()

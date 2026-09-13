@@ -359,6 +359,21 @@ def reranker_step(
             elif key in row["judged_negative_component_ids"]:
                 labels[index, column] = 0.0
                 judged[index, column] = True
+    preferences = (labels == -1) & valid
+    for row_index, (row, ids) in enumerate(zip(records, candidates, strict=True)):
+        if "unjudged_preference_component_ids" in row:
+            allowed = row["unjudged_preference_component_ids"]
+            if (
+                not isinstance(allowed, list)
+                or len(set(allowed)) != len(allowed)
+                or not set(allowed) <= set(row["unjudged_component_ids"]) & set(ids)
+            ):
+                raise ValueError(
+                    "Weak preferences require explicit unjudged candidates"
+                )
+            preferences[row_index] = False
+            for column, key in enumerate(ids):
+                preferences[row_index, column] = key in allowed
     total, auxiliary = next(iter(values.values())).sum() * 0.0, 0.0
     full_scores = None
     for key, weight in model.exits.weighted():
@@ -367,7 +382,9 @@ def reranker_step(
         for row, ids in enumerate(candidates):
             scores[row, : len(ids)] = values[key][offset : offset + len(ids)]
             offset += len(ids)
-        terms = ranking_terms(scores, labels, valid, judged)
+        terms = ranking_terms(
+            scores, labels, valid, judged, preference_mask=preferences
+        )
         extra = lambda_loss(scores, labels, valid, judged, k=objective.lambda_k)
         base = (
             objective.pairwise_weight * terms["pairwise"]

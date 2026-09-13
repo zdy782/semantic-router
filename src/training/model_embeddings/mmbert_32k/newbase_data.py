@@ -66,6 +66,15 @@ def validate_record(record: dict, components: dict[str, dict], split: str) -> No
     if not _unique_strings(record.get("parent_groups"), "parent_groups"):
         raise ValueError("Every record needs a parent group")
     preferences = _contrastive_preferences(record)
+    weak_field = "unjudged_preference_component_ids"
+    if weak_field in record:
+        weak = _unique_strings(record[weak_field], "unjudged preferences")
+        if (
+            "query_component_id" not in record
+            or not weak <= set(record.get("unjudged_component_ids", []))
+            or not weak <= set(record.get("candidate_component_ids", []))
+        ):
+            raise ValueError("Weak preferences require explicit unjudged candidates")
     if "component_id" in record:
         if preferences or any(
             key in record

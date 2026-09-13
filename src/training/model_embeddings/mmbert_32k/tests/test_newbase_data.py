@@ -11,6 +11,7 @@ from src.training.model_embeddings.mmbert_32k.newbase_data import (
     file_digest,
     retrieval_masks,
     text_digest,
+    validate_record,
 )
 
 
@@ -102,6 +103,30 @@ class NewBaseDataTest(unittest.TestCase):
             (root / "components.jsonl").write_text("changed")
             with self.assertRaisesRegex(ValueError, "changed"):
                 FrozenCorpus.load(root, "train")
+
+    def test_weak_ranking_preferences_cannot_relabel_a_judged_candidate(self):
+        components = {key: {} for key in ("q", "p", "n", "u")}
+        row = {
+            "id": "r",
+            "source": "retrieval",
+            "language": "en",
+            "split": "train",
+            "parent_groups": ["query"],
+            "query_component_id": "q",
+            "positive_component_ids": ["p"],
+            "judged_negative_component_ids": ["n"],
+            "unjudged_component_ids": ["u"],
+            "candidate_component_ids": ["p", "n", "u"],
+        }
+        for allowed in ([], ["u"]):
+            row["unjudged_preference_component_ids"] = allowed
+            validate_record(row, components, "train")
+        for invalid in (["p"], ["n"], ["absent"], ["u", "u"]):
+            row["unjudged_preference_component_ids"] = invalid
+            with self.assertRaises(ValueError):
+                validate_record(row, components, "train")
+        self.assertEqual(row["unjudged_component_ids"], ["u"])
+        self.assertEqual(row["judged_negative_component_ids"], ["n"])
 
     def test_explicit_preference_retains_only_its_unjudged_alternative(self):
         components = {

@@ -144,6 +144,49 @@ class NewBaseBatchesTest(unittest.TestCase):
         ]
         return rows, components
 
+    def test_ranking_filter_preserves_full_candidates_and_judged_loss(self):
+        rows, components = self.examples()
+        model = self.model("reranker")
+
+        def evaluate(records):
+            return reranker_step(
+                model,
+                CompleteTokenizer(),
+                records,
+                components,
+                device=torch.device("cpu"),
+                token_budget=128,
+                maximum=128,
+                objective=ObjectiveConfig("ranking"),
+                amp=False,
+            )
+
+        base, _ = evaluate(rows)
+        expanded = []
+        for index, row in enumerate(rows):
+            unknown = "p2" if index == 0 else "p1"
+            expanded.append(
+                {
+                    **row,
+                    "candidate_component_ids": [
+                        *row["candidate_component_ids"],
+                        unknown,
+                    ],
+                    "unjudged_component_ids": [unknown],
+                    "unjudged_preference_component_ids": [],
+                }
+            )
+        filtered, metrics = evaluate(expanded)
+        torch.testing.assert_close(filtered, base, atol=1e-6, rtol=1e-6)
+        self.assertEqual(metrics["input_count"], 6)
+        for row in expanded:
+            del row["unjudged_preference_component_ids"]
+        legacy, _ = evaluate(expanded)
+        self.assertGreater(legacy.item(), filtered.item())
+        expanded[0]["unjudged_preference_component_ids"] = ["n"]
+        with self.assertRaisesRegex(ValueError, "unjudged"):
+            evaluate(expanded)
+
     def test_loss_and_gradients_match_across_microbatch_budgets(self):
         rows, components = self.examples()
         for task, objective, function in (
