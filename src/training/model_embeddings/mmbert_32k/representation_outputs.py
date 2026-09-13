@@ -73,9 +73,10 @@ class PhysicalPrefixEncoder(nn.Module):
         encoder.config.num_hidden_layers = layer
         self.encoder = encoder
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, position_ids=None):
         return self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            position_ids=position_ids,
             return_dict=True,
         ).last_hidden_state

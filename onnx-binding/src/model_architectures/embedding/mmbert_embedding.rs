@@ -29,10 +29,10 @@ use crate::core::unified_error::{errors, UnifiedError, UnifiedResult};
 use crate::model_architectures::embedding::pooling::{
     l2_normalize, mean_pool_3d, truncate_dimension,
 };
+use crate::model_architectures::modernbert_inputs;
 use half::f16;
 use ndarray::{Array1, Array2, Array3};
 use ort::session::Session;
-use ort::value::Tensor;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -668,6 +668,7 @@ impl MmBertEmbeddingModel {
             snapshots.push(ArtifactSnapshot::capture(&library, "custom-operators").map_err(error)?);
         }
         let session = options.create_session(path)?;
+        modernbert_inputs::validate(&session.inputs)?;
         let evidence = options.evidence.lock();
         let actual = evidence.last().ok_or_else(|| {
             errors::model_load(
@@ -715,6 +716,7 @@ impl MmBertEmbeddingModel {
             None
         };
         let (session, runtime) = Self::create_session_inner(path, use_cpu)?;
+        modernbert_inputs::validate(&session.inputs)?;
         if runtime == "onnx-mmbert-rocm-v1" {
             if let Some(custom) = custom {
                 snapshots.push(custom.map_err(error)?);
@@ -1190,29 +1192,15 @@ impl MmBertEmbeddingModel {
         let batch_size = input_ids.shape()[0];
         let seq_len = input_ids.shape()[1];
 
-        // Create ort tensors from ndarray - ort 2.x requires (shape, data) tuple
         let input_ids_flat: Vec<i64> = input_ids.iter().copied().collect();
         let attention_mask_flat: Vec<i64> = attention_mask.iter().copied().collect();
-
-        let input_ids_tensor = Tensor::from_array(([batch_size, seq_len], input_ids_flat))
-            .map_err(|e: ort::Error| {
-                errors::inference_error("create_input_ids_tensor", &e.to_string())
-            })?;
-
-        let attention_mask_tensor =
-            Tensor::from_array(([batch_size, seq_len], attention_mask_flat)).map_err(
-                |e: ort::Error| {
-                    errors::inference_error("create_attention_mask_tensor", &e.to_string())
-                },
-            )?;
-
-        // Run the session with inputs
-        let outputs = session
-            .run(ort::inputs![
-                "input_ids" => input_ids_tensor,
-                "attention_mask" => attention_mask_tensor,
-            ])
-            .map_err(|e: ort::Error| errors::inference_error("session_run", &e.to_string()))?;
+        let outputs = modernbert_inputs::run(
+            session,
+            input_ids_flat,
+            attention_mask_flat,
+            batch_size,
+            seq_len,
+        )?;
 
         // Extract output
         // ONNX models can have different output formats:

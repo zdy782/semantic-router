@@ -148,6 +148,10 @@ class RepresentationExportTest(unittest.TestCase):
                 )
                 self.assertEqual(len(verification["cases"]), 6)
                 graph = onnx.load(path)
+                self.assertEqual(
+                    {value.name for value in graph.graph.input},
+                    {"input_ids", "attention_mask", "position_ids"},
+                )
                 self.assertFalse(
                     any(
                         node.doc_string or node.metadata_props
@@ -164,7 +168,12 @@ class RepresentationExportTest(unittest.TestCase):
                     with torch.inference_mode():
                         expected = model(ids, mask).numpy()
                     actual = runtime.run(
-                        None, {"input_ids": ids.numpy(), "attention_mask": mask.numpy()}
+                        None,
+                        {
+                            "input_ids": ids.numpy(),
+                            "attention_mask": mask.numpy(),
+                            "position_ids": np.arange(length, dtype=np.int64)[None, :],
+                        },
                     )[0]
                     np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-4)
                 with self.assertRaises(FileExistsError):

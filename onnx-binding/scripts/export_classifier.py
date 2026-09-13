@@ -16,7 +16,9 @@ import onnxruntime as ort
 import torch
 import transformers
 from model_precision import cast_parameters_preserving_buffers
+from modernbert_inputs import ort_inputs
 from onnx_artifacts import external_data_sha256, sha256, strip_debug_annotations
+from onnx_shape_simplification import simplify_batch_reshapes
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
@@ -42,9 +44,10 @@ class ClassifierLogits(torch.nn.Module):
         }:
             raise ValueError("Only mean or cls sequence pooling is supported")
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, position_ids=None):
+        positions = {} if position_ids is None else {"position_ids": position_ids}
         hidden = self.model.model(
-            input_ids=input_ids, attention_mask=attention_mask
+            input_ids=input_ids, attention_mask=attention_mask, **positions
         ).last_hidden_state
         if self.token_classification:
             return self.model.classifier(
@@ -126,9 +129,9 @@ def verify_graph(
             ids, mask = make_input(seed_ids, length, batch, tokenizer.pad_token_id)
             with torch.inference_mode():
                 expected = reference(ids, mask).float().numpy()
-            actual = session.run(
-                None, {"input_ids": ids.numpy(), "attention_mask": mask.numpy()}
-            )[0].astype(np.float32)
+            actual = session.run(None, ort_inputs(session, ids.numpy(), mask.numpy()))[
+                0
+            ].astype(np.float32)
             if actual.shape != expected.shape or not np.isfinite(actual).all():
                 raise ValueError("Graph returned invalid shape or nonfinite logits")
             # A padded token's query output has no task meaning. Its key is still
@@ -256,17 +259,24 @@ def main():
         with torch.inference_mode():
             torch.onnx.export(
                 wrapper,
-                (ids, mask),
+                (ids, mask, torch.arange(ids.shape[1]).unsqueeze(0)),
                 str(path),
-                input_names=["input_ids", "attention_mask"],
+                input_names=["input_ids", "attention_mask", "position_ids"],
                 output_names=["logits"],
                 opset_version=18,
                 dynamo=True,
                 external_data=True,
-                dynamic_shapes=({0: batch, 1: sequence}, {0: batch, 1: sequence}),
+                dynamic_shapes=(
+                    {0: batch, 1: sequence},
+                    {0: batch, 1: sequence},
+                    {1: sequence},
+                ),
                 optimize=True,
             )
     graph = onnx.load(path, load_external_data=False)
+    shape_simplification = (
+        simplify_batch_reshapes(graph) if not args.verify_only else None
+    )
     external_files = external_data_sha256(graph, path)
     strip_debug_annotations(graph)
     onnx.save(graph, path)
@@ -288,6 +298,7 @@ def main():
     model.config.save_pretrained(args.output)
     tokenizer.save_pretrained(args.output)
     receipt = {
+        "shape_simplification": shape_simplification,
         "task": "token-classification" if token_task else "text-classification",
         "dtype": args.dtype,
         "head_dtype": "float32",

@@ -12,10 +12,10 @@
 
 use crate::core::instance_options::{InstanceOptions, Provider};
 use crate::core::unified_error::{errors, UnifiedResult};
+use crate::model_architectures::modernbert_inputs;
 use half::f16;
 use ndarray::Array2;
 use ort::session::{Session, SessionOutputs};
-use ort::value::Tensor;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -289,6 +289,7 @@ impl MmBertSequenceClassifier {
         let onnx_candidates = Self::find_onnx_models(&model_path, provider)?;
         let (session, onnx_path) =
             Self::create_session_with_fallback(onnx_candidates, provider, &model_path_str)?;
+        modernbert_inputs::validate(&session.inputs)?;
         println!(
             "INFO: Selected classifier ONNX file: {}",
             onnx_path.display()
@@ -324,6 +325,7 @@ impl MmBertSequenceClassifier {
         };
         let graph = options.select_graph(candidates)?;
         let session = options.create_session(&graph)?;
+        modernbert_inputs::validate(&session.inputs)?;
         Ok(Self {
             session,
             tokenizer: Arc::new(tokenizer),
@@ -764,23 +766,13 @@ impl MmBertSequenceClassifier {
         max_len: usize,
         multi_label: bool,
     ) -> UnifiedResult<Vec<ClassificationResult>> {
-        // Create tensors
-        let input_ids_tensor = Tensor::from_array(([batch_size, max_len], input_ids))
-            .map_err(|e: ort::Error| errors::inference_error("create_input_ids", &e.to_string()))?;
-
-        let attention_mask_tensor = Tensor::from_array(([batch_size, max_len], attention_mask))
-            .map_err(|e: ort::Error| {
-                errors::inference_error("create_attention_mask", &e.to_string())
-            })?;
-
-        // Run inference
-        let outputs = self
-            .session
-            .run(ort::inputs![
-                "input_ids" => input_ids_tensor,
-                "attention_mask" => attention_mask_tensor,
-            ])
-            .map_err(|e: ort::Error| errors::inference_error("session_run", &e.to_string()))?;
+        let outputs = modernbert_inputs::run(
+            &mut self.session,
+            input_ids,
+            attention_mask,
+            batch_size,
+            max_len,
+        )?;
 
         // Extract logits (inline to avoid borrow issues)
         let logits = extract_logits_from_outputs(&outputs)?;
@@ -1142,6 +1134,7 @@ impl MmBertTokenClassifier {
             provider,
             &model_path_str,
         )?;
+        modernbert_inputs::validate(&session.inputs)?;
         println!(
             "INFO: Selected token-classifier ONNX file: {}",
             onnx_path.display()
@@ -1214,23 +1207,13 @@ impl MmBertTokenClassifier {
             attention_mask[i] = enc_attention_mask[i] as i64;
         }
 
-        // Create tensors (batch size 1)
-        let input_ids_tensor = Tensor::from_array(([1, execution_len], input_ids))
-            .map_err(|e: ort::Error| errors::inference_error("create_input_ids", &e.to_string()))?;
-
-        let attention_mask_tensor = Tensor::from_array(([1, execution_len], attention_mask))
-            .map_err(|e: ort::Error| {
-                errors::inference_error("create_attention_mask", &e.to_string())
-            })?;
-
-        // Run inference
-        let outputs = self
-            .session
-            .run(ort::inputs![
-                "input_ids" => input_ids_tensor,
-                "attention_mask" => attention_mask_tensor,
-            ])
-            .map_err(|e: ort::Error| errors::inference_error("session_run", &e.to_string()))?;
+        let outputs = modernbert_inputs::run(
+            &mut self.session,
+            input_ids,
+            attention_mask,
+            1,
+            execution_len,
+        )?;
 
         // Validate every execution row, including padding. BIO decoding stops
         // at the original encoding's offsets and never emits padded entities.

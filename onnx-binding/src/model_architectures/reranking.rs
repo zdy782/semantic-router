@@ -3,7 +3,8 @@
 
 use crate::core::instance_options::{InstanceOptions, Overflow, Provider};
 use crate::core::unified_error::{errors, UnifiedResult};
-use ort::{session::Session, value::Tensor};
+use crate::model_architectures::modernbert_inputs;
+use ort::session::Session;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, path::Path};
 use tokenizers::{PostProcessor, Tokenizer};
@@ -163,17 +164,9 @@ impl PairScorer {
             ));
         }
         drop(metadata);
-        if session.inputs.len() != 2
-            || !session
-                .inputs
-                .iter()
-                .all(|i| i.name == "input_ids" || i.name == "attention_mask")
-            || session.outputs.len() != 1
-            || session.outputs[0].name != "logits"
-        {
-            return Err(invalid(
-                "reranker requires input_ids, attention_mask and one logits output",
-            ));
+        modernbert_inputs::validate(&session.inputs)?;
+        if session.outputs.len() != 1 || session.outputs[0].name != "logits" {
+            return Err(invalid("reranker requires one logits output"));
         }
         Ok(Self {
             session,
@@ -215,7 +208,7 @@ impl PairScorer {
             input[i] = id.into();
             mask[i] = 1;
         }
-        let outputs = self.session.run(ort::inputs!["input_ids" => Tensor::from_array(([1, length], input)).map_err(error)?, "attention_mask" => Tensor::from_array(([1, length], mask)).map_err(error)?]).map_err(error)?;
+        let outputs = modernbert_inputs::run(&mut self.session, input, mask, 1, length)?;
         // The trained head computes FP32 logits even with a lower precision encoder.
         let (shape, values) = outputs["logits"]
             .try_extract_tensor::<f32>()

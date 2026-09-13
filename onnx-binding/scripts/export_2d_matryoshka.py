@@ -25,6 +25,7 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from model_precision import cast_parameters_preserving_buffers
+from modernbert_inputs import ort_inputs
 from onnx_artifacts import (
     external_data_sha256,
     prepare_export_directory,
@@ -32,6 +33,7 @@ from onnx_artifacts import (
     source_snapshot_sha256,
     strip_debug_annotations,
 )
+from onnx_shape_simplification import simplify_batch_reshapes
 
 TRAINING_ROOT = Path(__file__).resolve().parents[2] / "src/training/model_embeddings"
 sys.path.insert(0, str(TRAINING_ROOT))
@@ -79,8 +81,8 @@ class RerankerExit(nn.Module):
             "score_type": "relevance_logit",
         }
 
-    def forward(self, input_ids, attention_mask):
-        hidden = self.encoder(input_ids, attention_mask)
+    def forward(self, input_ids, attention_mask, position_ids=None):
+        hidden = self.encoder(input_ids, attention_mask, position_ids)
         return self.head(hidden[:, 0, : self.dimension].float())
 
 
@@ -120,27 +122,30 @@ def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
     mask = torch.ones_like(ids)
     mask[1, 12:] = 0
     ids[1, 12:] = config.pad_token_id
+    positions = torch.arange(ids.shape[1], device=device).unsqueeze(0)
     batch = torch.export.Dim("batch", min=1, max=32)
     sequence = torch.export.Dim("sequence", min=2, max=config.max_position_embeddings)
     with torch.inference_mode():
         example = model(ids, mask)
     torch.onnx.export(
         model,
-        (ids, mask),
+        (ids, mask, positions),
         str(path),
         dynamo=True,
         external_data=True,
         opset_version=opset,
-        input_names=["input_ids", "attention_mask"],
+        input_names=["input_ids", "attention_mask", "position_ids"],
         output_names=[
             "logits" if isinstance(model, RerankerExit) else "last_hidden_state"
         ],
         dynamic_shapes={
             "input_ids": {0: batch, 1: sequence},
             "attention_mask": {0: batch, 1: sequence},
+            "position_ids": {1: sequence},
         },
     )
     graph = onnx.load(str(path), load_external_data=False)
+    shape_simplification = simplify_batch_reshapes(graph)
     strip_debug_annotations(graph)
     if isinstance(model, RerankerExit):
         graph.metadata_props.add(
@@ -155,6 +160,7 @@ def export_graph(model, config, path: Path, *, opset: int, device: str) -> dict:
         "external_data_sha256": external_data_sha256(graph, path),
         "example_output_shape": list(example.shape),
         "example_output_dtype": str(example.dtype),
+        "shape_simplification": shape_simplification,
         "numerical_validation": "pending; ONNX checker is structural validation only",
     }
 
@@ -180,9 +186,9 @@ def verify_graph(reference, config, path, *, lengths, dimensions, task, precisio
                 ids[mask == 0] = config.pad_token_id
             with torch.inference_mode():
                 expected = reference(ids, mask).float().numpy()
-            actual = session.run(
-                None, {"input_ids": ids.numpy(), "attention_mask": mask.numpy()}
-            )[0].astype(np.float32)
+            actual = session.run(None, ort_inputs(session, ids.numpy(), mask.numpy()))[
+                0
+            ].astype(np.float32)
             if actual.shape != expected.shape or not np.isfinite(actual).all():
                 raise ValueError("Graph returned invalid shape or nonfinite values")
             valid = mask.numpy().astype(bool) if task == "embedding" else slice(None)

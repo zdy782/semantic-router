@@ -107,6 +107,13 @@ class NativeRepresentationTest(unittest.TestCase):
                 )
                 torch.testing.assert_close(selected, expected)
                 torch.testing.assert_close(prefix(self.ids, self.mask), expected)
+                positions = torch.arange(self.ids.shape[1]).unsqueeze(0)
+                torch.testing.assert_close(
+                    prefix(self.ids, self.mask, positions),
+                    prefix(self.ids, self.mask),
+                    rtol=0,
+                    atol=0,
+                )
             self.assertFalse(
                 torch.allclose(output.hidden_states[-1], output.last_hidden_state)
             )

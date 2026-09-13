@@ -1,0 +1,119 @@
+//! Standard ModernBERT input adaptation, shared by every task and physical exit.
+//! Absolute positions follow the actual execution length, including padding;
+//! they never depend on token values, attended-token counts or window offsets.
+
+use crate::core::unified_error::{errors, UnifiedResult};
+use ort::{
+    session::{Input, Session, SessionOutputs},
+    tensor::TensorElementType,
+    value::{Tensor, ValueType},
+};
+use std::collections::HashSet;
+
+fn invalid(message: &str) -> crate::core::unified_error::UnifiedError {
+    errors::config_error("modernbert_inputs", message)
+}
+
+fn dimensions(input: &Input) -> UnifiedResult<&[i64]> {
+    match &input.input_type {
+        ValueType::Tensor { ty, shape, .. }
+            if *ty == TensorElementType::Int64
+                && shape.len() == 2
+                && shape.iter().all(|&n| n == -1 || n > 0) =>
+        {
+            Ok(shape.as_ref())
+        }
+        _ => Err(invalid("expected rank-two int64 tensor inputs")),
+    }
+}
+
+/// Validate the actual session schema before exposing a loaded model.
+pub(crate) fn validate(inputs: &[Input]) -> UnifiedResult<bool> {
+    let mut names = HashSet::new();
+    for input in inputs {
+        if !matches!(
+            input.name.as_str(),
+            "input_ids" | "attention_mask" | "position_ids"
+        ) || !names.insert(input.name.as_str())
+        {
+            return Err(invalid("unknown or duplicate required graph input"));
+        }
+        let shape = dimensions(input)?;
+        if input.name == "position_ids" && shape[0] != 1 {
+            return Err(invalid("position_ids must declare one broadcast row"));
+        }
+    }
+    if !names.contains("input_ids") || !names.contains("attention_mask") {
+        return Err(invalid("input_ids and attention_mask are required"));
+    }
+    let ids = dimensions(inputs.iter().find(|x| x.name == "input_ids").unwrap())?;
+    for input in inputs {
+        let shape = dimensions(input)?;
+        for axis in 0..2 {
+            if axis == 0 && input.name == "position_ids" {
+                continue;
+            }
+            if shape[axis] > 0 && ids[axis] > 0 && shape[axis] != ids[axis] {
+                return Err(invalid(
+                    "contradictory declared token/mask/position dimensions",
+                ));
+            }
+        }
+    }
+    Ok(names.contains("position_ids"))
+}
+
+pub(crate) fn run(
+    session: &mut Session,
+    input_ids: Vec<i64>,
+    attention_mask: Vec<i64>,
+    batch: usize,
+    sequence: usize,
+) -> UnifiedResult<SessionOutputs<'_>> {
+    let positions = validate(&session.inputs)?;
+    if batch == 0
+        || sequence == 0
+        || sequence > i64::MAX as usize
+        || batch.checked_mul(sequence) != Some(input_ids.len())
+        || input_ids.len() != attention_mask.len()
+    {
+        return Err(invalid("invalid nonempty token/mask execution shape"));
+    }
+    for input in &session.inputs {
+        let wanted = dimensions(input)?;
+        let actual = [
+            if input.name == "position_ids" {
+                1
+            } else {
+                batch
+            },
+            sequence,
+        ];
+        if wanted
+            .iter()
+            .zip(actual)
+            .any(|(&n, value)| n > 0 && n as usize != value)
+        {
+            return Err(invalid(
+                "graph input dimensions differ from execution shape",
+            ));
+        }
+    }
+    let error = |e: ort::Error| errors::inference_error("modernbert_inputs", &e.to_string());
+    let mut inputs = ort::inputs![
+        "input_ids" => Tensor::from_array(([batch, sequence], input_ids)).map_err(error)?,
+        "attention_mask" => Tensor::from_array(([batch, sequence], attention_mask)).map_err(error)?,
+    ];
+    if positions {
+        inputs.push((
+            "position_ids".into(),
+            Tensor::from_array(([1, sequence], (0..sequence as i64).collect::<Vec<_>>()))
+                .map_err(error)?
+                .into(),
+        ));
+    }
+    session.run(inputs).map_err(error)
+}
+
+#[cfg(test)]
+mod tests;

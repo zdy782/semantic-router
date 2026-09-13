@@ -2,5 +2,6 @@
 
 pub mod classification;
 pub mod embedding;
+pub(crate) mod modernbert_inputs;
 
 pub mod reranking;

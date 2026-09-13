@@ -30,9 +30,10 @@ class ClassifierExportTest(unittest.TestCase):
     def test_half_export_keeps_native_rope_and_full_precision_task_head(self):
         torch.set_num_threads(2)
         for token_task in (False, True):
-            with self.subTest(
-                token_task=token_task
-            ), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(token_task=token_task),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 torch.manual_seed(29)
                 config = ModernBertConfig(
                     vocab_size=32,
@@ -171,18 +172,26 @@ class ClassifierExportTest(unittest.TestCase):
                     torch.testing.assert_close(
                         wrapper(ids, mask), model(ids, mask).logits
                     )
+                    positions = torch.arange(ids.shape[1]).unsqueeze(0)
+                    torch.testing.assert_close(
+                        wrapper(ids, mask, positions),
+                        wrapper(ids, mask),
+                        rtol=0,
+                        atol=0,
+                    )
                     batch = torch.export.Dim("batch", min=1, max=8)
                     length = torch.export.Dim("sequence", min=2, max=256)
                     graph = Path(directory) / "model.onnx"
                     torch.onnx.export(
                         wrapper,
-                        (ids, mask),
+                        (ids, mask, positions),
                         str(graph),
-                        input_names=["input_ids", "attention_mask"],
+                        input_names=["input_ids", "attention_mask", "position_ids"],
                         output_names=["logits"],
                         dynamic_shapes=(
                             {0: batch, 1: length},
                             {0: batch, 1: length},
+                            {1: length},
                         ),
                         opset_version=18,
                         dynamo=True,
