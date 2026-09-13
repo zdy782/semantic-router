@@ -1,0 +1,192 @@
+"""Real tiny 22-layer forward/backward and complete task-artifact round trips."""
+
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+try:
+    import torch
+    from transformers import ModernBertConfig, ModernBertModel
+
+    from src.training.model_embeddings.mmbert_32k import newbase_model
+    from src.training.model_embeddings.mmbert_32k.newbase_data import file_digest
+    from src.training.model_embeddings.mmbert_32k.newbase_model import (
+        ExitSpec,
+        NewBaseTask,
+        state_digest,
+    )
+except ImportError:
+    torch = None
+
+
+@unittest.skipIf(torch is None, "requires torch and transformers")
+class NewBaseModelTest(unittest.TestCase):
+    def test_compile_option_is_changed_only_when_the_config_defines_it(self):
+        for existing in (False, True):
+            config = SimpleNamespace(model_type="modernbert")
+            if existing:
+                config.reference_compile = True
+            info = {
+                "unexpected_keys": [],
+                "missing_keys": [],
+                "mismatched_keys": [],
+                "error_msgs": [],
+            }
+            with (
+                self.subTest(existing=existing),
+                patch.object(
+                    newbase_model.AutoConfig, "from_pretrained", return_value=config
+                ),
+                patch.object(
+                    newbase_model.AutoModel,
+                    "from_pretrained",
+                    return_value=(object(), info),
+                ),
+            ):
+                newbase_model._load_encoder(Path("unused-config-fixture"))
+                self.assertEqual(hasattr(config, "reference_compile"), existing)
+                if existing:
+                    self.assertIs(config.reference_compile, False)
+
+    def model(self, task):
+        config = ModernBertConfig(
+            vocab_size=32,
+            hidden_size=16,
+            intermediate_size=32,
+            num_hidden_layers=22,
+            num_attention_heads=2,
+            max_position_embeddings=128,
+            local_attention=4,
+            reference_compile=False,
+            attention_dropout=0.0,
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+        config._attn_implementation = "sdpa"
+        return NewBaseTask(
+            ModernBertModel(config),
+            task,
+            ExitSpec(dimensions=(16, 12, 8, 4, 2)),
+            {"test_only": True},
+        )
+
+    def inputs(self):
+        ids = torch.tensor([[1, 3, 4, 2], [1, 5, 2, 0]])
+        return ids, ids.ne(0).long()
+
+    def test_every_encoder_layer_and_twenty_heads_receive_gradients(self):
+        model = self.model("reranker").train()
+        outputs = model(*self.inputs())
+        self.assertEqual(len(outputs), 20)
+        loss = sum(
+            weight * torch.nn.functional.softplus(-outputs[key]).mean()
+            for key, weight in model.exits.weighted()
+        )
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            self.assertEqual(parameter.dtype, torch.float32)
+            self.assertIsNotNone(parameter.grad, name)
+            self.assertTrue(torch.isfinite(parameter.grad).all(), name)
+        for layer in model.encoder.layers:
+            self.assertTrue(
+                any(parameter.grad.abs().max() > 0 for parameter in layer.parameters())
+            )
+        for heads in model.layer_heads.values():
+            for head in heads.values():
+                self.assertTrue(head[-1].weight.grad.abs().max() > 0)
+
+    def test_both_tasks_save_reload_bitwise_and_preserve_rng(self):
+        for task in ("embedding", "reranker"):
+            with self.subTest(task=task), tempfile.TemporaryDirectory() as directory:
+                model = self.model(task).eval()
+                with torch.no_grad():
+                    expected = model(*self.inputs())
+                checkpoint = Path(directory) / "checkpoint"
+                model.save(checkpoint)
+                before = torch.get_rng_state().clone()
+                restored = NewBaseTask.resume(checkpoint).eval()
+                self.assertTrue(torch.equal(before, torch.get_rng_state()))
+                self.assertEqual(
+                    state_digest(model.state_dict()),
+                    state_digest(restored.state_dict()),
+                )
+                with torch.no_grad():
+                    actual = restored(*self.inputs())
+                for key, value in expected.items():
+                    torch.testing.assert_close(actual[key], value, atol=0, rtol=0)
+                (checkpoint / "config.json").write_text("changed")
+                with self.assertRaisesRegex(ValueError, "changed"):
+                    NewBaseTask.resume(checkpoint)
+
+    def test_embedding_truncates_then_normalizes_and_excludes_padding(self):
+        model = self.model("embedding").eval()
+        ids, mask = self.inputs()
+        with torch.no_grad():
+            batched = model(ids, mask)
+            single = model(ids[1:2, :3], mask[1:2, :3])
+        for key, values in batched.items():
+            torch.testing.assert_close(
+                values.norm(dim=-1), torch.ones(2), atol=1e-6, rtol=1e-6
+            )
+            torch.testing.assert_close(values[1:2], single[key], atol=1e-5, rtol=1e-5)
+
+    def test_missing_encoder_identity_rejected(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            self.assertRaisesRegex(ValueError, "Base lock"),
+        ):
+            NewBaseTask.from_base(
+                Path(directory),
+                "embedding",
+                ExitSpec(),
+                expected_files={},
+                provenance={},
+            )
+
+    def test_exact_base_values_survive_fresh_task_initialization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory) / "base"
+            encoder = self.model("embedding").encoder
+            del encoder.config.representation_contract
+            encoder.save_pretrained(base)
+            (base / "tokenizer.json").write_text("{}")
+            files = {
+                name: file_digest(base / name)
+                for name in ("model.safetensors", "config.json", "tokenizer.json")
+            }
+            task = NewBaseTask.from_base(
+                base,
+                "reranker",
+                ExitSpec(dimensions=(16, 12, 8, 4, 2)),
+                expected_files=files,
+                provenance={"source_revision": "a" * 40},
+            )
+            self.assertEqual(
+                state_digest(encoder.state_dict()),
+                state_digest(task.encoder.state_dict()),
+            )
+            self.assertEqual(len(task.layer_heads), 4)
+            task.save(Path(directory) / "task")
+            task_files = {
+                name: file_digest(Path(directory) / "task" / name)
+                for name in ("model.safetensors", "config.json")
+            }
+            (Path(directory) / "task" / "tokenizer.json").write_text("{}")
+            task_files["tokenizer.json"] = file_digest(
+                Path(directory) / "task" / "tokenizer.json"
+            )
+            with self.assertRaisesRegex(ValueError, "task checkpoint"):
+                NewBaseTask.from_base(
+                    Path(directory) / "task",
+                    "reranker",
+                    ExitSpec(dimensions=(16, 12, 8, 4, 2)),
+                    expected_files=task_files,
+                    provenance={"source_revision": "a" * 40},
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
