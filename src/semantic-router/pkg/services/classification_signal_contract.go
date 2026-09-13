@@ -15,6 +15,9 @@ import (
 func (s *ClassificationService) ClassifyIntentForEval(ctx context.Context, req IntentRequest) (*EvalResponse, error) {
 	s.runtimeMutex.RLock()
 	defer s.runtimeMutex.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	input, err := req.resolveSignalInput()
 	if err != nil {
 		return nil, err
@@ -51,6 +54,9 @@ func (s *ClassificationService) ClassifyIntentForEval(ctx context.Context, req I
 	)
 
 	var decisionResult *decision.DecisionResult
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var traces []decision.DecisionTrace
 	var decisionErr error
 	if len(candidates) > 0 {

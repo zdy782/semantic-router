@@ -22,6 +22,33 @@ var expectedAMDModelPaths = []string{
 	"models/Vela-1.0-Encoder-307M-Feedback",
 }
 
+func TestReloadRejectsPreviewAdmissionChangeBeforePreparation(t *testing.T) {
+	restore := stubReloadSeams(t)
+	defer restore()
+	previous := &OpenAIRouter{Config: &config.RouterConfig{}}
+	server := &Server{service: NewRouterService(previous)}
+	limit := 8
+	candidate := &config.RouterConfig{}
+	candidate.API.RoutingPreview.MaxConcurrency = &limit
+	ensureReloadConfigModels = func(*config.RouterConfig) error {
+		t.Fatal("restart-only change reached model download")
+		return nil
+	}
+	prepareReloadRuntime = func(*config.RouterConfig) (modelruntime.EmbeddingRuntimeState, error) {
+		t.Fatal("restart-only change reached runtime preparation")
+		return modelruntime.EmbeddingRuntimeState{}, nil
+	}
+	for _, source := range []string{"file", "kubernetes"} {
+		err := server.reloadRouterFromConfig(source, "config.yaml", candidate)
+		if err == nil || !strings.Contains(err.Error(), "routing_preview.max_concurrency") {
+			t.Fatalf("%s reload error = %v", source, err)
+		}
+		if server.service.GetRouter() != previous || server.CurrentConfig() != previous.Config {
+			t.Fatal("restart-only candidate replaced the live generation")
+		}
+	}
+}
+
 func TestReloadRejectsLiveArtifactMutationBeforeDownload(t *testing.T) {
 	restore := stubReloadSeams(t)
 	defer restore()

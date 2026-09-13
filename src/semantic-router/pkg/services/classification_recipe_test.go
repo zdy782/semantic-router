@@ -51,6 +51,15 @@ func TestEvalDecisionCandidatesSelectsEntrypointRecipe(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnknownRoutingModel)
 }
 
+func TestEvalRejectsCanceledContextBeforeResolvingInput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	service := NewPlaceholderClassificationService()
+	response, err := service.ClassifyIntentForEval(ctx, IntentRequest{Text: "hello"})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, response)
+}
+
 func TestRecipeClassificationServiceRejectsConcreteBackendModel(t *testing.T) {
 	routerConfig := &config.RouterConfig{
 		BackendModels: config.BackendModels{

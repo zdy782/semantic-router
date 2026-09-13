@@ -75,17 +75,7 @@ func (s *ClassificationAPIServer) handleEvalClassification(w http.ResponseWriter
 		}
 		req.Options.Trace = true
 	}
-	response, err := s.classificationSvc.ClassifyIntentForEval(r.Context(), req)
-	if err != nil {
-		if response != nil {
-			s.writeJSONResponse(w, http.StatusServiceUnavailable, response)
-			return
-		}
-		s.writeClassificationError(w, err)
-		return
-	}
-
-	s.writeJSONResponse(w, http.StatusOK, response)
+	s.runRoutingPreview(w, r, req)
 }
 
 // handlePIIDetection handles PII detection requests

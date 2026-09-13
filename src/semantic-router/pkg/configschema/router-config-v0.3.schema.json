@@ -6,6 +6,9 @@
       "properties": {
         "batch_classification": {
           "$ref": "#/$defs/BatchClassificationConfig"
+        },
+        "routing_preview": {
+          "$ref": "#/$defs/RoutingPreviewConfig"
         }
       },
       "additionalProperties": false,
@@ -5889,6 +5892,23 @@
             "type": "string"
           },
           "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RoutingPreviewConfig": {
+      "properties": {
+        "request_timeout_seconds": {
+          "type": "integer",
+          "maximum": 3600,
+          "minimum": 1,
+          "default": 120
+        },
+        "max_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 16
         }
       },
       "additionalProperties": false,

@@ -44,6 +44,10 @@ func defaultCanonicalRouterGlobal() CanonicalRouterGlobal {
 
 func defaultCanonicalServiceGlobal() CanonicalServiceGlobal {
 	return CanonicalServiceGlobal{
+		API: APIConfig{RoutingPreview: RoutingPreviewConfig{
+			RequestTimeoutSeconds: canonicalIntPtr(DefaultRoutingPreviewTimeoutSeconds),
+			MaxConcurrency:        canonicalIntPtr(DefaultRoutingPreviewMaxConcurrency),
+		}},
 		ResponseAPI: ResponseAPIConfig{
 			Enabled:      true,
 			StoreBackend: "redis",

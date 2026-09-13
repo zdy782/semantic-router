@@ -588,6 +588,9 @@ func (s *Server) reloadRouterFromConfig(
 	if s.lifecycle.isStopping() {
 		return errors.New("router server is shutting down")
 	}
+	if err := config.ValidateRoutingPreviewReload(resolveServerConfig(s), candidateCfg); err != nil {
+		return err
+	}
 	if err := modeldownload.ValidateReloadArtifacts(resolveServerConfig(s), candidateCfg); err != nil {
 		return fmt.Errorf("model artifact reload preflight failed: %w", err)
 	}
