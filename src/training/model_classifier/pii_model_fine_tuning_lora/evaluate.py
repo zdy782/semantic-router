@@ -14,25 +14,22 @@ PII_LABEL_COUNT = 35
 LONG_EVAL_THRESHOLD = 2048
 
 
-def load_model(base, config_path, adapter=None, trainable=False):
-    import torch
-    from peft import PeftModel
-    from transformers import AutoModelForTokenClassification, AutoTokenizer
+def load_model(base, config_path, adapter=None, trainable=False, fresh_head=False):
+    from full_training import load_token_model
+    from transformers import AutoTokenizer
 
     label_to_id, id_to_label = load_label_contract(config_path)
     if len(label_to_id) != PII_LABEL_COUNT:
         raise ValueError("Expected the existing 35-label PII contract")
+    if fresh_head and (adapter or not trainable):
+        raise ValueError("A fresh token head is only valid for full training")
     tokenizer = AutoTokenizer.from_pretrained(base)
-    model = AutoModelForTokenClassification.from_pretrained(
-        base,
-        num_labels=len(label_to_id),
-        id2label=id_to_label,
-        label2id=label_to_id,
-        torch_dtype=torch.float32,
-        attn_implementation="sdpa",
-        reference_compile=False,
+    model = load_token_model(
+        base, label_to_id, id_to_label, fresh_head=fresh_head, adapter=bool(adapter)
     )
     if adapter:
+        from peft import PeftModel
+
         model = PeftModel.from_pretrained(model, adapter, is_trainable=trainable)
     return model, tokenizer, label_to_id, id_to_label
 

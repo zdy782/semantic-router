@@ -1,6 +1,6 @@
 # Heavy inference dependencies are lazy so data-contract tests stay dependency-light.
 # ruff: noqa: PLC0415
-"""Continue an existing PII LoRA adapter with explicit data and runtime budgets."""
+"""Train a PII adapter or full token classifier with explicit runtime budgets."""
 
 import argparse
 import hashlib
@@ -12,6 +12,13 @@ from collections import defaultdict
 from pathlib import Path
 
 from evaluate import evaluate_records, load_model
+from full_training import (
+    initial_artifact_receipt,
+    optimizer_groups,
+    save_full_checkpoint,
+    tensor_receipt,
+    validate_method,
+)
 from span_data import align_record, read_jsonl
 
 
@@ -72,9 +79,11 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
-    parser.add_argument("--base-id", default="llm-semantic-router/mmbert-32k-yarn")
+    parser.add_argument("--base-id")
     parser.add_argument("--base-revision", required=True)
-    parser.add_argument("--adapter", required=True)
+    parser.add_argument("--adapter")
+    parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    parser.add_argument("--fresh-head", action="store_true")
     parser.add_argument("--config", required=True)
     parser.add_argument("--train", required=True)
     parser.add_argument("--replay")
@@ -85,6 +94,11 @@ def main():
     parser.add_argument("--accumulate", type=int, default=2)
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
+    parser.add_argument("--head-learning-rate", type=float)
+    parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
+    parser.add_argument(
+        "--evaluation-dtype", choices=["float32", "bfloat16"], default="bfloat16"
+    )
     parser.add_argument("--replay-probability", type=float, default=0.4)
     parser.add_argument("--replay-balance-entities", action="store_true")
     parser.add_argument("--eval-every", type=int, default=100)
@@ -97,6 +111,12 @@ def main():
     parser.add_argument("--probe-only", action="store_true")
     parser.add_argument("--evaluate-initial", action="store_true")
     args = parser.parse_args()
+    validate_method(args.method, args.adapter, args.fresh_head)
+    if args.method == "full" and not args.base_id:
+        raise ValueError("Full training requires an explicit base model identity")
+    if args.method == "lora" and args.head_learning_rate is not None:
+        raise ValueError("A separate head learning rate requires full training")
+    args.base_id = args.base_id or "llm-semantic-router/mmbert-32k-yarn"
     if (
         min(
             args.steps,
@@ -116,15 +136,23 @@ def main():
     torch.set_num_threads(8)
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
-    model, tokenizer, label_to_id, id_to_label = load_model(
-        args.base, args.config, args.adapter, trainable=True
+    initial_artifact = (
+        initial_artifact_receipt(args.base) if args.method == "full" else None
     )
+    model, tokenizer, label_to_id, id_to_label = load_model(
+        args.base, args.config, args.adapter, trainable=True, fresh_head=args.fresh_head
+    )
+    if (
+        initial_artifact is not None
+        and initial_artifact_receipt(args.base) != initial_artifact
+    ):
+        raise ValueError("Base files changed during full-model initialization")
     if args.max_length > model.config.max_position_embeddings:
         raise ValueError("Budget exceeds checkpoint capacity")
     model.gradient_checkpointing_enable(
         gradient_checkpointing_kwargs={"use_reentrant": False}
     )
-    model.to("cuda")
+    model.to(args.device)
     model.train()
     train, rejected = prepare_records(
         read_jsonl(args.train), tokenizer, label_to_id, args.max_length
@@ -146,10 +174,19 @@ def main():
     replay_pools = list(replay_by_type.values())
     if not train or not dev:
         raise ValueError("Training and development sets must both be nonempty")
+    groups = (
+        optimizer_groups(
+            model, args.learning_rate, args.head_learning_rate or args.learning_rate
+        )
+        if args.method == "full"
+        else None
+    )
     parameters = [
         parameter for parameter in model.parameters() if parameter.requires_grad
     ]
-    optimizer = torch.optim.AdamW(parameters, lr=args.learning_rate, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(
+        groups or parameters, lr=args.learning_rate, weight_decay=0.01
+    )
     collator = DataCollatorForTokenClassification(
         tokenizer,
         padding=True,
@@ -159,6 +196,13 @@ def main():
     metadata = {
         "base_model": args.base_id,
         "base_revision": args.base_revision,
+        "method": args.method,
+        "task": "token-classification",
+        "architecture": type(model).__name__,
+        "fresh_head": args.fresh_head,
+        "initial_artifact": initial_artifact,
+        "initial_tensors": tensor_receipt(model) if args.method == "full" else None,
+        "contract_sha256": hashlib.sha256(Path(args.config).read_bytes()).hexdigest(),
         "seed": args.seed,
         "label2id": label_to_id,
         "train_sha256": hashlib.sha256(Path(args.train).read_bytes()).hexdigest(),
@@ -172,15 +216,30 @@ def main():
         "replay_rows": len(replay),
         "rejections": rejected + replay_rejected,
         "trainable_parameters": sum(parameter.numel() for parameter in parameters),
+        "optimizer_groups": [
+            {
+                "name": group.get("name", "adapter"),
+                "learning_rate": group["lr"],
+                "parameters": sum(parameter.numel() for parameter in group["params"]),
+            }
+            for group in optimizer.param_groups
+        ],
         "attention": "sdpa",
         "checkpointing": "non-reentrant",
-        "dtype": "FP32 parameters and BF16 autocast",
-        "device_name": torch.cuda.get_device_name(0),
+        "dtype": (
+            "FP32 parameters and BF16 autocast" if args.device == "cuda" else "float32"
+        ),
+        "evaluation_dtype": args.evaluation_dtype,
+        "device_name": (
+            torch.cuda.get_device_name(0) if args.device == "cuda" else "cpu"
+        ),
         "steps": args.steps,
         "batch_size": args.batch_size,
         "gradient_accumulation": args.accumulate,
         "max_length": args.max_length,
         "learning_rate": args.learning_rate,
+        "head_learning_rate": args.head_learning_rate or args.learning_rate,
+        "loss_normalization": "mean over attended nonignored token labels in each microbatch",
         "replay_probability": args.replay_probability,
         "replay_balance_entities": args.replay_balance_entities,
         "probe_only": args.probe_only,
@@ -188,6 +247,22 @@ def main():
         "test_used": False,
     }
     (args.output / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
+
+    def save_checkpoint(kind):
+        if args.method == "full":
+            save_full_checkpoint(
+                model, tokenizer, args.output / f"{kind}-model", metadata
+            )
+        else:
+            save_adapter(
+                model,
+                tokenizer,
+                args.output / f"{kind}-adapter",
+                args.base_id,
+                args.base_revision,
+                label_to_id,
+            )
+
     print(
         json.dumps(
             {
@@ -195,7 +270,7 @@ def main():
                 **{
                     key: value
                     for key, value in metadata.items()
-                    if key not in ("label2id", "rejections")
+                    if key not in ("label2id", "rejections", "initial_tensors")
                 },
                 "rejected_rows": len(rejected) + len(replay_rejected),
             }
@@ -204,19 +279,14 @@ def main():
     )
     best = -1.0
     if args.evaluate_initial and not args.probe_only:
-        metrics, _predictions = evaluate_records(model, tokenizer, dev, id_to_label)
+        metrics, _predictions = evaluate_records(
+            model, tokenizer, dev, id_to_label, dtype=args.evaluation_dtype
+        )
         best = checkpoint_score(metrics, args.selection_metric)
         (args.output / "dev-step-0.json").write_text(
             json.dumps(metrics, indent=2) + "\n"
         )
-        save_adapter(
-            model,
-            tokenizer,
-            args.output / "best-adapter",
-            args.base_id,
-            args.base_revision,
-            label_to_id,
-        )
+        save_checkpoint("best")
         (args.output / "selection.json").write_text(
             json.dumps(
                 {
@@ -233,8 +303,9 @@ def main():
     log = args.output / "steps.jsonl"
     for step in range(1, args.steps + 1):
         optimizer.zero_grad(set_to_none=True)
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.synchronize()
+        if args.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.synchronize()
         started = time.perf_counter()
         step_loss = 0.0
         tokens = []
@@ -262,8 +333,10 @@ def main():
                     for item in selected
                 ]
             )
-            batch = {key: value.to("cuda") for key, value in batch.items()}
-            with torch.autocast("cuda", dtype=torch.bfloat16):
+            batch = {key: value.to(args.device) for key, value in batch.items()}
+            with torch.autocast(
+                args.device, dtype=torch.bfloat16, enabled=args.device == "cuda"
+            ):
                 outputs = model(**batch)
                 loss = outputs.loss / args.accumulate
             if not bool(torch.isfinite(loss)):
@@ -274,8 +347,10 @@ def main():
         gradients = [
             parameter.grad for parameter in parameters if parameter.grad is not None
         ]
-        if not gradients or not all(
-            bool(torch.isfinite(gradient).all()) for gradient in gradients
+        if (
+            (args.method == "full" and len(gradients) != len(parameters))
+            or not gradients
+            or not all(bool(torch.isfinite(gradient).all()) for gradient in gradients)
         ):
             raise ValueError(f"Missing or non-finite gradients at step {step}")
         grad_norm = torch.nn.utils.clip_grad_norm_(parameters, 1.0)
@@ -287,9 +362,10 @@ def main():
             * (1 + math.cos(math.pi * (step - warmup) / max(1, args.steps - warmup)))
         )
         for group in optimizer.param_groups:
-            group["lr"] = args.learning_rate * rate
+            group["lr"] = group.get("initial_lr", args.learning_rate) * rate
         optimizer.step()
-        torch.cuda.synchronize()
+        if args.device == "cuda":
+            torch.cuda.synchronize()
         row = {
             "step": step,
             "loss": step_loss,
@@ -299,9 +375,21 @@ def main():
             "max_input_tokens": max(tokens),
             "mean_input_tokens": sum(tokens) / len(tokens),
             "step_seconds": time.perf_counter() - started,
-            "peak_allocated_gib": torch.cuda.max_memory_allocated() / 2**30,
-            "peak_reserved_gib": torch.cuda.max_memory_reserved() / 2**30,
+            "peak_allocated_gib": (
+                torch.cuda.max_memory_allocated() / 2**30
+                if args.device == "cuda"
+                else None
+            ),
+            "peak_reserved_gib": (
+                torch.cuda.max_memory_reserved() / 2**30
+                if args.device == "cuda"
+                else None
+            ),
             "learning_rate": optimizer.param_groups[0]["lr"],
+            "group_learning_rates": {
+                group.get("name", "adapter"): group["lr"]
+                for group in optimizer.param_groups
+            },
         }
         with log.open("a") as stream:
             stream.write(json.dumps(row) + "\n")
@@ -310,7 +398,9 @@ def main():
         if args.probe_only:
             continue
         if step % args.eval_every == 0 or step == args.steps:
-            metrics, _predictions = evaluate_records(model, tokenizer, dev, id_to_label)
+            metrics, _predictions = evaluate_records(
+                model, tokenizer, dev, id_to_label, dtype=args.evaluation_dtype
+            )
             score = checkpoint_score(metrics, args.selection_metric)
             (args.output / f"dev-step-{step}.json").write_text(
                 json.dumps(metrics, indent=2) + "\n"
@@ -329,14 +419,7 @@ def main():
             )
             if score > best:
                 best = score
-                save_adapter(
-                    model,
-                    tokenizer,
-                    args.output / "best-adapter",
-                    args.base_id,
-                    args.base_revision,
-                    label_to_id,
-                )
+                save_checkpoint("best")
                 (args.output / "selection.json").write_text(
                     json.dumps(
                         {
@@ -350,14 +433,7 @@ def main():
                     + "\n"
                 )
     if not args.probe_only:
-        save_adapter(
-            model,
-            tokenizer,
-            args.output / "last-adapter",
-            args.base_id,
-            args.base_revision,
-            label_to_id,
-        )
+        save_checkpoint("last")
     print(
         json.dumps(
             {

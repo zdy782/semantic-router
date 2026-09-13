@@ -1,4 +1,4 @@
-# PII adapter repair and evaluation
+# PII training and evaluation
 
 This workflow continues an existing mmBERT PII adapter while preserving its 17
 entity types and 35 BIO labels. It is separate from the historical
@@ -97,6 +97,57 @@ short training/retention replay to check preservation of the original tasks. Use
 examples in one length bucket cannot dominate other lengths. The appropriate
 steps, batch size, replay rate, and curriculum require measured development and
 memory results; a 32K checkpoint capacity does not establish a deployable budget.
+
+## Train the complete token classifier
+
+`--method full` trains every encoder parameter, including token embeddings, and
+the complete `head.dense`, `head.norm`, and `classifier`. Use `--fresh-head` when
+deriving a PII model from a frozen ModernBERT base: it constructs and initializes
+the token head with the architecture's native initialization without changing
+encoder tensors. An existing native 35-label token checkpoint can be continued
+by omitting this flag. Full mode rejects adapters and requires an explicit base
+identity; LoRA continuation remains the default.
+
+```bash
+python "$SCRIPT/train_repair.py" --method full --fresh-head \
+  --base "$WORK/frozen-base" --base-id "$BASE_MODEL_ID" \
+  --base-revision "$BASE_REVISION" --config "$WORK/reference/config.json" \
+  --train "$WORK/corpus/train.jsonl" --dev "$WORK/corpus/dev.jsonl" \
+  --output "$WORK/full-run" --learning-rate 1e-5 --head-learning-rate 1e-4 \
+  --evaluation-dtype float32 --steps 400 --batch-size 2 --accumulate 4
+```
+
+The learning rates and budget above are explicit example settings, not a
+qualified training recipe. Both methods retain mean cross-entropy over
+nonignored token labels within each microbatch, including `O` labels. Padding
+and special tokens have ignored labels. Full mode checks that every trainable
+parameter receives a finite gradient. Optional `--head-learning-rate` gives the
+entire prediction head a separate rate with the same schedule. Evaluation uses
+`--evaluation-dtype` independently of training autocast; the default remains
+BF16. `--device cpu` provides a FP32 engineering path for small fixtures.
+
+Full checkpoints are `best-model` and `last-model`. Each contains native
+safetensors, tokenizer/config files, and `full-checkpoint.json`, which binds
+every saved tensor to its shape, dtype, exact bytes, and initial-artifact/data
+receipt. Saving verifies the complete encoder and head. Missing encoder weights
+cannot be replaced by random initialization, and a native checkpoint must retain
+the exact label order. Neither full training nor evaluation requires PEFT.
+
+Export the chosen full checkpoint using the same initial model identity:
+
+```bash
+python "$SCRIPT/export_repair.py" --method full \
+  --base "$WORK/frozen-base" --base-id "$BASE_MODEL_ID" \
+  --base-revision "$BASE_REVISION" --config "$WORK/reference/config.json" \
+  --checkpoint "$WORK/full-run/best-model" \
+  --run-manifest "$WORK/full-run/run.json" --output "$WORK/full-export"
+```
+
+The exporter checks checkpoint provenance and tokenization bytes, writes the
+runtime label mappings, and requires exact FP32 short-probe logits after native
+save/reload. It does not combine the trained encoder with its old base. The tiny
+CPU tests exercise real full training, native export, and malformed-checkpoint
+rejection; they do not establish model quality or a 32K memory budget.
 
 ## Evaluate and export a selected checkpoint
 
