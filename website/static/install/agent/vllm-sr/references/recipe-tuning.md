@@ -46,6 +46,17 @@ result. Include ordinary explanations and quoted instructions as counterexamples
 and cover distinct operations across the supported languages. An explicit request
 for independent review should not depend on matching one particular example.
 
+Separate authorization from execution details. A request to delegate work must
+authorize multiple workers; mentioning agents or asking for an explanation does
+not. Once authorized, the workflow owns planning and integration. Requiring the
+user to name each internal stage makes otherwise valid requests brittle. Test
+single-worker, negated, quoted, and informational controls alongside delegation.
+
+Feedback routing requires a prior assistant reply. Include that history in both
+Preview and routed tests; a `user_feedback` condition cannot corroborate a
+history-free request. Distinguish correction of an answer from ordinary editing
+or a request for a different format.
+
 For comparisons between embedding intents, `value_source: raw` preserves scores
 below the match threshold. A signed difference can express which intent has more
 evidence; it still needs a mapping and evaluation on both positive and negative
@@ -58,6 +69,13 @@ when no strong match exists. `top_k` can suppress otherwise valid matches; use
 `top_k: 0` when decisions need several independent embedding signals. Compare
 the published scores with emitted matches in Preview. Check each inference
 deployment's token budget separately from the selected backend's context window.
+
+Also inspect prototype compression. A multilingual candidate list does not
+guarantee every example survives clustering and the prototype limit. Rule-local
+`prototype_scoring` travels with the Recipe; without a rule override, the global
+configuration applies. To retain all deduplicated candidates, use an override
+with `enabled: false`, and set `best_weight` and `top_m` for the intended scoring.
+Disabling compression does not turn the resulting score into a raw maximum.
 
 Guard detects prompt attacks. Safety and Hazard identify content risk and
 categories; they do not establish malicious intent. Pair harmful requests with
@@ -86,6 +104,11 @@ session and conversation identities in actual routed requests. Test a complete
 tool cycle, continuation, explicit correction, failed model, decision change,
 and a new conversation. Repeat the same session ID across different Recipes to
 verify isolation.
+
+For a new agent integration, start with conversation protection and explicitly
+disable online adaptation until you can evaluate owned outcomes. Turning on the
+master learning switch otherwise enables both components by default. Keep this
+an application choice: clients without stable identities cannot obtain a hold.
 
 Compare `apply`, `observe`, and `bypass`. An observed recommendation to stay is
 not an applied hold. Verify the actual selected model, backend response, route

@@ -59,6 +59,18 @@ Adding a keyword condition also does not guarantee less inference: used signal
 families can run concurrently before decisions are evaluated. Measure the actual
 request cost.
 
+For recovery, include the earlier assistant reply: Feedback routing skips
+requests without one. Test actual corrections alongside harmless requests to
+change tone or format. For collaboration, distinguish an instruction to delegate
+from a discussion of agents. The workflow handles its internal stages; users
+should not have to name them to request collaboration.
+
+Check that multilingual examples survive prototype compression. A rule-local
+`prototype_scoring` override stays with the Recipe, while an omitted override
+inherits global settings. Use `enabled: false` to retain all deduplicated
+candidates, and specify `best_weight` and `top_m` for their combined score.
+Measure the effect before replacing the baseline.
+
 ## Validate and preview the candidate
 
 Discover the running contract before editing configuration:
@@ -152,6 +164,15 @@ conversation. Compare `apply`, `observe`, and `bypass`: an observed recommendati
 to keep a model is different from an actual hold. Check the selected backend,
 route headers, Replay API, and Dashboard together. Repeat a session ID across
 recipes to verify their isolation. A hold must not retain an ineligible model.
+
+Start agent integrations with conversation protection and online adaptation
+explicitly disabled. Enabling the master learning switch otherwise enables both
+components by default. Adopt adaptation after evaluating your application's
+outcomes; clients need stable identities for protection to retain a model.
+
+Inspect Replay and the Dashboard before activating the next candidate. The
+default in-memory Replay store is cleared by configuration reloads and restarts;
+save the traces needed for comparison first.
 
 ## Keep changes that improve the objective
 
