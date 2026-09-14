@@ -2,6 +2,7 @@ package classification
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,8 @@ func categoryProbabilityFallbackAllowed(inference CategoryInference) bool {
 }
 
 const (
+	embeddingEvaluationFailedCode    = "embedding_evaluation_failed"
+	reaskEvaluationFailedCode        = "reask_evaluation_failed"
 	domainEvaluationFailedCode       = "domain_evaluation_failed"
 	factCheckEvaluationFailedCode    = "fact_check_evaluation_failed"
 	userFeedbackEvaluationFailedCode = "user_feedback_evaluation_failed"
@@ -76,6 +79,9 @@ const (
 func recordSignalRuleErrors(results *SignalResults, mu *sync.Mutex, signalType string, names []string, code string) {
 	mu.Lock()
 	defer mu.Unlock()
+	if results.SignalErrors == nil {
+		results.SignalErrors = make(map[string]string)
+	}
 	for _, name := range names {
 		results.SignalErrors[signalConfidenceKey(signalType, name)] = code
 	}
@@ -258,6 +264,10 @@ func (c *Classifier) applyUserFeedbackSignalResult(results *SignalResults, mu *s
 }
 
 func (c *Classifier) evaluateReaskSignal(results *SignalResults, mu *sync.Mutex, currentUserText string, priorUserMessages []string) {
+	names := c.applicableReaskRuleNames(currentUserText, priorUserMessages)
+	if len(names) == 0 {
+		return
+	}
 	start := time.Now()
 	matchedRules, err := c.reaskClassifier.Classify(currentUserText, priorUserMessages)
 	elapsed := time.Since(start)
@@ -267,6 +277,7 @@ func (c *Classifier) evaluateReaskSignal(results *SignalResults, mu *sync.Mutex,
 	logging.Debugf("[Signal Computation] Reask signal evaluation completed in %v", elapsed)
 	if err != nil {
 		logging.Errorf("reask rule evaluation failed: %v", err)
+		recordSignalRuleErrors(results, mu, config.SignalTypeReask, names, reaskEvaluationFailedCode)
 		return
 	}
 	if len(matchedRules) == 0 {
@@ -287,6 +298,25 @@ func (c *Classifier) evaluateReaskSignal(results *SignalResults, mu *sync.Mutex,
 	}
 	results.Metrics.Reask.Confidence = bestConfidence
 	mu.Unlock()
+}
+
+func (c *Classifier) applicableReaskRuleNames(currentUserText string, priorUserMessages []string) []string {
+	if strings.TrimSpace(currentUserText) == "" {
+		return nil
+	}
+	priorTurns := 0
+	for _, text := range priorUserMessages {
+		if strings.TrimSpace(text) != "" {
+			priorTurns++
+		}
+	}
+	var names []string
+	for _, rule := range c.reaskClassifier.rules {
+		if priorTurns >= rule.WithDefaults().LookbackTurns {
+			names = append(names, rule.Name)
+		}
+	}
+	return names
 }
 
 func (c *Classifier) evaluateContextSignal(

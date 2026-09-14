@@ -59,9 +59,11 @@ func (c *Classifier) evaluateEmbeddingSignal(results *SignalResults, mu *sync.Mu
 	// whenever text classification hit a transient failure.
 	if textErr != nil {
 		logging.Errorf("text-modality embedding rule evaluation failed: %v", textErr)
+		c.recordEmbeddingSignalError(results, mu, config.QueryModalityText)
 	}
 	if imageErr != nil {
 		logging.Errorf("image-modality embedding rule evaluation failed: %v", imageErr)
+		c.recordEmbeddingSignalError(results, mu, config.QueryModalityImage)
 	}
 
 	mu.Lock()
@@ -79,6 +81,15 @@ func (c *Classifier) evaluateEmbeddingSignal(results *SignalResults, mu *sync.Mu
 		bestConfidence = c.recordEmbeddingResult(results, imageResult, imageElapsed, bestConfidence)
 	}
 	results.Metrics.Embedding.Confidence = bestConfidence
+}
+
+func (c *Classifier) recordEmbeddingSignalError(results *SignalResults, mu *sync.Mutex, modality config.QueryModality) {
+	rules := c.keywordEmbeddingClassifier.rulesByModality[modality]
+	names := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		names = append(names, rule.Name)
+	}
+	recordSignalRuleErrors(results, mu, config.SignalTypeEmbedding, names, embeddingEvaluationFailedCode)
 }
 
 // recordEmbeddingResult merges scores and matches from a single classification
