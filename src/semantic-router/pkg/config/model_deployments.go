@@ -20,7 +20,6 @@ type ModelDeployment struct {
 	Precision           string           `yaml:"precision,omitempty" json:"precision,omitempty"`
 	CustomOpsProfile    string           `yaml:"custom_ops_profile,omitempty" json:"custom_ops_profile,omitempty"`
 	CompilationCacheDir string           `yaml:"compilation_cache_dir,omitempty" json:"compilation_cache_dir,omitempty"`
-	ShortSequenceTokens int              `yaml:"short_sequence_tokens,omitempty" json:"short_sequence_tokens,omitempty"`
 	Input               ModelInputBudget `yaml:"input,omitempty" json:"input,omitempty"`
 }
 
@@ -128,9 +127,6 @@ func (d ModelDeployment) validate(cfg *RouterConfig) error {
 	if err := d.ValidateCompilationCache(); err != nil {
 		return err
 	}
-	if err := d.ValidateShortSequence(); err != nil {
-		return err
-	}
 	if d.Input.MaxTokens < 0 {
 		return fmt.Errorf("input.max_tokens must not be negative")
 	}
@@ -153,21 +149,6 @@ func (d ModelDeployment) ValidateCompilationCache() error {
 	}
 	if strings.TrimSpace(d.CompilationCacheDir) != d.CompilationCacheDir || strings.ContainsRune(d.CompilationCacheDir, '\x00') || !filepath.IsAbs(d.CompilationCacheDir) {
 		return fmt.Errorf("compilation_cache_dir must be an absolute, trimmed path without null bytes")
-	}
-	return nil
-}
-
-// ValidateShortSequence restricts the optional second physical session. The
-// full input budget remains explicit and unchanged; zero keeps one session.
-func (d ModelDeployment) ValidateShortSequence() error {
-	if d.ShortSequenceTokens == 0 {
-		return nil
-	}
-	if d.Provider != "ort" || !strings.HasPrefix(d.Device, "migraphx:") {
-		return fmt.Errorf("short_sequence_tokens requires an ORT migraphx:index deployment")
-	}
-	if d.ShortSequenceTokens < 0 || d.ShortSequenceTokens >= d.Input.MaxTokens {
-		return fmt.Errorf("short_sequence_tokens must be positive and smaller than an explicit input.max_tokens")
 	}
 	return nil
 }
@@ -228,14 +209,6 @@ func CompileModelBindings(cfg *RouterConfig) (*ModelBindingPlan, error) {
 
 func validateTaskModelBinding(name string, decl ModelBinding, deployment ModelDeployment) error {
 	want := ""
-	if deployment.ShortSequenceTokens != 0 {
-		if decl.OperatingPoint != nil {
-			return fmt.Errorf("short_sequence_tokens is incompatible with artifact-bound operating_point execution")
-		}
-		if decl.Contract != RemoteClassifierContractLabelDistribution && decl.Contract != RemoteClassifierContractTokenSpans && decl.Contract != RemoteClassifierContractLabelScores {
-			return fmt.Errorf("short_sequence_tokens is supported only by local classifier tasks")
-		}
-	}
 	if decl.OperatingPoint != nil {
 		if !strings.HasPrefix(name, "classifier.") {
 			return fmt.Errorf("operating_point is only supported by generic classifier bindings")

@@ -79,8 +79,6 @@ pub struct InstanceOptions {
     pub execution_max_input_tokens: Option<usize>,
     /// Optional owned MIGraphX compiled-program storage root.
     pub compilation_cache_dir: Option<PathBuf>,
-    /// Optional extra short session; the classifier also retains its full execution shape.
-    pub short_sequence_tokens: Option<usize>,
     pub overflow: Overflow,
     pub intra_threads: Option<usize>,
     pub profile_prefix: Option<String>,
@@ -147,14 +145,6 @@ impl InstanceOptions {
             return Err(errors::config_error(
                 "provider",
                 "CPU requires device_id=0 and native graph precision",
-            ));
-        }
-        if self.short_sequence_tokens.is_some()
-            && (self.provider != Provider::Migraphx || self.short_sequence_tokens == Some(0))
-        {
-            return Err(errors::config_error(
-                "short_sequence_tokens",
-                "requires MIGraphX and a positive short bucket",
             ));
         }
         if self.max_input_tokens == Some(0)
@@ -381,12 +371,6 @@ impl InstanceOptions {
         inputs: &[ExecutionInput],
     ) -> UnifiedResult<PreparedSession> {
         self.validate_configuration()?;
-        if self.short_sequence_tokens.is_some() {
-            return Err(errors::config_error(
-                "short_sequence_tokens",
-                "this architecture does not support classifier session buckets",
-            ));
-        }
         let mut compiler_flags = self.compiler_flags(std::env::vars_os())?;
         if self.provider == Provider::Migraphx {
             compiler_flags.insert(
@@ -722,6 +706,17 @@ fn runtime_build_info() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removed_classifier_session_bank_option_is_rejected() {
+        let error = serde_json::from_str::<InstanceOptions>(
+            r#"{"model_path":"unused","short_sequence_tokens":512}"#,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unknown field `short_sequence_tokens`"));
+    }
 
     #[test]
     fn compiler_identity_is_frozen_without_requiring_a_cache() {

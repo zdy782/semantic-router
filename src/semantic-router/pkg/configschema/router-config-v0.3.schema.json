@@ -3925,9 +3925,6 @@
         "compilation_cache_dir": {
           "type": "string"
         },
-        "short_sequence_tokens": {
-          "type": "integer"
-        },
         "input": {
           "$ref": "#/$defs/ModelInputBudget"
         }

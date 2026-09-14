@@ -173,21 +173,10 @@ and [model update guide](lifecycle-diagnostics.md#update-a-running-model).
 
 ## Advanced MIGraphX settings
 
-These deployment options are optional and disabled by default:
+Set `compilation_cache_dir` to reuse compiled models after a restart. This optional
+setting requires `provider: ort`, a `migraphx:N` device, and a persistent, writable
+absolute directory outside model directories. It is disabled by default.
 
-| Option | Use | Requirements |
-| --- | --- | --- |
-| `compilation_cache_dir` | Reuse compiled models after a restart | Persistent, writable absolute directory outside model directories |
-| `short_sequence_tokens` | Add a smaller session for short classifier requests | Dynamic-sequence graph, an explicit larger `input.max_tokens`, no artifact-bound `operating_point` |
-
-For example, `short_sequence_tokens: 512` alongside `input.max_tokens: 8192`
-creates two sessions. A request uses the smallest session that fits its complete
-input. Both sessions warm up before activation, increasing startup work, GPU
-memory, and cache storage. This option supports local ModernBERT classifiers,
-including token classification; it does not support embeddings or reranking.
-Evaluate it on the target GPU before enabling it in production.
-
-Both options require `provider: ort` and a `migraphx:N` device. A changed model,
-GPU, precision, or compiler can require new compilation. See
+A changed model, GPU, precision, or compiler can require new compilation. See
 [AMD troubleshooting](lifecycle-diagnostics.md#amd-startup-problems) for settings
 that conflict with deployment configuration.

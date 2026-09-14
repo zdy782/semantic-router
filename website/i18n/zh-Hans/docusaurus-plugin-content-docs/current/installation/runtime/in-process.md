@@ -140,13 +140,6 @@ Binding 属于配方；放在相应配方的 `routing` 下即可独立更换模�
 
 ## MIGraphX 高级设置 {#advanced-migraphx-settings}
 
-以下 deployment 选项均默认关闭：
+设置 `compilation_cache_dir` 可在重启后复用已编译的模型。此可选设置要求 `provider: ort`、`migraphx:N` 设备，以及模型目录之外可持久保存且可写的绝对路径目录，默认关闭。
 
-| 选项 | 用途 | 要求 |
-| --- | --- | --- |
-| `compilation_cache_dir` | 重启后复用编译结果 | 模型目录之外持久、可写的绝对路径 |
-| `short_sequence_tokens` | 为短分类请求增加一个较小的 session | 动态序列图、显式且更大的 `input.max_tokens`，且未绑定 `operating_point` |
-
-例如，`short_sequence_tokens: 512` 配合 `input.max_tokens: 8192` 创建两个 session，请求使用能够容纳完整输入的最小 session。两个 session 均在激活前预热，会增加启动工作、GPU 内存和缓存占用。此选项支持本地 ModernBERT 分类器，包括 token 分类，不支持嵌入或重排。用于生产前，应在目标 GPU 上验证。
-
-两个选项都要求 `provider: ort` 和 `migraphx:N` 设备。模型、GPU、精度或编译器变化可能触发重新编译。与 deployment 配置冲突的环境变量见 [AMD 排查](lifecycle-diagnostics.md#amd-startup-problems)。
+模型、GPU、精度或编译器发生变化时，可能需要重新编译。与部署配置冲突的设置见 [AMD 故障排查](lifecycle-diagnostics.md#amd-startup-problems)。
