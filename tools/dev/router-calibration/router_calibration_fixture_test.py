@@ -610,8 +610,18 @@ fixtures:
         )
 
         _, probes = router_calibration_manifest.load_probe_manifest(manifest_path)
-        self.assertEqual(len(probes), 280)
-        original_probes, added_probes = probes[:269], probes[269:]
+        self.assertEqual(len(probes), 285)
+        original_probes, added_probes = probes[:269], probes[269:280]
+        self.assertEqual(
+            {probe.decision_id for probe in probes[280:]},
+            {
+                "contract-direct-result-repair",
+                "contract-personal-action-care",
+                "contract-plural-workflow-start",
+                "contract-single-worker-workflow",
+                "contract-quoted-result-repair",
+            },
+        )
         self.assertEqual(
             {probe.decision_id for probe in added_probes},
             {

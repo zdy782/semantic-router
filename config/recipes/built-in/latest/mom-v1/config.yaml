@@ -261,7 +261,7 @@ recipes:
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: &id001
+        keywords:
         - (answer|response|result|solution|output|calculation|value).{0,64}(wrong|incorrect|erroneous|error|inconsistent|mistake)
         - (wrong|incorrect|erroneous|inconsistent).{0,32}(answer|response|result|solution|output|calculation|value)
         - (回答|答案|结果|解答|输出|计算|数值).{0,32}(错|不正确|不一致|有误)
@@ -276,11 +276,16 @@ recipes:
         - (답변|답|계산|결과).{0,24}(틀|잘못|오류|맞지)
         - (उत्तर|जवाब|गणना|परिणाम).{0,32}(गलत|त्रुटि|अशुद्ध)
         - (ответ|решени|расчёт|результат).{0,48}(невер|неправиль|ошиб)
+        - (?:错误|不正确|有误|不一致)的?(?:回答|答案|结果|解答|计算|数值)
+        - (?:إجابتك|اجابتك|جوابك).{0,32}(?:خاط|خطأ|غير صحيح)
+        - (?:falsche|fehlerhafte|inkorrekte)[nrs]?\s+(?:antwort|ergebnis|lösung|berechnung)
+        - (?:誤った|間違った|不正確な)(?:回答|答え|結果|解答|計算)
+        - (?:respuesta|resultado|solución|cálculo).{0,48}defectuos
       - name: answer_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: &id002
+        keywords:
         - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:please|then|and|now)\s+)*(?:(?:I want you
           to|I would like you to|could you|can you)\s+)?(?:\b(correct|fix|revise|replace|recheck|recalculate|recompute|redo|try
           again|check again)\b)
@@ -297,11 +302,16 @@ recipes:
         - (?:^|[.!?;,:।\n])\s*(?:कृपया\s*)?(?:इसे\s*|उत्तर\s*|जवाब\s*)?(सुधारें|सुधारो|सही
           करें|ठीक करें)
         - (?:^|[.!?;,:。！？；，、\n])\s*(?:пожалуйста[, ]*)?(исправь|исправьте|скорректируй|скорректируйте|пересчитай|пересчитайте)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:请|然后|再|并)*(?:替换|更换|换掉|修改)[^。！？\n]{0,32}(?:回答|答案|结果|解答|计算)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:استبدل|بدّل|بدل|صحح|صحّح|عدّل|عدل)[^.!?؛\n]{0,48}(?:إجابت|اجابت|جواب|النتيجة|الإجابة|الجواب)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:ersetze|tausche|ändern|ändere)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:sustituye|reemplaza|sustituya|reempláce)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?(?:その|この|前の|先ほどの)?[^。！？\n]{0,24}(?:回答|答え|結果|解答|計算)(?:を|は)[^。！？\n]{0,24}(?:訂正|修正|置き換え|直して|再計算|やり直)
       - name: no_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: &id003
+        keywords:
         - (do not|don't|never).{0,24}(correct|fix|revise|replace|recheck|recalculate|redo)
         - (不要|无需|不必).{0,12}(纠正|更正|修正|修改|重算|重做|核对)
         - لا.{0,12}(تصحح|تعدّل|تعدل|تراجع|تعد الحساب)
@@ -318,6 +328,39 @@ recipes:
         - (수정|정정|고치|고쳐|바로잡).{0,12}(하지 마|지 마|말아|필요 없)
         - (सुधार|सही|ठीक).{0,12}(न करें|मत करो|मत करें)|मत.{0,12}(सुधार|करो)
         - (?:^|[\s.!?;,:])не\s+(исправ|корректир|пересчит)
+        - (?:不要|无需|不必|别).{0,12}(?:替换|更换|换掉|修改|纠正|重算|重新计算)
+        - لا.{0,12}(?:تستبدل|تبدّل|تبدل)
+        - (?:ersetze|tausche|ändere).{0,32}nicht
+        - \bno\s+(?:sustituyas|reemplaces|sustituya|reemplaza)\b
+        - (?:置き換え|やり直|再計算|訂正|修正).{0,8}(?:ないで|しない|不要)|直さないで
+      - name: answer_repair
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords: &id001
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:please|then|now|and)\s+)*(?:(?:can|could)
+          you\s+)?(?:(?:correct|fix)\s+(?:(?:the|your|previous|last)\s+){0,3}(?:answer|response|result|solution|calculation|it|this)\b|(?:recalculate|recompute)\b)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:请|然后|再|并)*(?:(?:把|将).{0,24})?(?:(?:纠正|更正|修正)[^。！？\n]{0,16}(?:回答|答案|结果|解答|计算)|重算|重新计算|重新核算)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:(?:صحح|صحّح|صوّب)[^.!?؛\n]{0,24}(?:الإجابة|الجواب|النتيجة|الحساب|إجابتك)|أعد
+          الحساب|اعد الحساب)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:(?:korrigiere|berichtige)\s+(?:(?:die|das|deine|dein|vorherige|vorheriges)\s+)*(?:antwort|ergebnis|lösung|berechnung)\b|berechne
+          neu\b)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:(?:corrige|corrija|rectifica)\s+(?:(?:la|el|tu|su)\s+)?(?:respuesta|resultado|solución|cálculo)\b|recalcula\b)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?(?:その|この|前の|先ほどの)?(?:回答|答え|結果|解答|計算)(?:を|は)?[^。！？\n]{0,24}(?:訂正して|修正して|直して|再計算して|やり直して)(?:ください)?
+      - name: care_request
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords: &id002
+        - \b(?:what should I (?:do|take)|should I (?:take|stop|change|sign|pay|invest)|is
+          it safe for me to|can I safely)\b
+        - (?:我(?:该|应该|应当|能否|可不可以|能不能).{0,16}(?:做|服用|停药|继续|签署|支付|投资)|我该怎么办)
+        - (?:ماذا (?:يجب|ينبغي) أن أفعل|هل (?:يجب|ينبغي|يمكنني).{0,32}(?:أتناول|أوقف|أستمر|أوقع|أدفع|أستثمر))
+        - \b(?:was soll ich (?:tun|nehmen)|soll(?:te)? ich [^.!?;:\n]{0,48}(?:einnehmen|absetzen|nehmen|unterschreiben|zahlen|investieren)|ist
+          es für mich sicher)\b
+        - \b(?:qué (?:debo|debería) hacer|debo (?:tomar|dejar|continuar|firmar|pagar|invertir)|es
+          seguro para mí)\b
+        - (?:私は.{0,24}(?:飲む|服用|やめる|続ける|署名|支払|投資).{0,8}(?:べき|よい|良い)|どうすれば(?:よい|いい|良い)|どうするべき)
       structure:
       - description: Vocabulary mentioned for explanation or translation is not an
           execution request.
@@ -458,6 +501,38 @@ recipes:
             conditions:
             - type: structure
               name: quoted_request
+        - operator: AND
+          conditions:
+          - type: conversation
+            name: has_answer
+          - type: keyword
+            name: answer_repair
+          - operator: NOT
+            conditions:
+            - type: keyword
+              name: no_revision
+          - operator: NOT
+            conditions:
+            - type: structure
+              name: quoted_request
+        - operator: AND
+          conditions:
+          - type: keyword
+            name: care_request
+          - operator: OR
+            conditions:
+            - type: domain
+              name: health
+            - type: domain
+              name: law
+            - type: domain
+              name: business
+            - type: domain
+              name: economics
+          - operator: NOT
+            conditions:
+            - type: structure
+              name: quoted_request
         on_unknown: no_match
       algorithm:
         type: multi_factor
@@ -524,6 +599,26 @@ recipes:
                 name: business
               - type: domain
                 name: economics
+        - operator: NOT
+          conditions:
+          - operator: AND
+            conditions:
+            - type: keyword
+              name: care_request
+            - operator: OR
+              conditions:
+              - type: domain
+                name: health
+              - type: domain
+                name: law
+              - type: domain
+                name: business
+              - type: domain
+                name: economics
+            - operator: NOT
+              conditions:
+              - type: structure
+                name: quoted_request
         on_unknown: no_match
       algorithm:
         type: multi_factor
@@ -1155,17 +1250,83 @@ recipes:
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id001
+        keywords:
+        - (answer|response|result|solution|output|calculation|value).{0,64}(wrong|incorrect|erroneous|error|inconsistent|mistake)
+        - (wrong|incorrect|erroneous|inconsistent).{0,32}(answer|response|result|solution|output|calculation|value)
+        - (回答|答案|结果|解答|输出|计算|数值).{0,32}(错|不正确|不一致|有误)
+        - (الإجابة|الجواب|النتيجة|الناتج|الحساب|القيمة).{0,40}(خاط|خطأ|غير صحيح|غير
+          متسق)
+        - (antwort|ergebnis|lösung|ausgabe|berechnung|wert).{0,48}(falsch|fehler|nicht
+          korrekt|widersprüch)
+        - (respuesta|resultado|solución|salida|cálculo|valor).{0,48}(incorrect|erróne|error|equivoc|incoherent)
+        - (回答|答え|結果|解答|出力|計算|値).{0,32}(間違|誤り|誤って|不正確|矛盾)
+        - (réponse|résultat|solution|calcul).{0,48}(faux|fausse|incorrect|erron|erreur)
+        - (resposta|resultado|solução|cálculo).{0,48}(errad|incorret|erro|equivoc)
+        - (답변|답|계산|결과).{0,24}(틀|잘못|오류|맞지)
+        - (उत्तर|जवाब|गणना|परिणाम).{0,32}(गलत|त्रुटि|अशुद्ध)
+        - (ответ|решени|расчёт|результат).{0,48}(невер|неправиль|ошиб)
+        - (?:错误|不正确|有误|不一致)的?(?:回答|答案|结果|解答|计算|数值)
+        - (?:إجابتك|اجابتك|جوابك).{0,32}(?:خاط|خطأ|غير صحيح)
+        - (?:falsche|fehlerhafte|inkorrekte)[nrs]?\s+(?:antwort|ergebnis|lösung|berechnung)
+        - (?:誤った|間違った|不正確な)(?:回答|答え|結果|解答|計算)
+        - (?:respuesta|resultado|solución|cálculo).{0,48}defectuos
       - name: answer_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id002
+        keywords:
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:please|then|and|now)\s+)*(?:(?:I want you
+          to|I would like you to|could you|can you)\s+)?(?:\b(correct|fix|revise|replace|recheck|recalculate|recompute|redo|try
+          again|check again)\b)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:请|然后|再|并|接着)*(?:(?:把|将).{0,24})?(?:(请|重新|再).{0,16}(检查|核对|计算|推导|修改|纠正|更正|修正)|纠正|更正|修正|重算|重做)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:(صحح|صحّح|صوّب|عدّل|راجع|أعد|اعد).{0,40}(الإجابة|الجواب|النتيجة|الناتج|الحساب|القيمة|حساب|فحص|النظر)|أعد
+          الحساب)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:(korrigiere|berichtige|überprüfe|prüfe|berechne|überarbeite|wiederhole))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:(corrige|corrija|rectifica|revisa|recalcula|vuelve
+          a calcular|comprueba de nuevo))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:まず|次に|そして)?(?:(訂正|修正|直して|やり直|再計算|確認して|見直して|検算))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:s\x27il vous plaît[, ]*|s\x27il te plaît[, ]*|puis\s+)?(corrigez|corrige|rectifiez|rectifie|recalculez|recalcule)\b
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:por favor[, ]*)?(corrija|corrige|corrigir|retifique|recalcule)\b
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:제발\s*|다시\s*)?(?:답변을\s*|답을\s*|결과를\s*)?(수정|정정|고쳐|바로잡)
+        - (?:^|[.!?;,:।\n])\s*(?:कृपया\s*)?(?:इसे\s*|उत्तर\s*|जवाब\s*)?(सुधारें|सुधारो|सही
+          करें|ठीक करें)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:пожалуйста[, ]*)?(исправь|исправьте|скорректируй|скорректируйте|пересчитай|пересчитайте)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:请|然后|再|并)*(?:替换|更换|换掉|修改)[^。！？\n]{0,32}(?:回答|答案|结果|解答|计算)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:استبدل|بدّل|بدل|صحح|صحّح|عدّل|عدل)[^.!?؛\n]{0,48}(?:إجابت|اجابت|جواب|النتيجة|الإجابة|الجواب)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:ersetze|tausche|ändern|ändere)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:sustituye|reemplaza|sustituya|reempláce)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?(?:その|この|前の|先ほどの)?[^。！？\n]{0,24}(?:回答|答え|結果|解答|計算)(?:を|は)[^。！？\n]{0,24}(?:訂正|修正|置き換え|直して|再計算|やり直)
       - name: no_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id003
+        keywords:
+        - (do not|don't|never).{0,24}(correct|fix|revise|replace|recheck|recalculate|redo)
+        - (不要|无需|不必).{0,12}(纠正|更正|修正|修改|重算|重做|核对)
+        - لا.{0,12}(تصحح|تعدّل|تعدل|تراجع|تعد الحساب)
+        - (nicht|keinesfalls).{0,24}(korrigieren|berichtigen|überarbeiten|ändern)|korrigiere.{0,24}nicht
+        - no.{0,12}(corrijas|corrija|rectifiques|revises|recalcules)
+        - (訂正|修正|変更|再計算).{0,8}(しないで|不要)|直さないで
+        - 不要.{0,12}(重新检查|重新计算|检查|计算)|别.{0,12}(纠正|修正|重算)
+        - لا.{0,12}(تصحّح|تراجع|تعد حساب|تعد فحص)
+        - (prüfe|überprüfe|berechne|überarbeite|berichtige).{0,24}nicht
+        - no.{0,12}(corrijas|rectifiques|revises|recalcules|vuelvas a calcular)
+        - (やり直さない|見直さない|確認しない|再計算しない)
+        - ne.{0,24}(corrige|rectifie|recalcule).{0,16}pas
+        - não.{0,16}(corrija|corrige|corrigir|retifique|recalcule)
+        - (수정|정정|고치|고쳐|바로잡).{0,12}(하지 마|지 마|말아|필요 없)
+        - (सुधार|सही|ठीक).{0,12}(न करें|मत करो|मत करें)|मत.{0,12}(सुधार|करो)
+        - (?:^|[\s.!?;,:])не\s+(исправ|корректир|пересчит)
+        - (?:不要|无需|不必|别).{0,12}(?:替换|更换|换掉|修改|纠正|重算|重新计算)
+        - لا.{0,12}(?:تستبدل|تبدّل|تبدل)
+        - (?:ersetze|tausche|ändere).{0,32}nicht
+        - \bno\s+(?:sustituyas|reemplaces|sustituya|reemplaza)\b
+        - (?:置き換え|やり直|再計算|訂正|修正).{0,8}(?:ないで|しない|不要)|直さないで
+      - name: answer_repair
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords: *id001
       structure:
       - description: Vocabulary mentioned for explanation or translation is not an
           execution request.
@@ -1295,6 +1456,20 @@ recipes:
               conditions:
               - type: keyword
                 name: no_revision
+          - operator: NOT
+            conditions:
+            - type: structure
+              name: quoted_request
+        - operator: AND
+          conditions:
+          - type: conversation
+            name: has_answer
+          - type: keyword
+            name: answer_repair
+          - operator: NOT
+            conditions:
+            - type: keyword
+              name: no_revision
           - operator: NOT
             conditions:
             - type: structure
@@ -1720,6 +1895,20 @@ recipes:
         - (verwende|nutze|frage|befrage|delegiere).{0,24}(keine|nicht).{0,24}(zwei|drei|mehrere|unabhängige).{0,16}(modelle|agenten|prüfer|experten)
         - no.{0,16}(uses|utilices|pidas|consultes|delegues).{0,24}(dos|tres|varios|múltiples|independientes).{0,16}(modelos|agentes|revisores|expertos)
         - (二つ|三つ|別々|複数).{0,12}(モデル|エージェント|専門家).{0,16}(使わない|使用しない|頼まない|依頼しない|求めない)
+        - \b(?:one|1)\s+(?:model|agent|worker|reviewer|expert)\s+only\b
+        - \b(?:do not|don\x27t|never)\s+(?:add|invoke|create)\s+(?:any\s+)?(?:additional|more|other)\s+(?:models?|agents?|workers?|reviewers?|experts?)\b
+        - (?:单人|一人|一个人)(?:[^。！？；：\n]{0,16})(?:分阶段|独立|完成|执行|处理)
+        - (?:不要|不得|不许|别|禁止).{0,8}(?:增加|添加|调用|启动).{0,8}(?:其他|更多|额外).{0,4}(?:模型|智能体|执行者|工作单元|专家)
+        - (?:一人|1人)(?:だけ)?で[^。！？；：\n]{0,16}(?:実行|進め|担当|処理|行)
+        - \b(?:only|exactly|just)\s+(?:one|1)\s+(?:model|agent|worker|reviewer|expert)\b
+        - \b(?:a\s+)?single\s+(?:agent|worker|reviewer|expert)\b
+        - \b(?:use|using|employ|employing)\s+(?:one|1)\s+(?:agent|worker|reviewer|expert)\b
+        - (?:只|仅)(?:用|使用|让|调用|安排)?(?:一|1)(?:个|位|名)(?:模型|智能体|执行者|评审|专家)|单(?:个|一)(?:模型|智能体|执行者|评审|专家)
+        - (?:وكيل|عامل|نموذج|مراجع|خبير)(?:اً|ًا|ا|ً)?\s+واحد(?:اً|ًا|ا|ً)?
+        - \b(?:nur|genau)\s+(?:ein|einen|einem|einer)\s+(?:modell|agent|agenten|arbeiter|bearbeiter|prüfer|experten)\b
+        - \b(?:ein|einen|einem)\s+einzig(?:er|en|em|es)\s+(?:modell|agent|agenten|arbeiter|bearbeiter|prüfer|experten)\b
+        - \b(?:un\s+solo|una\s+sola|(?:sólo|solo|solamente)\s+(?:un|una))\s+(?:modelo|agente|trabajador|trabajadora|revisor|revisora|experto|experta)\b
+        - (?:一人|1人|一つ|1つ)(?:の)?(?:モデル|エージェント|担当者|評価者|専門家)(?:だけ|のみ)|単一(?:の)?(?:エージェント|担当者|評価者|専門家)
       - case_sensitive: false
         keywords:
         - break this into independent workstreams
@@ -1767,28 +1956,99 @@ recipes:
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id001
+        keywords:
+        - (answer|response|result|solution|output|calculation|value).{0,64}(wrong|incorrect|erroneous|error|inconsistent|mistake)
+        - (wrong|incorrect|erroneous|inconsistent).{0,32}(answer|response|result|solution|output|calculation|value)
+        - (回答|答案|结果|解答|输出|计算|数值).{0,32}(错|不正确|不一致|有误)
+        - (الإجابة|الجواب|النتيجة|الناتج|الحساب|القيمة).{0,40}(خاط|خطأ|غير صحيح|غير
+          متسق)
+        - (antwort|ergebnis|lösung|ausgabe|berechnung|wert).{0,48}(falsch|fehler|nicht
+          korrekt|widersprüch)
+        - (respuesta|resultado|solución|salida|cálculo|valor).{0,48}(incorrect|erróne|error|equivoc|incoherent)
+        - (回答|答え|結果|解答|出力|計算|値).{0,32}(間違|誤り|誤って|不正確|矛盾)
+        - (réponse|résultat|solution|calcul).{0,48}(faux|fausse|incorrect|erron|erreur)
+        - (resposta|resultado|solução|cálculo).{0,48}(errad|incorret|erro|equivoc)
+        - (답변|답|계산|결과).{0,24}(틀|잘못|오류|맞지)
+        - (उत्तर|जवाब|गणना|परिणाम).{0,32}(गलत|त्रुटि|अशुद्ध)
+        - (ответ|решени|расчёт|результат).{0,48}(невер|неправиль|ошиб)
+        - (?:错误|不正确|有误|不一致)的?(?:回答|答案|结果|解答|计算|数值)
+        - (?:إجابتك|اجابتك|جوابك).{0,32}(?:خاط|خطأ|غير صحيح)
+        - (?:falsche|fehlerhafte|inkorrekte)[nrs]?\s+(?:antwort|ergebnis|lösung|berechnung)
+        - (?:誤った|間違った|不正確な)(?:回答|答え|結果|解答|計算)
+        - (?:respuesta|resultado|solución|cálculo).{0,48}defectuos
       - name: answer_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id002
+        keywords:
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:please|then|and|now)\s+)*(?:(?:I want you
+          to|I would like you to|could you|can you)\s+)?(?:\b(correct|fix|revise|replace|recheck|recalculate|recompute|redo|try
+          again|check again)\b)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:请|然后|再|并|接着)*(?:(?:把|将).{0,24})?(?:(请|重新|再).{0,16}(检查|核对|计算|推导|修改|纠正|更正|修正)|纠正|更正|修正|重算|重做)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:(صحح|صحّح|صوّب|عدّل|راجع|أعد|اعد).{0,40}(الإجابة|الجواب|النتيجة|الناتج|الحساب|القيمة|حساب|فحص|النظر)|أعد
+          الحساب)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:(korrigiere|berichtige|überprüfe|prüfe|berechne|überarbeite|wiederhole))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:(corrige|corrija|rectifica|revisa|recalcula|vuelve
+          a calcular|comprueba de nuevo))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:まず|次に|そして)?(?:(訂正|修正|直して|やり直|再計算|確認して|見直して|検算))
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:s\x27il vous plaît[, ]*|s\x27il te plaît[, ]*|puis\s+)?(corrigez|corrige|rectifiez|rectifie|recalculez|recalcule)\b
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:por favor[, ]*)?(corrija|corrige|corrigir|retifique|recalcule)\b
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:제발\s*|다시\s*)?(?:답변을\s*|답을\s*|결과를\s*)?(수정|정정|고쳐|바로잡)
+        - (?:^|[.!?;,:।\n])\s*(?:कृपया\s*)?(?:इसे\s*|उत्तर\s*|जवाब\s*)?(सुधारें|सुधारो|सही
+          करें|ठीक करें)
+        - (?:^|[.!?;,:。！？；，、\n])\s*(?:пожалуйста[, ]*)?(исправь|исправьте|скорректируй|скорректируйте|пересчитай|пересчитайте)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:请|然后|再|并)*(?:替换|更换|换掉|修改)[^。！？\n]{0,32}(?:回答|答案|结果|解答|计算)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:استبدل|بدّل|بدل|صحح|صحّح|عدّل|عدل)[^.!?؛\n]{0,48}(?:إجابت|اجابت|جواب|النتيجة|الإجابة|الجواب)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:ersetze|tausche|ändern|ändere)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:sustituye|reemplaza|sustituya|reempláce)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?(?:その|この|前の|先ほどの)?[^。！？\n]{0,24}(?:回答|答え|結果|解答|計算)(?:を|は)[^。！？\n]{0,24}(?:訂正|修正|置き換え|直して|再計算|やり直)
       - name: no_revision
         method: regex
         operator: OR
         case_sensitive: false
-        keywords: *id003
+        keywords:
+        - (do not|don't|never).{0,24}(correct|fix|revise|replace|recheck|recalculate|redo)
+        - (不要|无需|不必).{0,12}(纠正|更正|修正|修改|重算|重做|核对)
+        - لا.{0,12}(تصحح|تعدّل|تعدل|تراجع|تعد الحساب)
+        - (nicht|keinesfalls).{0,24}(korrigieren|berichtigen|überarbeiten|ändern)|korrigiere.{0,24}nicht
+        - no.{0,12}(corrijas|corrija|rectifiques|revises|recalcules)
+        - (訂正|修正|変更|再計算).{0,8}(しないで|不要)|直さないで
+        - 不要.{0,12}(重新检查|重新计算|检查|计算)|别.{0,12}(纠正|修正|重算)
+        - لا.{0,12}(تصحّح|تراجع|تعد حساب|تعد فحص)
+        - (prüfe|überprüfe|berechne|überarbeite|berichtige).{0,24}nicht
+        - no.{0,12}(corrijas|rectifiques|revises|recalcules|vuelvas a calcular)
+        - (やり直さない|見直さない|確認しない|再計算しない)
+        - ne.{0,24}(corrige|rectifie|recalcule).{0,16}pas
+        - não.{0,16}(corrija|corrige|corrigir|retifique|recalcule)
+        - (수정|정정|고치|고쳐|바로잡).{0,12}(하지 마|지 마|말아|필요 없)
+        - (सुधार|सही|ठीक).{0,12}(न करें|मत करो|मत करें)|मत.{0,12}(सुधार|करो)
+        - (?:^|[\s.!?;,:])не\s+(исправ|корректир|пересчит)
+        - (?:不要|无需|不必|别).{0,12}(?:替换|更换|换掉|修改|纠正|重算|重新计算)
+        - لا.{0,12}(?:تستبدل|تبدّل|تبدل)
+        - (?:ersetze|tausche|ändere).{0,32}nicht
+        - \bno\s+(?:sustituyas|reemplaces|sustituya|reemplaza)\b
+        - (?:置き換え|やり直|再計算|訂正|修正).{0,8}(?:ないで|しない|不要)|直さないで
       - name: plural_workers
         method: regex
         operator: OR
         case_sensitive: false
         keywords:
         - (multiple|several|two|three|2|3|different|separate|independent).{0,32}(models|agents|workers|reviewers|experts)
-        - (多个|两|三|不同|独立的).{0,12}(模型|智能体|执行者|评审|专家)
+        - (多个|两|三|不同).{0,12}(模型|智能体|执行者|评审|专家)
         - ((عدة|عدّة|اثنين|اثنان).{0,20}(نماذج|وكلاء|مراجعين|خبراء)|نموذجين|وكيلين|(نماذج|وكلاء|مراجعين|خبراء).{0,20}(مختلفة|مختلفين|مستقلة|مستقلين))
         - (mehrere|zwei|drei|verschiedene|getrennte|unabhängige).{0,24}(modelle|agenten|bearbeiter|prüfer|experten)
         - (varios|varias|dos|tres|diferentes|distintos|independientes).{0,24}(modelos|agentes|trabajadores|revisores|expertos)
-        - (複数|二つ|三つ|2つ|3つ|別々|異なる|独立した).{0,12}(モデル|エージェント|担当者|評価者|専門家)
+        - (複数|二つ|三つ|2つ|3つ|別々|異なる).{0,12}(モデル|エージェント|担当者|評価者|専門家)
+        - \b(?:unabhängigen|getrennten|verschiedenen)\s+(?:arbeitern|bearbeitern|prüfern|modellen)\b
+        - (?:让|安排|派|委派)[^。！？；：\n]{0,12}(?:独立的?|不同的?)?(?:工作单元|执行单元|作业单元|执行者|智能体|模型|专家)[^。！？；：\n]{0,12}(?:分工|分担|分别)
+        - (?:独立した|別々の|異なる)(?:作業担当|担当者|実行者|エージェント|専門家|モデル)(?:に|へ)[^。！？；：\n]{0,80}(?:分担させ|分配して|割り振って|割り当てて)
+        - \b(?:mehrere|zwei|drei|verschiedene|getrennte|unabhängige)\s+arbeiter\b
+        - \b(?:zwei|drei|mehrere[nr]?)\s+(?:unabhängige[nr]?\s+)?(?:arbeiter[n]?|bearbeiter[n]?|agenten|modelle[n]?|prüfer[n]?|experten)\b
+        - \b(?:workers|agents|models|reviewers|experts)\s+(?:working\s+)?(?:independently|separately)\b
+        - (?:وكيلان|وكيلين|عاملان|عاملين|نموذجان|نموذجين|مراجعان|مراجعين|خبيران|خبيرين)
+        - (?:وكلاء|نماذج|عاملون|عاملين|مراجعون|مراجعين|خبراء)\s+(?:مستقلون|مستقلين|مستقلة|مختلفون|مختلفين|مختلفة)
+        - \b(?:modelos|agentes|trabajadores|trabajadoras|revisores|revisoras|expertos|expertas)\s+(?:independientes|separados|separadas|diferentes|distintos|distintas)\b
+        - (?:二人|三人|2人|3人)(?:の)?[^。！？；：\n]{0,12}(?:担当者|評価者|専門家)
       - name: review_action
         method: regex
         operator: OR
@@ -1801,6 +2061,7 @@ recipes:
         - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:bitte|dann|und|jetzt)\s+)*(?:(frage|befrage|konsultiere|hole|lass|nutze|verwende).{0,64}(modell|prüfer|experten|antwort|beurteil))
         - (?:^|[.!?;,:。！？；，、\n])\s*(?:(?:por favor|después|luego|ahora|y)\s+)*(?:(pide|consulta|obtén|obten|usa|utiliza|solicita).{0,64}(modelo|revisor|experto|respuesta|evaluación))
         - (?:^|[.!?;,:。！？；，、\n])\s*(?:まず|次に|そして)?(?:異なる|複数の|二つの|三つの|独立した)?(モデル|評価者|専門家).{0,48}(依頼して|求め[、，て]|使って|検討してもら|評価してもら)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?(?:(?:異なる|複数の|二つの|三つの|独立した)\s*){1,3}(?:モデル|評価者|専門家)[^。！？\n]{0,48}(?:回答させて|回答してもら|評価させ(?:て|[、，])|検討させ(?:て|[、，])|回答を求め|評価を求め)
       - name: independent_work
         method: regex
         operator: OR
@@ -1869,6 +2130,37 @@ recipes:
         - \b(?:describe|planifica|simula)\b[^.!?;,:。！？；：，\n]{0,80}\b(?:solo|sólo|solamente)\b
         - (?:実行|起動|呼び出し|分配|分担|委任).{0,8}(?:しないで|しない|せず|不要)
         - (?:説明|計画|シミュレーション|描写).{0,8}(?:だけ|のみ)
+        - \b(?:do not|don\x27t|never)\s+(?:organize|orchestrate|start)\b
+        - (?:不要|别|无需).{0,12}(?:组织|编排)
+        - لا\s+(?:تنظّم|تنظم|تنفّذ|تشغّل|تشغل)
+        - (?:organisiere|koordiniere|starte|führe)\b[^.!?;,:\n]{0,80}\b(?:nicht|niemals|keinen?|keine)\b
+        - \bno\s+(?:organices|inicies|ejecutes)\b
+        - (?:編成|構成|調整|組織).{0,8}(?:しないで|しない|不要)|組まないで
+        - (?:不要|别|不许|无需|不得).{0,16}(?:让|安排|派|委派).{0,32}(?:分工|分担|分别)
+        - (?:分担|分配|割り当て|割り振|委任)(?:させ|し|ら)?(?:ないで|ない|ません|ず)
+      - name: answer_repair
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords: *id001
+      - name: care_request
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords: *id002
+      - name: workflow_start
+        method: regex
+        operator: OR
+        case_sensitive: false
+        keywords:
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:please|then|now)\s+)*(?:run|execute|coordinate|organize|orchestrate|start)\b[^.!?;,:\n]{0,48}\bworkflow\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:请|然后|再)?(?:运行|执行|协调|组织|启动|编排)[^。！？；：，\n]{0,32}(?:工作流|多步骤流程)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:من فضلك|ثم|رجاء)\s+)*(?:نظّم|نظم|نسّق|نسق|شغّل|شغل|نفّذ|نفذ)[^.!?؛:\n]{0,48}(?:سير
+          عمل|مسار عمل)
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:bitte|dann|jetzt)\s+)*(?:organisiere|koordiniere|starte|führe)\b[^.!?;,:\n]{0,48}\b(?:workflow|arbeitsablauf)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:(?:por favor|luego|ahora)\s+)*(?:organiza|coordina|ejecuta|inicia)\b[^.!?;,:\n]{0,48}(?:flujo
+          de (?:trabajo|agentes)|workflow)\b
+        - (?:^|[.!?;,:。！？；：，、\n])\s*(?:まず|次に|そして)?[^。！？；：\n]{0,32}(?:ワークフロー|作業フロー)(?:を)?[^。！？；：\n]{0,24}(?:実行して|開始して|編成して|構成して|調整して|組んで|組織して)(?:ください)?
       structure:
       - description: Vocabulary mentioned for explanation or translation is not an
           execution request.
@@ -1979,6 +2271,16 @@ recipes:
                 name: delegated_executors
               - type: projection
                 name: execution_direction
+            - operator: AND
+              conditions:
+              - type: keyword
+                name: workflow_start
+              - type: keyword
+                name: independent_work
+              - type: projection
+                name: execution_direction
+          - type: keyword
+            name: plural_workers
           - operator: NOT
             conditions:
             - type: keyword
@@ -2156,6 +2458,38 @@ recipes:
               conditions:
               - type: keyword
                 name: no_revision
+          - operator: NOT
+            conditions:
+            - type: structure
+              name: quoted_request
+        - operator: AND
+          conditions:
+          - type: conversation
+            name: has_answer
+          - type: keyword
+            name: answer_repair
+          - operator: NOT
+            conditions:
+            - type: keyword
+              name: no_revision
+          - operator: NOT
+            conditions:
+            - type: structure
+              name: quoted_request
+        - operator: AND
+          conditions:
+          - type: keyword
+            name: care_request
+          - operator: OR
+            conditions:
+            - type: domain
+              name: health
+            - type: domain
+              name: law
+            - type: domain
+              name: business
+            - type: domain
+              name: economics
           - operator: NOT
             conditions:
             - type: structure

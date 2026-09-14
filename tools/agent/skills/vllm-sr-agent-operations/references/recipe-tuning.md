@@ -51,11 +51,17 @@ authorize multiple workers; mentioning agents or asking for an explanation does
 not. Once authorized, the workflow owns planning and integration. Requiring the
 user to name each internal stage makes otherwise valid requests brittle. Test
 single-worker, negated, quoted, and informational controls alongside delegation.
+Check that worker counts survive translation and inflection. In languages without
+grammatical noun plurality, an independent worker does not by itself establish
+multiple executors.
 
 Feedback routing requires a prior assistant reply. Include that history in both
 Preview and routed tests; a `user_feedback` condition cannot corroborate a
 history-free request. Distinguish correction of an answer from ordinary editing
-or a request for a different format.
+or a request for a different format. A direct instruction to correct a previous
+result and a self-contained error report with an operative repair instruction
+are useful separate cases; neither requires a Feedback match to prove the
+explicit instruction. Preserve missing-history and negated-repair controls.
 
 For comparisons between embedding intents, `value_source: raw` preserves scores
 below the match threshold. A signed difference can express which intent has more
@@ -126,7 +132,10 @@ multi-model workflows explicit rather than enabling a global hold indiscriminate
    history, required tools, unknown signals, and insufficient backend capacity.
 3. Validate and activate the candidate through the
    [configuration workflow](configuration-loop.md). Verify its active revision.
-4. Run real Preview requests with full messages, tools, padding and images. In the
+4. Recombining saved signal values can isolate a policy change, provided the
+   unchanged baseline reproduces its original heuristics and decisions exactly.
+   Label this as offline recomposition, then run real Preview requests with full
+   messages, tools, padding and images. In the
    contributor conformance harness, choose `deployment` or `policy` scope explicitly.
    Keep strict deployment checks as the default. Report selected, immediate-response,
    execution-required and unavailable outcomes separately. Policy coverage does not

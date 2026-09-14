@@ -5903,3 +5903,109 @@ decisions:
     - en
     - contract
     - support
+- id: contract-direct-result-repair
+  expected_recipe: cost
+  expected_decision: reasoning
+  expected_algorithm: multi_factor
+  expected_plugins:
+  - request_params
+  expected_signals:
+    keywords:
+    - answer_repair
+    - answer_error
+    - answer_revision
+  objective: An explicit incorrect-result report and operative repair instruction warrant answer recovery.
+  variants:
+  - id: en
+    query: The calculation result is incorrect. Please recalculate it.
+    tags:
+    - language:en
+    - contract
+    - correction
+- id: contract-personal-action-care
+  expected_recipe: balance
+  expected_decision: reasoning
+  expected_algorithm: multi_factor
+  expected_plugins:
+  - request_params
+  expected_signals:
+    keywords:
+    - care_request
+    domains:
+    - health
+  objective: A direct personal medical action question combines explicit wording with a relevant domain.
+  variants:
+  - id: en
+    query: Should I stop taking the prescribed medicine before my next appointment?
+    tags:
+    - language:en
+    - contract
+    - care
+- id: contract-plural-workflow-start
+  expected_recipe: accuracy
+  expected_decision: agent
+  expected_algorithm: workflows
+  expected_plugins:
+  - request_params
+  expected_signals:
+    keywords:
+    - workflow_start
+    - plural_workers
+    - independent_work
+    projection:
+    - execution_direction
+  expected_signal_values:
+    embedding:workflow_intent:
+      gte: -1
+      lte: 1
+    embedding:informational:
+      gte: -1
+      lte: 1
+  objective: A workflow start requires multiple independent executors and semantic evidence for execution.
+  variants:
+  - id: en
+    query: Organize a workflow with two independent workers to check the filenames and count the folders.
+    tags:
+    - language:en
+    - contract
+    - orchestration
+- id: contract-single-worker-workflow
+  expected_recipe: accuracy
+  expected_decision: simple
+  expected_algorithm: multi_factor
+  expected_plugins:
+  - request_params
+  expected_signals:
+    keywords:
+    - workflow_start
+    - single
+  forbidden_signals:
+    keywords:
+    - plural_workers
+  objective: An explicit one-worker limit does not authorize multi-model execution.
+  variants:
+  - id: en
+    query: Run a workflow independently, using exactly one worker to sort the archive.
+    tags:
+    - language:en
+    - contract
+    - negative
+    - orchestration
+- id: contract-quoted-result-repair
+  expected_recipe: cost
+  expected_decision: economy
+  expected_algorithm: multi_factor
+  expected_plugins:
+  - request_params
+  expected_signals:
+    structure:
+    - quoted_request
+  objective: An outer translation instruction leaves the enclosed repair instruction inert.
+  variants:
+  - id: en
+    query: 'Translate: The calculation result is incorrect. Please recalculate it.'
+    tags:
+    - language:en
+    - contract
+    - negative
+    - correction

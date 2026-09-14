@@ -23,7 +23,7 @@ defaults:
 assets:
 - id: mom-v1
   bundle: mom-v1
-  sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+  sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 protocols:
 - id: openai/chat-completions@1
   display_name: OpenAI Chat Completions
@@ -8296,7 +8296,7 @@ models:
   verification:
     authority: vllm-sr-maintainers
     status: claimed
-    asset_sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+    asset_sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 - id: vllm-sr/mom-v1-lite
   display_name: MoM V1 Lite
   description: Prioritizes known cost within task-specific quality bands for tools, reasoning, and economy routing.
@@ -8363,7 +8363,7 @@ models:
   verification:
     authority: vllm-sr-maintainers
     status: claimed
-    asset_sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+    asset_sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 - id: vllm-sr/mom-v1-flash
   display_name: MoM V1 Flash
   description: Prioritizes measured first-token or output-token latency within task-specific quality bands.
@@ -8433,7 +8433,7 @@ models:
   verification:
     authority: vllm-sr-maintainers
     status: claimed
-    asset_sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+    asset_sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 - id: vllm-sr/mom-v1-ultra
   display_name: MoM V1 Ultra
   description: Combines strict quality selection with bounded review and agent workflows.
@@ -8518,7 +8518,7 @@ models:
   verification:
     authority: vllm-sr-maintainers
     status: claimed
-    asset_sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+    asset_sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 - id: vllm-sr/mom-v1-vault
   display_name: MoM V1 Vault
   description: Contains prompt attacks and routes private or sensitive work to the operator-assigned model pools.
@@ -8571,7 +8571,7 @@ models:
   verification:
     authority: vllm-sr-maintainers
     status: claimed
-    asset_sha256: sha256:5772161e625eb16fe64fadc57e6a6caa4455cf8f96f8124d5c5dac6ef642a597
+    asset_sha256: sha256:f98733eba4e1aef5345623841d0c26a9200da9bee35bf2d14633c19770e7e57f
 benchmarks:
 - id: tiger-ai-lab/mmlu-pro@1.0.0
   display_name: MMLU-Pro

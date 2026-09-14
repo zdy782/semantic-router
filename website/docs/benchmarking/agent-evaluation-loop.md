@@ -60,10 +60,12 @@ families can run concurrently before decisions are evaluated. Measure the actual
 request cost.
 
 For recovery, include the earlier assistant reply: Feedback routing skips
-requests without one. Test actual corrections alongside harmless requests to
-change tone or format. For collaboration, distinguish an instruction to delegate
-from a discussion of agents. The workflow handles its internal stages; users
-should not have to name them to request collaboration.
+requests without one. Test direct repair instructions and self-contained error
+reports separately from Feedback matches, with harmless tone or formatting edits
+as controls. For collaboration, distinguish multiple-worker authorization from
+a discussion of agents or a request for one independent worker. The workflow
+handles its internal stages; users should not have to name them to request
+collaboration.
 
 Check that multilingual examples survive prototype compression. A rule-local
 `prototype_scoring` override stays with the Recipe, while an omitted override
@@ -98,6 +100,10 @@ vllm-sr route preview \
   --prompt 'Give a brief definition of a readiness probe.' \
   --trace --json --timeout 300
 ```
+
+Recombining saved signal values can help isolate a rule change, but it is not
+a new Preview result. First reproduce the baseline decisions and heuristic
+matches exactly, then test the candidate with real requests.
 
 Preview runs configured classifiers and embeddings without backend generation.
 Check the matched signals, projection results, decision, algorithm, selection

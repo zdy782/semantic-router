@@ -31,8 +31,9 @@ private deployment. Each recipe can use a different set of connected models.
 
 **Balance** uses an efficient pool for clearly simple work, a stronger reasoning
 pool for hard tasks or answer recovery, and a balanced pool in between. Domain
-and FactCheck signals help identify consequential advice; a medical definition
-alone does not require escalation.
+and FactCheck signals help identify consequential advice. Direct personal action
+requests also combine explicit wording with a relevant domain; a medical
+definition alone does not require escalation.
 
 **Speed** favors first-token latency for ordinary conversation and tools, and
 per-token latency for reasoning. Lightweight semantic and request-shape signals
@@ -41,15 +42,18 @@ keep routing overhead small.
 **Cost** keeps requests on one model. Its base selector prefers the lowest
 estimated request cost within the decision's quality band, with stronger pools
 for reasoning and active tool use. After an assistant answer, correctness
-feedback can escalate answer recovery; repetition or a formatting edit alone
-does not establish that the answer was wrong.
+feedback or a direct request to correct the result can escalate answer recovery.
+A self-contained error report with an instruction to repair it also qualifies.
+Repetition or a formatting edit alone does not establish that an answer was wrong.
 
 **Accuracy** normally uses one strong model. An explicit request for independent
 review selects `review`, which compares two responses and synthesizes them.
 An explicit request to delegate work to multiple workers selects `agent`, with
-at most three steps and two workers in parallel. The router plans the internal
-stages and combines results; users need not name those stages. Describing,
-translating, or prohibiting a workflow does not authorize execution. Long context or a subject label does not trigger fan-out.
+at most three steps and two workers in parallel. A request for only one worker
+does not authorize fan-out; independence alone does not establish multiple
+workers. The router plans the internal stages and combines results; users need
+not name those stages. Describing, translating, or prohibiting a workflow does
+not authorize execution. Long context or a subject label does not trigger fan-out.
 A client-owned tool loop stays on the single-model reasoning path.
 
 **Vault** uses separate pools for ordinary and sensitive requests. `guard`

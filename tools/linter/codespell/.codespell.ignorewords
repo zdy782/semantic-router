@@ -103,3 +103,5 @@ naem
 FPR
 # go.sum hash fragment (perf/go.sum, not a spelling error)
 NCe
+# German possessive determiner in multilingual routing rules
+deine
