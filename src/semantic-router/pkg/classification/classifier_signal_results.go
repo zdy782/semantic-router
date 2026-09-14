@@ -79,7 +79,7 @@ type SignalResults struct {
 	JailbreakDecision       *tasks.LabelDecision // Present for categorical verdicts without probabilities
 	JailbreakDetected       bool                 // Whether any jailbreak was detected (across all rules)
 	JailbreakType           string               // Type of the detected jailbreak (from highest-confidence detection)
-	JailbreakConfidence     float32              // Confidence of the detected jailbreak
+	JailbreakConfidence     float32              // Highest observed Guard score, available even without a match
 	JailbreakScoreAvailable bool
 
 	// PII detection metadata (populated when PII signal is evaluated)
