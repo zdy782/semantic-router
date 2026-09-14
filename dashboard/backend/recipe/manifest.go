@@ -383,7 +383,7 @@ func validateExpectedSelectionStatus(status *string, label string, issues *[]str
 		return
 	}
 	switch *status {
-	case "selected", "planned_final", "fallback", "execution_required", "unavailable", "failed":
+	case "selected", "planned_final", "fallback", "execution_required", "unavailable", "failed", "not_required":
 		return
 	default:
 		*issues = append(*issues, label+".expected_selection_status is invalid")

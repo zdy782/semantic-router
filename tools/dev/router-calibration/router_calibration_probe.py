@@ -26,6 +26,7 @@ SELECTION_STATUSES = frozenset(
         "execution_required",
         "unavailable",
         "failed",
+        "not_required",
     }
 )
 MAX_PROBE_REPEAT = 10_000

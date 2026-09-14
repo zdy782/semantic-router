@@ -611,11 +611,11 @@ fixtures:
 
         _, probes = router_calibration_manifest.load_probe_manifest(manifest_path)
         receipt = _mom_materialization_receipt(probes)
-        self.assertEqual(len(probes), 235)
-        self.assertEqual(receipt["message_probes"], 89)
-        self.assertEqual(receipt["generated_probes"], 50)
-        self.assertEqual(receipt["image_parts"], 57)
-        self.assertEqual(receipt["text_bytes"], 26_230_077)
+        self.assertEqual(len(probes), 253)
+        self.assertEqual(receipt["message_probes"], 90)
+        self.assertEqual(receipt["generated_probes"], 45)
+        self.assertEqual(receipt["image_parts"], 53)
+        self.assertEqual(receipt["text_bytes"], 20_730_898)
         self.assertEqual(len(receipt["image_urls"]), 1)
         image_url = next(iter(receipt["image_urls"]))
         self.assertEqual(
@@ -635,12 +635,47 @@ fixtures:
         )
         self.assertEqual(
             receipt["text_sha256"],
-            "3f01766dddb0f84699c0e450381874b6cd22428fb3ed41a5928e2fb79c00723b",
+            "e2f443018ab5f3fbc4f35fa044c0121a1e42f1968d93144f6cfbe3a2b204cc35",
         )
         self.assertEqual(
             receipt["semantic_sha256"],
-            "6de1f8f7fdb3104233e22a133b4037226c6a86112a03e1bd5c1199c8ec63ff98",
+            "956fdd3f1e1c3cc482602b1f8437b15738927b62c787e87b5b3d86c6d28a5ab8",
         )
+        by_id = {probe.probe_id: probe for probe in probes}
+        self.assertEqual(len(by_id), len(probes))
+        # Preserve protocol and intent regressions independently of the old
+        # capability-based lanes: recursion is reasoning, Flow resumes the
+        # agent, and a programming visibility term is not confidential data.
+        expected_routes = {
+            "accuracy_reasoning:accuracy_multi_round_exploration__recursive_search": (
+                "accuracy",
+                "reasoning",
+            ),
+            "accuracy_agent:accuracy_dynamic_workflow__flow_state_resume": (
+                "accuracy",
+                "agent",
+            ),
+            "vault_v2_private_visibility_term:vault_v2_private_visibility_term": (
+                "vault",
+                "private",
+            ),
+            "vault_sensitive:vault_image__private_image_over_tools_collision": (
+                "vault",
+                "sensitive",
+            ),
+        }
+        for probe_id, route in expected_routes.items():
+            with self.subTest(probe_id=probe_id):
+                probe = by_id[probe_id]
+                self.assertEqual(
+                    (probe.expected_recipe, probe.expected_decision), route
+                )
+        containment = [probe for probe in probes if probe.expected_decision == "guard"]
+        self.assertEqual(len(containment), 5)
+        for probe in containment:
+            self.assertEqual(probe.expected_selection_status, "not_required")
+            self.assertIsNone(probe.expected_algorithm)
+            self.assertIn("fast_response", probe.expected_plugins)
 
 
 if __name__ == "__main__":

@@ -145,6 +145,11 @@ def build_consolidated_report(report_root: Path) -> dict[str, Any]:
         "inventory": inventory,
         "results": results,
         "summary": {
+            "evaluation_scopes": sorted(
+                {result["evaluation_scope"] for result in results if result["report"]}
+            ),
+            "deployment_passed": reported == expected
+            and all(result["deployment_passed"] for result in results),
             "expected_recipes": expected,
             "reported_recipes": reported,
             "passed_recipes": passed,
@@ -173,10 +178,24 @@ def _recipe_result(
     evaluation = _mapping(report.get("evaluation")) if report else {}
     is_reported = report is not None
     is_passed = is_reported and bool(evaluation.get("passed"))
+    scope = str(evaluation.get("evaluation_scope") or "deployment")
     devices = recipe.get("required_devices", [])
     absent_status = "requires_hardware" if devices else "missing"
     return {
         "recipe": name,
+        "evaluation_scope": scope,
+        "deployment_passed": (
+            is_passed
+            if scope == "deployment"
+            else bool(
+                _mapping(_mapping(evaluation.get("scopes")).get("deployment")).get(
+                    "passed"
+                )
+            )
+        ),
+        "scopes": evaluation.get("scopes"),
+        "selection_status_counts": evaluation.get("selection_status_counts"),
+        "selection_reasons": evaluation.get("selection_reasons"),
         "status": (
             "passed" if is_passed else "failed" if is_reported else absent_status
         ),
@@ -204,12 +223,14 @@ def render_consolidated_markdown(payload: dict[str, Any]) -> str:
             f"{summary['matched']}/{summary['total']} probes matched."
         ),
         "",
-        "| Recipe | Status | Matched | Total | Required devices |",
-        "| --- | --- | ---: | ---: | --- |",
+        f"Evaluation scopes: {', '.join(summary.get('evaluation_scopes') or ['deployment'])}. Deployment passed: `{summary.get('deployment_passed', False)}`.",
+        "",
+        "| Recipe | Scope | Status | Matched | Total | Required devices |",
+        "| --- | --- | --- | ---: | ---: | --- |",
     ]
     for result in _sequence(payload.get("results")):
         lines.append(
-            f"| {result['recipe']} | {result['status']} | "
+            f"| {result['recipe']} | {result.get('evaluation_scope', 'deployment')} | {result['status']} | "
             f"{result['matched']} | {result['total']} | "
             f"{', '.join(result.get('required_devices', []))} |"
         )

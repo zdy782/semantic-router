@@ -60,7 +60,9 @@ authoring mechanics here and release operations in the maintainer guide.
    entrypoint. Default recipes use `global.router.auto_model_names`; named
    recipes set `model` and `expected_recipe`.
 5. Declare `expected_algorithm` for every decision and `expected_plugins` when
-   the decision configures plugins.
+   the decision configures plugins. A model-free `fast_response` decision has no
+   algorithm: omit `expected_algorithm`, assert the plugin, and set
+   `expected_selection_status: not_required` on its probe group.
 6. Use `expected_signals` or `forbidden_signals` for signal and projection
    evidence that the prompt is intended to exercise.
 7. Preserve or raise the checked-in `coverage` minima. New routing surfaces
@@ -105,8 +107,9 @@ Keep large request boundaries declarative and reviewable:
   limit; animated containers are rejected.
 
 The evaluator materializes these fields only in memory. Reports retain the
-compact specification, materialized text/JSON byte counts, and a SHA-256
-receipt—not expanded filler or fixture binary. Do not check in repeated
+compact request specification, materialized text/JSON byte counts, and a SHA-256
+receipt. The raw Preview response is also preserved, including any text returned
+by the server; keep generated reports out of recipe packages. Do not check in repeated
 content objects, duplicate data URIs, YAML anchors, aliases, merge keys, or
 explicit tags; conformance and package admission reject YAML indirection.
 
@@ -157,6 +160,47 @@ make recipe-conformance-eval \
 # Build the CPU router and run every CPU-compatible maintained recipe.
 make recipe-conformance-live-cpu-all
 ```
+
+### Policy and deployment scope
+
+Live evaluation uses routing Preview. It runs the configured router classifiers
+and embeddings, evaluates decisions and the model selector, and returns the
+trace without calling a backend LLM. The default `--scope deployment` checks
+both policy evidence and the expected selection result against the actual
+assigned models. It does not certify backend answer quality or multi-model
+execution.
+
+For reusable policy evaluation across different model capacities, explicitly use
+`--scope policy`:
+
+```bash
+python tools/dev/router-calibration/recipe_conformance.py eval \
+  --recipe <name> --router-url http://127.0.0.1:8080 --scope policy
+
+python tools/dev/router-calibration/router_calibration_loop.py eval \
+  --probes path/to/probes.yaml --router-url http://127.0.0.1:8080 --scope policy
+```
+
+Both scopes retain the same decision, recipe, algorithm, plugin, signal,
+projection, trace, and request-error checks. Policy scope can pass when no
+assigned model fits, but still requires a valid selection response. Reports
+show policy and deployment results separately, selection-status counts, and
+each returned reason. A policy pass is not a deployment pass. Keep
+`expected_algorithm`; omitting it is not a policy-only mode.
+
+Explicit group-level `expected_selection_status: unavailable` and
+`not_required` remain strict in both scopes: the status must match, no final
+model may be fabricated, and a reason is required. `not_required` also requires
+the `fast_response` selection method. Use `unavailable` only when the test binds
+real assignment limits; a long request alone does not imply that every possible
+model pool must reject it.
+
+For deployment qualification, bind the intended recipe entrypoints and real
+model metadata, then run deployment scope and backend execution checks. Input
+capacity includes retained messages and media plus the effective output limit.
+The router's neutral token estimate is not an exact tokenizer or media bound.
+Router-classifier input limits are separate: an inference or HTTP failure fails
+both scopes and cannot be reclassified as a successful capacity rejection.
 
 CI publishes coverage in the job summary and uploads the consolidated
 `recipe-conformance-report` artifact for 30 days. `inventory.json` contains the

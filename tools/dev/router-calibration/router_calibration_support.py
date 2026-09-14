@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from router_calibration_evaluation import (
+    EVALUATION_SCOPES,
     compare_eval_selection,
     compare_eval_trace,
     compare_expected_plugins,
@@ -192,6 +194,8 @@ def evaluate_probe(
     probe: Probe,
     request_timeout_seconds: float = 60.0,
     allowed_decisions: frozenset[str] | None = None,
+    *,
+    scope: str = "deployment",
 ) -> dict[str, Any]:
     """Evaluate one probe while preserving the patchable transport seam."""
     return evaluate_probe_request(
@@ -200,6 +204,7 @@ def evaluate_probe(
         request_timeout_seconds=request_timeout_seconds,
         allowed_decisions=allowed_decisions,
         http_client=http_json,
+        scope=scope,
     )
 
 
@@ -208,7 +213,11 @@ def evaluate_probes(
     probes: Iterable[Probe],
     manifest: dict[str, Any] | None = None,
     selected_probe_ids: Iterable[str] | None = None,
+    *,
+    scope: str = "deployment",
 ) -> dict[str, Any]:
+    if scope not in EVALUATION_SCOPES:
+        raise ValueError(f"unknown evaluation scope {scope!r}")
     manifest = manifest or {}
     settings = resolve_evaluation_settings(manifest)
     all_probes = list(probes)
@@ -228,9 +237,11 @@ def evaluate_probes(
                 probe,
                 settings.request_timeout_seconds,
                 frozenset(decisions_by_recipe[recipe_key]),
+                scope=scope,
             )
         except RuntimeError as exc:
             result = failed_probe_result(probe, exc)
+            result["evaluation_scope"] = scope
         result["latency_ms"] = round((time.perf_counter() - probe_started) * 1000, 3)
         return result
 
@@ -259,6 +270,28 @@ def evaluate_probes(
         else 0.0
     )
     return {
+        "evaluation_scope": scope,
+        "scopes": {
+            name: summarize_scope_results(results, manifest, name)
+            for name in EVALUATION_SCOPES
+        },
+        "selection_status_counts": dict(
+            sorted(
+                Counter(
+                    result.get("selection_status") or "missing" for result in results
+                ).items()
+            )
+        ),
+        "selection_reasons": [
+            {
+                "id": result["id"],
+                "status": result.get("selection_status") or "missing",
+                "reason": result.get("selection_reason") or "",
+                "error": result.get("error"),
+            }
+            for result in results
+            if result.get("selection_reason") or result.get("error")
+        ],
         "router_url": normalize_router_url(router_url),
         "evaluated_at": utc_now(),
         "request_timeout_seconds": settings.request_timeout_seconds,
@@ -279,6 +312,31 @@ def evaluate_probes(
         "decisions": decision_summaries,
         "tags": tag_summaries,
         "results": results,
+    }
+
+
+def summarize_scope_results(
+    results: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    scope: str,
+) -> dict[str, Any]:
+    scoped = [
+        {**result, "matched": bool(result.get(f"{scope}_matched"))}
+        for result in results
+    ]
+    matched = sum(result["matched"] for result in scoped)
+    total = len(scoped)
+    success_rate = round(matched / total * 100, 1) if total else 0.0
+    decisions = summarize_decision_results(scoped, manifest)
+    acceptance = resolve_acceptance(manifest)
+    return {
+        "matched": matched,
+        "total": total,
+        "success_rate": success_rate,
+        "matched_decisions": sum(bool(item["passed"]) for item in decisions),
+        "total_decisions": len(decisions),
+        "passed": success_rate >= acceptance["min_probe_pass_rate"]
+        and all(item["passed"] for item in decisions),
     }
 
 
@@ -373,6 +431,11 @@ def resolve_eval_request_timeout(manifest: dict[str, Any]) -> float:
 
 def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
     return {
+        "evaluation_scope": "deployment",
+        "policy_matched": False,
+        "deployment_matched": False,
+        "raw_response": getattr(exc, "raw_response", None),
+        "http_status": getattr(exc, "http_status", None),
         "id": probe.probe_id,
         "decision_id": probe.decision_id,
         "variant_id": probe.variant_id,
@@ -427,6 +490,8 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "trace_matched": False,
         "signal_errors_matched": False,
         "selection_matched": False,
+        "selection_structure_matched": False,
+        "selection_structure_errors": ["Eval request failed before model selection"],
         "selection_errors": ["Eval request failed before model selection"],
         "trace_decisions": [],
         "trace_errors": [str(exc)],

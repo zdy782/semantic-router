@@ -55,7 +55,7 @@
     },
     "matchMode": {"enum": ["contains", "exact"]},
     "selectionStatus": {
-      "enum": ["selected", "planned_final", "fallback", "execution_required", "unavailable", "failed"]
+      "enum": ["selected", "planned_final", "fallback", "execution_required", "unavailable", "failed", "not_required"]
     },
     "coveragePercent": {"type": "number", "minimum": 0, "maximum": 100},
     "tagCategoryCounts": {

@@ -27,6 +27,7 @@ from recipe_metadata_schema import (
     load_recipe_metadata_document,
     validate_recipe_metadata_schema,
 )
+from router_calibration_evaluation import EVALUATION_SCOPES
 from router_calibration_manifest import Probe, load_probe_manifest
 from router_calibration_report import render_markdown_summary
 from router_calibration_support import evaluate_probes, write_json
@@ -488,15 +489,15 @@ def build_recipe_inventory(path: Path) -> RecipeInventory:
     plugins: set[str] = set()
     fallback_decisions: set[str] = set()
     for (recipe, name), decision in decisions.items():
-        algorithm = str(
-            _mapping(decision.get("algorithm")).get("type") or "static"
-        ).strip()
-        algorithms.add(algorithm)
-        plugins.update(
+        decision_plugins = {
             str(_mapping(plugin).get("type") or "").strip()
             for plugin in _sequence(decision.get("plugins"))
             if str(_mapping(plugin).get("type") or "").strip()
-        )
+        }
+        algorithm = str(_mapping(decision.get("algorithm")).get("type") or "").strip()
+        if algorithm or "fast_response" not in decision_plugins:
+            algorithms.add(algorithm or "static")
+        plugins.update(decision_plugins)
         rules = _mapping(decision.get("rules"))
         if not _sequence(rules.get("conditions")):
             fallback_decisions.add(f"{recipe}:{name}")
@@ -695,12 +696,24 @@ def command_eval(args: argparse.Namespace) -> int:
     config = load_yaml_mapping(recipe_path / "config.yaml")
     manifest, probes = load_probe_manifest(recipe_path / "probes.yaml")
     probes = bind_default_entrypoints(config, probes)
-    evaluation = evaluate_probes(args.router_url, probes, manifest)
+    evaluation = evaluate_probes(
+        args.router_url, probes, manifest, scope=getattr(args, "scope", "deployment")
+    )
     tag_acceptance = evaluate_live_tag_policy(
         evaluation, _mapping(manifest.get("coverage"))
     )
     evaluation["coverage_acceptance"] = tag_acceptance
     evaluation["passed"] = bool(evaluation["passed"]) and tag_acceptance["passed"]
+    for scope, summary in evaluation.get("scopes", {}).items():
+        scoped_results = [
+            {**result, "matched": bool(result.get(f"{scope}_matched"))}
+            for result in evaluation["results"]
+        ]
+        scoped_tags = evaluate_live_tag_policy(
+            {"results": scoped_results}, _mapping(manifest.get("coverage"))
+        )
+        summary["coverage_acceptance"] = scoped_tags
+        summary["passed"] = bool(summary["passed"]) and scoped_tags["passed"]
     report = {"inventory": asdict(inventory), "evaluation": evaluation}
     output_dir = args.output_dir / args.recipe
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -718,6 +731,8 @@ def command_eval(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "recipe": args.recipe,
+                "evaluation_scope": evaluation.get("evaluation_scope", "deployment"),
+                "scopes": evaluation.get("scopes", {}),
                 "matched": evaluation["matched"],
                 "total": evaluation["total"],
                 "passed": evaluation["passed"],
@@ -778,6 +793,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = subparsers.add_parser("eval")
     evaluate.add_argument("--recipe", required=True)
     evaluate.add_argument("--router-url", required=True)
+    evaluate.add_argument(
+        "--scope",
+        choices=EVALUATION_SCOPES,
+        default="deployment",
+        help="Policy checks real routing evidence; deployment also requires the expected live model selection.",
+    )
     evaluate.set_defaults(func=command_eval)
 
     report = subparsers.add_parser("report")

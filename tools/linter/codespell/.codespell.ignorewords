@@ -27,6 +27,9 @@ varios
 tread
 ot
 Sie
+# German, Spanish, and Portuguese recipe vocabulary
+modell
+diagramas
 # Language codes (ISO 639-1) used in HuggingFace dataset configs
 te
 # NPM package names (not spelling errors)

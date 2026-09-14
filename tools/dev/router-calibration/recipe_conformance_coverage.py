@@ -293,6 +293,11 @@ def _configured_algorithms(
             str(_mapping(decision.get("algorithm")).get("type") or "static"),
         )
         for (recipe, name), decision in decisions.items()
+        if _mapping(decision.get("algorithm"))
+        or not any(
+            _mapping(plugin).get("type") == "fast_response"
+            for plugin in _sequence(decision.get("plugins"))
+        )
     }
 
 
@@ -361,6 +366,10 @@ def _decision_surface_key(recipe: str, decision: str, surface: str) -> str:
 
 
 def _signal_key(signal_type: str, name: str) -> str:
+    # Runtime complexity outcomes carry a difficulty suffix; coverage counts
+    # the configured rule. Actual outcome matching remains suffix-exact.
+    if signal_type == "complexity":
+        name = name.split(":", 1)[0]
     return f"{signal_type}:{name}"
 
 

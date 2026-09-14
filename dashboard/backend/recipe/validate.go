@@ -67,15 +67,7 @@ func compareEvalResponse(raw json.RawMessage, probe ProbeDetail, allProbes []Pro
 		probe.Expected.SignalMatch,
 	)
 	aliasPassed := aliasMatches(probe.Expected.Alias, actualModels)
-	selectionPassed, selectionFailures := compareEvalSelection(
-		probe.Expected.Algorithm,
-		response.SelectedModel,
-		response.SelectionStatus,
-		response.SelectionMethod,
-		actualModels,
-		probe.Expected.SelectionStatus,
-		response.SelectionReason,
-	)
+	selectionPassed, selectionFailures := compareExpectedSelection(probe.Expected, response, actualModels)
 	checks := ValidationChecks{
 		Decision:  actualDecision == probe.Expected.Decision,
 		Model:     probe.Model == "" || strings.TrimSpace(response.RequestedModel) == probe.Model,
@@ -134,6 +126,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func compareExpectedSelection(expected ExpectedAssertions, response evalResponse, recommendedModels []string) (bool, []string) {
+	_, failures := compareEvalSelection(expected.Algorithm, response.SelectedModel, response.SelectionStatus, response.SelectionMethod, recommendedModels, expected.SelectionStatus, response.SelectionReason)
+	if (response.SelectionStatus == "unavailable" || response.SelectionStatus == "not_required") && strings.TrimSpace(response.FinalModel) != "" {
+		failures = append(failures, response.SelectionStatus+" must not fabricate final_model")
+	}
+	return len(failures) == 0, failures
+}
+
 func compareEvalSelection(algorithm, selectedModel, status, method string, recommendedModels []string, expectedStatus, reason string) (bool, []string) {
 	algorithm = strings.TrimSpace(algorithm)
 	if algorithm == "" && expectedStatus == "" {
@@ -151,7 +151,15 @@ func compareEvalSelection(algorithm, selectedModel, status, method string, recom
 	failures := []string{}
 	failures = append(failures, selectionStatusFailures(algorithm, expectedStatuses, status)...)
 	negative := status == "unavailable" || status == "failed"
-	if algorithm != "" && (!negative || (expectedStatus != "unavailable" && expectedStatus != "failed") || method != "") {
+	if status == "not_required" {
+		if method != "fast_response" {
+			failures = append(failures, "not_required requires selection_method=fast_response")
+		}
+		if strings.TrimSpace(reason) == "" {
+			failures = append(failures, "selection_reason is required for not_required")
+		}
+	}
+	if status != "not_required" && algorithm != "" && (!negative || (expectedStatus != "unavailable" && expectedStatus != "failed") || method != "") {
 		failures = append(failures, selectionMethodFailures(algorithm, method)...)
 	}
 	if negative && strings.TrimSpace(reason) == "" {
@@ -210,7 +218,7 @@ func selectedModelFailures(status, selectedModel string, recommendedModels []str
 	if (status == "selected" || status == "fallback") && selectedModel != "" && !contains(recommendedModels, selectedModel) {
 		failures = append(failures, "selected_model is not a recommended decision candidate")
 	}
-	if (status == "execution_required" || status == "unavailable" || status == "failed") && selectedModel != "" {
+	if (status == "execution_required" || status == "unavailable" || status == "failed" || status == "not_required") && selectedModel != "" {
 		failures = append(failures, fmt.Sprintf("%s must not fabricate selected_model", status))
 	}
 	return failures

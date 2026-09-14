@@ -154,10 +154,10 @@ type DeactivateResult struct {
 }
 
 type ExpectedAssertions struct {
-	SelectionStatus  string              `json:"selection_status,omitempty"`
 	Decision         string              `json:"decision"`
 	Recipe           string              `json:"recipe,omitempty"`
 	Algorithm        string              `json:"algorithm,omitempty"`
+	SelectionStatus  string              `json:"selection_status,omitempty"`
 	Alias            string              `json:"alias,omitempty"`
 	Plugins          []string            `json:"plugins"`
 	ForbiddenPlugins []string            `json:"forbidden_plugins"`

@@ -485,7 +485,7 @@ type momFixtureReceipt struct {
 	textDigest      string
 }
 
-func TestMoMGeneratedTextPreservesLegacyTextReceipt(t *testing.T) {
+func TestMoMGeneratedTextPreservesPortableTextReceipt(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "config", "recipes", "built-in", "latest", "mom-v1", "probes.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -496,11 +496,12 @@ func TestMoMGeneratedTextPreservesLegacyTextReceipt(t *testing.T) {
 		t.Fatalf("decodeProbes(%s): %v", path, err)
 	}
 	receipt := materializeMoMFixtureReceipt(t, manifest)
-	if receipt.probeCount != 235 || receipt.messageProbes != 89 || receipt.generatedProbes != 50 ||
-		receipt.imageParts != 57 || receipt.textBytes != 26_230_077 {
+	// Match the official Python probe materializer's portable bundle receipt.
+	if receipt.probeCount != 253 || receipt.messageProbes != 90 || receipt.generatedProbes != 45 ||
+		receipt.imageParts != 53 || receipt.textBytes != 20_730_898 {
 		t.Fatalf("receipt counts = %#v", receipt)
 	}
-	if receipt.textDigest != "3f01766dddb0f84699c0e450381874b6cd22428fb3ed41a5928e2fb79c00723b" {
+	if receipt.textDigest != "e2f443018ab5f3fbc4f35fa044c0121a1e42f1968d93144f6cfbe3a2b204cc35" {
 		t.Fatalf("materialized text digest = %s", receipt.textDigest)
 	}
 	assertMoMImageFixtureReceipt(t, manifest, receipt.imageURLs)

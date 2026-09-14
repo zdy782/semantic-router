@@ -41,8 +41,30 @@ class RecipeConformanceTest(unittest.TestCase):
         # model assignments are composed by the Dashboard when a Mixture is
         # created, so the package itself stays model- and deployment-neutral.
         self.assertEqual(len(mom.entrypoints), 0)
-        self.assertEqual(len(mom.decisions), 27)
-        self.assertEqual(mom.variants, 235)
+        self.assertEqual(
+            set(mom.decisions),
+            {
+                "balance:simple",
+                "balance:medium",
+                "balance:reasoning",
+                "speed:fast",
+                "speed:tools",
+                "speed:reasoning",
+                "cost:economy",
+                "cost:tools",
+                "cost:reasoning",
+                "accuracy:simple",
+                "accuracy:reasoning",
+                "accuracy:review",
+                "accuracy:agent",
+                "vault:guard",
+                "vault:sensitive",
+                "vault:private",
+            },
+        )
+        self.assertEqual(len(mom.decisions), 16)
+        self.assertEqual(mom.variants, 253)
+        self.assertEqual(set(mom.algorithms), {"multi_factor", "fusion", "workflows"})
         self.assertTrue(mom.coverage["passed"])
 
     def test_default_discovery_skips_the_nested_built_in_catalog(self) -> None:

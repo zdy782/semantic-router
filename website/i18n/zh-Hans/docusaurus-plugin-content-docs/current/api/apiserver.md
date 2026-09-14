@@ -88,6 +88,11 @@ curl -sS http://localhost:8080/api/v1/diagnostics/classify/intent \
 
 名称、分数和匹配规则取决于当前配方。各端点支持的输入形式见实时 schema。
 
+当命中的决策使用 `fast_response` 时，Preview 返回
+`selection_status: not_required` 和 `selection_method: fast_response`，不包含
+`selected_model`。这种即时响应不需要模型分配或候选模型的能力、上下文准入检查。
+面向客户端的响应模型标识不代表选择或调用了生成后端。
+
 ## 检查模型与指标 {#inspect-models-and-metrics}
 
 | 方法 | 路径 | 用途 |
