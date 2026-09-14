@@ -38,7 +38,7 @@ global:
     deployments:
       local-embedding:
         artifact: models/Vela-1.0-Encoder-307M-Embedding
-        revision: 3ef35758e9e36c73830a10dec2c8f1f5200cbf54
+        revision: 1e57cebf5a7b7fec6e6973f05bbca97c5cca4436
         provider: ort
         device: rocm:0
         precision: native

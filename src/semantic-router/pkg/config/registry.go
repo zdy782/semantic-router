@@ -161,7 +161,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Embedding",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding",
-		Revision:                "3ef35758e9e36c73830a10dec2c8f1f5200cbf54",
+		Revision:                "1e57cebf5a7b7fec6e6973f05bbca97c5cca4436",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Embedding"},
 		Purpose:                 PurposeEmbedding,
