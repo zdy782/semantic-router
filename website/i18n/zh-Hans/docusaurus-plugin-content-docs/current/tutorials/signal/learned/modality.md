@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "7c874be29871f6d00b36b2e21b3e549e846b98c5"
+  source_commit: "601c24720bd1d170db1dc431ac80055433021561"
   source_file: "docs/tutorials/signal/learned/modality.md"
   outdated: false
 ---
@@ -52,6 +52,8 @@ routing:
 保持规则名与决策要引用的路由行为对齐。通过 `global.model_catalog.modules.modality_detector` 配置检测器。
 
 ## 依赖与限制 {#dependencies-and-limitations}
+
+在检测器配置中设置 `classifier.max_sequence_length` 可以指定 token 预算；零值保留历史上的 512-token 默认值。原生加载器会检查模型是否支持该预算，超出预算的输入返回错误，不会截断后再预测。`method: classifier` 下推理失败会保留为未知，由决策的 `on_unknown` 策略处理，不会产生 `AR` 匹配。`method: hybrid` 则显式允许现有的关键词回退。
 
 模态检测器对预期输出模式分类；它不证明后端支持请求的输入附件。请保持模型卡能力与提供方校验对齐。完整示例见：
 [`config/fragments/signal/modality/multimodal.yaml`](https://github.com/vllm-project/semantic-router/blob/main/config/fragments/signal/modality/multimodal.yaml)。
