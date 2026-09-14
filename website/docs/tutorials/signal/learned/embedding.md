@@ -60,7 +60,14 @@ routing:
 
 Tune the threshold and candidate list together; that matters more than adding many low-quality examples.
 
-Configure ranked fallback behavior with the embedding model settings:
+By default, a rule matches only when its similarity score reaches its
+`threshold`. Unmatched scores remain available to numeric predicates and
+projections.
+
+For ranked intent selection, you can explicitly enable soft matching below.
+When no rule meets its threshold, this permits matches above
+`min_score_threshold` instead. Leave it disabled when a rule's threshold must
+be a strict boundary, such as a risk or privacy condition.
 
 ```yaml
 global:

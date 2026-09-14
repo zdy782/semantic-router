@@ -50,6 +50,22 @@ control.
 
 ## Configuration
 
+When configuration omits a setting, the defaults are:
+
+| Setting | Default |
+| --- | --- |
+| `global.router.learning.enabled` | `false`; the master switch must be enabled. |
+| `adaptation.enabled` and `protection.enabled` | `true`, subject to the master switch. |
+| `adaptation.candidate_set` | `decision` |
+| `protection.scope` | `conversation` |
+| Protection identity headers | `x-session-id` and `x-conversation-id` |
+
+The repository's reference `config/config.yaml` explicitly enables learning and
+both components. Built-in recipes inherit the active base configuration; choosing
+a recipe does not enable the master switch. When protection is enabled but its
+configured identity is missing, it records diagnostics and leaves routing
+unprotected. See [session identification](../../api/session-identification).
+
 ```yaml
 global:
   router:

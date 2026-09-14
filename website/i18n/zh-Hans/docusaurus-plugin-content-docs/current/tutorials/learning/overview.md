@@ -41,6 +41,18 @@ translation:
 
 ## 配置
 
+配置省略相关设置时，默认值如下：
+
+| 设置 | 默认值 |
+| --- | --- |
+| `global.router.learning.enabled` | `false`；需要显式开启总开关。 |
+| `adaptation.enabled` 和 `protection.enabled` | `true`，但受总开关控制。 |
+| `adaptation.candidate_set` | `decision` |
+| `protection.scope` | `conversation` |
+| 防护身份请求头 | `x-session-id` 和 `x-conversation-id` |
+
+仓库参考配置 `config/config.yaml` 显式启用了路由学习及两个组件。内置配方继承当前基础配置；选择配方不会开启总开关。防护已启用但缺少配置的身份标识时，只记录诊断，不对路由施加会话防护。详见[会话标识](../../api/session-identification)。
+
 ```yaml
 global:
   router:

@@ -1080,8 +1080,8 @@ type HNSWEmbeddingConfig struct {
 	// +optional
 	TargetLayer int `json:"target_layer,omitempty"`
 
-	// EnableSoftMatching enables soft matching mode
-	// +kubebuilder:default=true
+	// EnableSoftMatching allows below-threshold matches when no rule meets its threshold.
+	// +kubebuilder:default=false
 	// +optional
 	EnableSoftMatching bool `json:"enable_soft_matching,omitempty"`
 

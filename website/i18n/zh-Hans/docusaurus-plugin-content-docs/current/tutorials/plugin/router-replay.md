@@ -11,6 +11,8 @@ translation:
 
 `router_replay` 是一个路由局部插件，用于覆盖单条路由的回放/调试采集。
 
+配方的 `routing.data_policy.replay: false` 优先于全局和路由局部回放设置。该策略禁止采集，包括被拒绝的请求；`router_replay.enabled: true` 也不能覆盖它。Vault 使用此策略，因此其请求不会出现在 Dashboard Insights 中。详见[回放 API 和隐私控制](../../api/router#router-replay)。
+
 ## 主要优势
 
 - 让一条路由覆盖路由器级回放默认值。

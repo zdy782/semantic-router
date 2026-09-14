@@ -105,8 +105,9 @@ over this skill.
    to `mom-v1`; it does not need a standalone directory. Use `builtin export`
    to inspect the verified bundle, or `builtin init` to select the named recipe
    and bind its decisions to providers from your config. Read the listed
-   candidate requirements and supply an explicit bindings file for every
-   decision. Preserve recipe structure and algorithm minimums; do not replace
+   candidate requirements and supply explicit bindings for each decision that
+   calls a backend. Immediate-response decisions, such as Vault's `guard`, need no model
+   assignment. Preserve recipe structure and algorithm minimums; do not replace
    it with a similarly named source example or silently delete lanes to force
    validation. When the user authorizes a capability-specific derivative, use
    explicit adaptation options such as `builtin init --exclude-decision`.

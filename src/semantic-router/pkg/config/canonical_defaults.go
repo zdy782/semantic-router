@@ -156,7 +156,7 @@ func defaultCanonicalModelCatalog() CanonicalModelCatalog {
 		hazard.Revision = model.Revision
 	}
 	catalog.Deployments = map[string]ModelDeployment{"hazard": hazard}
-	enabledSoftMatching := true
+	enabledSoftMatching := false
 	catalog.Embeddings.Semantic.EmbeddingConfig.EnableSoftMatching = &enabledSoftMatching
 	return catalog
 }

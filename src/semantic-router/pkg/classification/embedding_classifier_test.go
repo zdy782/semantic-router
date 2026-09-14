@@ -37,6 +37,35 @@ func TestEmbeddingClassifier_SoftMatchingDisabledWithoutHardMatch(t *testing.T) 
 	}
 }
 
+func TestEmbeddingClassifier_DefaultsRespectRuleThreshold(t *testing.T) {
+	stubEmbeddingLookup(t, map[string][]float32{
+		"request":   makeEmbedding(1.0, 0.0, 0.0),
+		"reference": makeEmbedding(0.60, 0.0, 0.0),
+	})
+
+	for name, settings := range map[string]config.HNSWConfig{
+		"omitted settings":   {},
+		"canonical defaults": config.DefaultCanonicalGlobal().ModelCatalog.Embeddings.Semantic.EmbeddingConfig,
+	} {
+		t.Run(name, func(t *testing.T) {
+			classifier := newTestEmbeddingClassifier(t, []config.EmbeddingRule{{
+				Name: "intent", Candidates: []string{"reference"},
+				SimilarityThreshold: 0.8, AggregationMethodConfiged: config.AggregationMethodMax,
+			}}, settings)
+			result, err := classifier.ClassifyDetailed("request")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Matches) != 0 {
+				t.Fatalf("below-threshold similarity must not emit a routing signal: %+v", result.Matches)
+			}
+			if len(result.Scores) != 1 || result.Scores[0].Score < 0.59 {
+				t.Fatalf("unmatched similarity must remain available for numeric projections: %+v", result.Scores)
+			}
+		})
+	}
+}
+
 func TestEmbeddingClassifier_SoftMatchingEnabledReturnsBestRule(t *testing.T) {
 	stubEmbeddingLookup(t, map[string][]float32{
 		"query":        makeEmbedding(1.0, 0.0, 0.0),

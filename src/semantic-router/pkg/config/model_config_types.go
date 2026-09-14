@@ -83,12 +83,15 @@ func (e EmbeddingModels) MinSimilarityThreshold() float32 {
 type HNSWConfig struct {
 	// FullContext sends complete routing text to mmBERT up to its model capacity.
 	// False retains bounded representative sampling for routing latency.
-	FullContext        bool                   `yaml:"full_context,omitempty"`
-	Backend            string                 `yaml:"backend,omitempty"`
-	ModelType          string                 `yaml:"model_type,omitempty"`
-	PreloadEmbeddings  bool                   `yaml:"preload_embeddings"`
-	TargetDimension    int                    `yaml:"target_dimension,omitempty"`
-	TargetLayer        int                    `yaml:"target_layer,omitempty"`
+	FullContext       bool   `yaml:"full_context,omitempty"`
+	Backend           string `yaml:"backend,omitempty"`
+	ModelType         string `yaml:"model_type,omitempty"`
+	PreloadEmbeddings bool   `yaml:"preload_embeddings"`
+	TargetDimension   int    `yaml:"target_dimension,omitempty"`
+	TargetLayer       int    `yaml:"target_layer,omitempty"`
+	// EnableSoftMatching allows below-threshold matches when no rule meets its
+	// threshold. This ranked fallback is opt-in; routing predicates default to
+	// the threshold declared by each rule.
 	EnableSoftMatching *bool                  `yaml:"enable_soft_matching,omitempty"`
 	TopK               *int                   `yaml:"top_k,omitempty"`
 	MinScoreThreshold  float32                `yaml:"min_score_threshold,omitempty"`
@@ -111,7 +114,7 @@ func (c HNSWConfig) WithDefaults() HNSWConfig {
 		result.TargetDimension = 768
 	}
 	if result.EnableSoftMatching == nil {
-		defaultEnabled := true
+		defaultEnabled := false
 		result.EnableSoftMatching = &defaultEnabled
 	}
 	if result.TopK == nil {

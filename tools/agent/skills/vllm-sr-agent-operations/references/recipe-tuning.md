@@ -40,6 +40,13 @@ Do not assume an early keyword condition avoids learned inference. Used signal
 families can execute concurrently before decision composition; measure the
 whole request and the actual forwards.
 
+Check the effective matching settings before tuning candidates. Embedding soft
+matching is opt-in: enabling it permits matches below individual rule thresholds
+when no strong match exists. `top_k` can suppress otherwise valid matches; use
+`top_k: 0` when decisions need several independent embedding signals. Compare
+the published scores with emitted matches in Preview. Check each inference
+deployment's token budget separately from the selected backend's context window.
+
 Guard detects prompt attacks. Safety and Hazard identify content risk and
 categories; they do not establish malicious intent. Pair harmful requests with
 help-seeking, quotation, and analysis controls before choosing refusal behavior.

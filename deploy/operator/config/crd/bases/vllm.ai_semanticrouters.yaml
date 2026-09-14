@@ -1520,9 +1520,9 @@ spec:
                             - openai_compatible
                             type: string
                           enable_soft_matching:
-                            default: true
-                            description: EnableSoftMatching enables soft matching
-                              mode
+                            default: false
+                            description: EnableSoftMatching allows below-threshold
+                              matches when no rule meets its threshold.
                             type: boolean
                           min_score_threshold:
                             default: "0.5"

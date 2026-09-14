@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import tempfile
@@ -430,7 +431,7 @@ def resolve_eval_request_timeout(manifest: dict[str, Any]) -> float:
 
 
 def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
-    return {
+    result = {
         "evaluation_scope": "deployment",
         "policy_matched": False,
         "deployment_matched": False,
@@ -491,8 +492,12 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "signal_errors_matched": False,
         "selection_matched": False,
         "selection_structure_matched": False,
-        "selection_structure_errors": ["Eval request failed before model selection"],
-        "selection_errors": ["Eval request failed before model selection"],
+        "selection_structure_errors": [
+            "Eval request failed; returned selection diagnostics do not establish success"
+        ],
+        "selection_errors": [
+            "Eval request failed; returned selection diagnostics do not establish success"
+        ],
         "trace_decisions": [],
         "trace_errors": [str(exc)],
         "recommended_models": [],
@@ -503,6 +508,53 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "metrics": {},
         "error": str(exc),
     }
+    result.update(_failed_response_diagnostics(result["raw_response"]))
+    return result
+
+
+def _failed_response_diagnostics(payload: Any) -> dict[str, Any]:
+    """Retain returned observations without accepting remote evaluation outcomes."""
+    if not isinstance(payload, dict):
+        return {}
+    result: dict[str, Any] = {}
+    fields = {
+        "requested_model": ("actual_model", str),
+        "recipe": ("actual_recipe", str),
+        "routing_decision": ("actual_decision", str),
+        "selected_model": ("selected_model", str),
+        "selection_status": ("selection_status", str),
+        "selection_method": ("selection_method", str),
+        "selection_reason": ("selection_reason", str),
+        "recommended_models": ("recommended_models", list),
+        "signal_errors": ("signal_errors", dict),
+        "signal_error_matches": ("signal_error_matches", dict),
+        "signal_confidences": ("signal_confidences", dict),
+        "signal_values": ("signal_values", dict),
+        "applied_unknown_policies": ("applied_unknown_policies", dict),
+        "decision_error": ("decision_error", str),
+        "metrics": ("metrics", dict),
+        "eval_trace": ("eval_trace", list),
+    }
+    for source, (target, value_type) in fields.items():
+        value = payload.get(source)
+        if isinstance(value, value_type):
+            result[target] = copy.deepcopy(value)
+    decision = payload.get("decision_result")
+    if isinstance(decision, dict):
+        for source, target, value_type in (
+            ("algorithm", "actual_algorithm", str),
+            ("plugins", "actual_plugins", list),
+            ("used_signals", "used_signals", dict),
+            ("matched_signals", "matched_signals", dict),
+            ("unmatched_signals", "unmatched_signals", dict),
+        ):
+            value = decision.get(source)
+            if isinstance(value, value_type):
+                result[target] = copy.deepcopy(value)
+        name = decision.get("decision_name")
+        if not result.get("actual_decision") and isinstance(name, str):
+            result["actual_decision"] = name
+    return result
 
 
 def run_validate(dsl_path: Path | None, yaml_path: Path | None) -> dict[str, Any]:
