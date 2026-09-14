@@ -6,7 +6,7 @@ safe negatives and unknown-label masks. See the [application recipes](../vela-ap
 for source admission, initialization, training and independent evaluation.
 
 New runs start from `llm-semantic-router/Vela-1.0-Encoder-307M` revision
-`ccd22e6ba42f86681578229f9dfd468295da3def`. Bind the downloaded encoder,
+`fe9ccc074b781bc0e2e13c2c8d26f2640410636a`. Bind the downloaded encoder,
 configuration and tokenizer bytes in each run. A shared model name alone does
 not establish common training lineage.
 

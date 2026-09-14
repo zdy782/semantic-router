@@ -2,7 +2,7 @@
 
 Derive a new PII model from the qualified
 `llm-semantic-router/Vela-1.0-Encoder-307M` Base at revision
-`ccd22e6ba42f86681578229f9dfd468295da3def`. This workflow initializes a fresh
+`fe9ccc074b781bc0e2e13c2c8d26f2640410636a`. This workflow initializes a fresh
 complete token-classification head and trains the full encoder, preserving 17
 entity types and 35 BIO labels. It validates character spans, supervises every
 entity subword, and evaluates exact entity boundaries. These instructions produce
@@ -28,7 +28,7 @@ From the repository root:
 SCRIPT=src/training/model_classifier/pii_model_fine_tuning_lora
 WORK=work/vela-pii
 BASE_MODEL_ID=llm-semantic-router/Vela-1.0-Encoder-307M
-BASE_REVISION=ccd22e6ba42f86681578229f9dfd468295da3def
+BASE_REVISION=fe9ccc074b781bc0e2e13c2c8d26f2640410636a
 mkdir -p "$WORK/sources"
 hf download "$BASE_MODEL_ID" --revision "$BASE_REVISION" --local-dir "$WORK/base"
 hf download llm-semantic-router/Vela-1.0-Encoder-307M-PII config.json \

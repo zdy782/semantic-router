@@ -77,6 +77,12 @@ python -m src.training.model_classifier.sequence_repair.train \
 
 输入预算包含特殊 tokens。超过预算的训练样本会被记录为拒绝，评测时拒绝溢出。增加预算时，应加入真实长样本。
 
+### 继续训练并保留已有能力 {#continue-a-model-while-preserving-existing-behavior}
+
+适配已发布的分类器时，从该任务的 checkpoint 开始，并省略 `--fresh-head`。可选的 `--trainable-last-layers` 只更新最后几层编码器和分类 head。将旧训练样本标记为 `retention_replay: true`，再使用 `--retention-targets`，可以在学习新标签时约束这些旧样本的预测变化。
+
+按照[继续训练流程](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_classifier/sequence_repair#preserve-behavior-during-continued-training)生成目标并配置训练。替换已部署的 Guard 模型前，在独立开发集上同时检查攻击召回率和合法请求误报。
+
 ## PII 检测器 {#pii-detector}
 
 PII 训练使用实体片段，而不是为整个请求指定一个标签。BIO 编码中，`B-TYPE` 表示实体开始，`I-TYPE` 表示继续，`O` 表示其他 token。

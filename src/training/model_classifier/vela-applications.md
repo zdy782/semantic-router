@@ -225,7 +225,7 @@ actual Torch accelerator build and all installed dependency versions with each
 candidate; installing a CPU or CUDA wheel does not enable ROCm.
 
 New Vela runs start from `llm-semantic-router/Vela-1.0-Encoder-307M` at
-revision `ccd22e6ba42f86681578229f9dfd468295da3def`. Download that revision
+revision `fe9ccc074b781bc0e2e13c2c8d26f2640410636a`. Download that revision
 to `/models/encoder` and retain its file hashes in the training receipt.
 Initialize a fresh task head and train the complete encoder. Use the actual
 parent ID and immutable revision; changing metadata on an old adapter does not
@@ -236,7 +236,7 @@ The [shared trainer](sequence_repair/README.md) handles softmax tasks:
 ```bash
 python -m src.training.model_classifier.sequence_repair.train \
   --base /models/encoder --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --base-revision fe9ccc074b781bc0e2e13c2c8d26f2640410636a \
   --method full --fresh-head --contract /artifacts/task/contract.json \
   --train /artifacts/task/train.jsonl \
   --dev /artifacts/task/development.jsonl \

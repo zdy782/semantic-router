@@ -8,7 +8,65 @@ import math
 from pathlib import Path
 
 from .model import load_model, save_adapter
-from .task_head import task_head_scope
+from .task_head import task_head_scope, tensor_digest
+
+
+def configure_trainable_tail(model, last_layers):
+    """Restrict a complete ModernBERT checkpoint to its tail and entire task head."""
+    if (
+        type(model).__name__ != "ModernBertForSequenceClassification"
+        or hasattr(model, "peft_config")
+        or hasattr(model, "get_base_model")
+    ):
+        raise ValueError("Tail training requires a complete ModernBERT classifier")
+    layers = model.model.layers
+    if type(last_layers) is not int or not 1 <= last_layers <= len(layers):
+        raise ValueError("Trainable tail must contain one through all encoder layers")
+    start = len(layers) - last_layers
+    modules = [*layers[start:], model.head, model.classifier]
+    selected = {
+        id(parameter) for module in modules for parameter in module.parameters()
+    }
+    named = dict(model.named_parameters())
+    if not selected or not selected <= {id(parameter) for parameter in named.values()}:
+        raise ValueError("Trainable modules do not belong to the classifier")
+    if any(
+        id(parameter) in selected for parameter in model.model.final_norm.parameters()
+    ):
+        raise ValueError("Encoder final normalization must remain frozen")
+    model.requires_grad_(False)
+    for module in modules:
+        module.requires_grad_(True)
+    tensors = {
+        name: {"shape": list(parameter.shape), "numel": parameter.numel()}
+        for name, parameter in named.items()
+        if parameter.requires_grad
+    }
+    return {
+        "architecture": type(model).__name__,
+        "layer_indices": list(range(start, len(layers))),
+        "trainable_tensors": tensors,
+        "trainable_parameters": sum(item["numel"] for item in tensors.values()),
+        "encoder_final_norm_trainable": False,
+    }
+
+
+def frozen_parameter_receipt(model):
+    """Hash frozen parameters once so an optional restricted update is auditable."""
+    return {
+        name: {
+            "shape": list(parameter.shape),
+            "dtype": str(parameter.dtype),
+            "sha256": tensor_digest(parameter),
+        }
+        for name, parameter in model.named_parameters()
+        if not parameter.requires_grad
+    }
+
+
+def assert_frozen_parameters_preserved(expected, model):
+    if frozen_parameter_receipt(model) != expected:
+        raise ValueError("Frozen parameter scope or tensor values changed")
 
 
 def validate_method(method, adapter, fresh_head):

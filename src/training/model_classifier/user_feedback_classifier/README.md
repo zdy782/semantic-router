@@ -77,7 +77,7 @@ training budget before comparing development scores.
 python -m src.training.model_classifier.sequence_repair.train \
   --base /artifacts/vela-base \
   --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --base-revision fe9ccc074b781bc0e2e13c2c8d26f2640410636a \
   --method full --fresh-head \
   --contract /artifacts/feedback-contract.json \
   --train /artifacts/feedback-train.jsonl \

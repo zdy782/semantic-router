@@ -14,12 +14,17 @@ from pathlib import Path
 from .data import assert_disjoint, file_receipts, label_counts, read_records
 from .evaluate import evaluate_records
 from .optimization import (
+    assert_frozen_parameters_preserved,
+    configure_trainable_tail,
+    frozen_parameter_receipt,
     initial_artifact_receipt,
     load_trainable_model,
     optimizer_groups,
     save_training_checkpoint,
     validate_method,
+    verify_full_checkpoint,
 )
+from .retention import RetentionCache, masked_teacher_kl, tokenizer_file_receipt
 from .selection import (
     BINARY_FP_SELECTION,
     binary_checkpoint_key,
@@ -201,6 +206,10 @@ def main():
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--head-learning-rate", type=float)
+    parser.add_argument("--trainable-last-layers", type=int)
+    parser.add_argument("--retention-targets", type=Path)
+    parser.add_argument("--retention-weight", type=float)
+    parser.add_argument("--retention-temperature", type=float)
     parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument(
         "--evaluation-dtype", choices=["bfloat16", "float32"], default="bfloat16"
@@ -230,6 +239,27 @@ def main():
     parser.add_argument("--seed", type=int, default=20260913)
     args = parser.parse_args()
     validate_method(args.method, args.adapter, args.fresh_head)
+    if args.trainable_last_layers is not None and args.method != "full":
+        raise ValueError("A trainable encoder tail requires full checkpoint training")
+    if args.retention_targets is None:
+        if args.retention_weight is not None or args.retention_temperature is not None:
+            raise ValueError("Retention settings require explicit TRAIN targets")
+    else:
+        if args.method != "full" or args.fresh_head:
+            raise ValueError("Retention requires the unchanged complete initial head")
+        args.retention_weight = (
+            0.5 if args.retention_weight is None else args.retention_weight
+        )
+        args.retention_temperature = (
+            2.0 if args.retention_temperature is None else args.retention_temperature
+        )
+        if any(
+            not math.isfinite(value) or value <= 0
+            for value in (args.retention_weight, args.retention_temperature)
+        ):
+            raise ValueError(
+                "Retention weight and temperature must be finite and positive"
+            )
     if args.training_order and (
         args.balanced_sampling
         or args.length_balanced_sampling
@@ -264,6 +294,16 @@ def main():
     )
     if model.config.problem_type != "single_label_classification":
         raise ValueError("This training loop requires single-label targets")
+    if args.retention_targets is not None:
+        verify_full_checkpoint(model, args.base)
+    trainable_scope = (
+        configure_trainable_tail(model, args.trainable_last_layers)
+        if args.trainable_last_layers is not None
+        else None
+    )
+    frozen_parameters = (
+        frozen_parameter_receipt(model) if trainable_scope is not None else None
+    )
     validate_selection_options(
         args.selection,
         label_to_id,
@@ -296,6 +336,26 @@ def main():
         pools[row["label"]].append(index)
     if not train:
         raise ValueError("No training rows fit the explicit budget")
+    retention = None
+    if args.retention_targets is not None:
+        if any(
+            not isinstance(row.get("retention_replay", False), bool) for row, _ in train
+        ):
+            raise ValueError("retention_replay must be a boolean TRAIN annotation")
+        retention = RetentionCache.load(
+            args.retention_targets,
+            initialization=initial_artifacts,
+            contract_sha256=hashlib.sha256(
+                Path(args.contract).read_bytes()
+            ).hexdigest(),
+            tokenizer_files=tokenizer_file_receipt(args.base),
+            train_rows=[row for row, _ in train],
+            tokenized_rows={row["id"]: encoded for row, encoded in train},
+            label_to_id=label_to_id,
+            replay_ids=[
+                row["id"] for row, _ in train if row.get("retention_replay", False)
+            ],
+        )
     train_lengths = [len(encoded["input_ids"]) for _, encoded in train]
     if (
         args.microbatch_token_budget is not None
@@ -344,6 +404,18 @@ def main():
         "base_revision": args.base_revision,
         "method": args.method,
         "fresh_head": args.fresh_head,
+        "trainable_scope": trainable_scope,
+        "frozen_parameters": frozen_parameters,
+        "retention": (
+            {
+                "targets": retention.receipt,
+                "weight": args.retention_weight,
+                "temperature": args.retention_temperature,
+                "normalization": "all examples in the optimizer step",
+            }
+            if retention is not None
+            else None
+        ),
         "initial_artifacts": initial_artifacts,
         "initial_adapter_sha256": initial_artifacts.get("adapter_model.safetensors"),
         "initial_adapter_config_sha256": initial_artifacts.get("adapter_config.json"),
@@ -478,6 +550,8 @@ def main():
         if key is not None and (best_key is None or key > best_key):
             best = score
             best_key = key
+            if frozen_parameters is not None:
+                assert_frozen_parameters_preserved(frozen_parameters, model)
             save_training_checkpoint(
                 model,
                 tokenizer,
@@ -532,6 +606,7 @@ def main():
         torch.cuda.reset_peak_memory_stats()
         torch.cuda.synchronize()
         start, step_loss, lengths = time.perf_counter(), 0.0, []
+        step_ce_loss, step_retention_loss, retention_examples = 0.0, 0.0, 0
         if training_order:
             planned = training_order.indices_for_step(step)
             microbatches = (
@@ -580,6 +655,21 @@ def main():
                         logits, gold, args.batch_size * args.accumulate
                     )
                 )
+            step_ce_loss += float(loss.detach())
+            if retention is not None:
+                teacher_logits, eligible = retention.targets(
+                    [row for row, _ in selected], device=logits.device
+                )
+                preservation = args.retention_weight * masked_teacher_kl(
+                    logits,
+                    teacher_logits,
+                    eligible,
+                    examples_per_step=args.batch_size * args.accumulate,
+                    temperature=args.retention_temperature,
+                )
+                loss = loss + preservation
+                step_retention_loss += float(preservation.detach())
+                retention_examples += int(eligible.sum())
             if not bool(torch.isfinite(loss)):
                 raise ValueError(f"Non-finite loss at step {step}")
             loss.backward()
@@ -611,6 +701,9 @@ def main():
         log = {
             "step": step,
             "loss": step_loss,
+            "cross_entropy_loss": step_ce_loss,
+            "retention_loss": step_retention_loss,
+            "retention_examples": retention_examples,
             "grad_norm": float(norm),
             "finite": True,
             "gradient_tensors": len(gradients),
@@ -639,6 +732,8 @@ def main():
     (args.output / "sampling-final.json").write_text(
         json.dumps(sampling_exposure([row for row, _ in train], drawn), indent=2) + "\n"
     )
+    if frozen_parameters is not None:
+        assert_frozen_parameters_preserved(frozen_parameters, model)
     if not args.probe_only:
         save_training_checkpoint(
             model,

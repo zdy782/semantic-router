@@ -63,7 +63,7 @@ For a fresh task head and LoRA adapter:
 python -m src.training.model_classifier.sequence_repair.initialize \
   --base artifacts/vela/base \
   --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --base-revision fe9ccc074b781bc0e2e13c2c8d26f2640410636a \
   --contract artifacts/vela/factcheck/contract.json \
   --output artifacts/vela/factcheck-initial
 ```
@@ -97,7 +97,7 @@ results, then qualify the selected artifact on separate test data.
 python -m src.training.model_classifier.sequence_repair.train \
   --base artifacts/vela/base \
   --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --base-revision fe9ccc074b781bc0e2e13c2c8d26f2640410636a \
   --adapter artifacts/vela/factcheck-initial \
   --contract artifacts/vela/factcheck/contract.json \
   --train artifacts/vela/factcheck/train.jsonl \
@@ -178,6 +178,46 @@ multiset or loss denominator. `actual-training-order.jsonl` records planned IDs
 and actual microbatches; `training-order-completed.json` binds the completed trace.
 Without this flag, existing sampling behavior is unchanged.
 
+### Preserve behavior during continued training
+
+When adding examples to an existing classifier, you can update only its last
+encoder layers and keep its earlier representations fixed. With `--method full`,
+`--trainable-last-layers 2` trains the last two blocks and the classification head.
+The earlier blocks, embeddings and encoder final normalization stay frozen. The
+saved checkpoint still contains the complete model.
+
+To also preserve predictions on old training examples, mark those rows with
+`"retention_replay": true`. Leave new examples unmarked. Generate teacher targets
+from the same complete checkpoint and label contract used for continuation:
+
+```bash
+python -m src.training.model_classifier.sequence_repair.prepare_retention \
+  --base artifacts/vela/guard-current \
+  --contract artifacts/vela/guard/contract.json \
+  --train artifacts/vela/guard/train.jsonl \
+  --output artifacts/vela/guard/retention \
+  --max-length 32768 --device cuda
+```
+
+Add these options to the full-checkpoint training command:
+
+```bash
+--trainable-last-layers 2 \
+--retention-targets artifacts/vela/guard/retention/manifest.json \
+--retention-weight 0.5 --retention-temperature 2
+```
+
+Targets contain complete-input FP32 logits. Training verifies their checkpoint,
+contract, tokenizer and row identities, and uses only teacher predictions that
+agree with the row's label without a tie. New examples retain their supervised
+labels. The additional KL loss uses the same optimizer-step example count as
+cross entropy, including when long inputs run in separate microbatches.
+
+This option requires a complete checkpoint with its existing head; it cannot be
+combined with an adapter or `--fresh-head`. Evaluate the updated model on separate
+development data, including false alarms on legitimate requests. Retention
+constrains the training examples; it does not guarantee unchanged unseen behavior.
+
 ### Optional token-budget microbatches
 
 `--microbatch-token-budget 32768` takes the same `batch-size × accumulate`
@@ -245,7 +285,7 @@ python -m src.training.model_classifier.sequence_repair.export \
   --runtime-task fact-check \
   --base artifacts/vela/base \
   --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision ccd22e6ba42f86681578229f9dfd468295da3def \
+  --base-revision fe9ccc074b781bc0e2e13c2c8d26f2640410636a \
   --adapter artifacts/vela/runs/factcheck-short/best-adapter \
   --run-manifest artifacts/vela/runs/factcheck-short/run.json \
   --contract artifacts/vela/factcheck/contract.json \

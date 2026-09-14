@@ -102,6 +102,18 @@ The input limit includes special tokens. Oversize training examples are
 reported as rejected, and evaluation rejects overflow. Include real long
 examples when increasing the limit.
 
+### Continue a model while preserving existing behavior
+
+When adapting a published classifier, start from that task checkpoint and omit
+`--fresh-head`. The optional `--trainable-last-layers` setting updates only the
+last encoder blocks and classification head. Mark old training examples with
+`retention_replay: true` and use `--retention-targets` to constrain changes to
+their predictions while learning from new labels.
+
+Follow the [continuation workflow](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_classifier/sequence_repair#preserve-behavior-during-continued-training)
+to generate targets and configure training. Compare both attack recall and false
+alarms on separate development requests before replacing a deployed Guard model.
+
 ## PII detector
 
 PII requires entity-span training rather than one label per request. The model
