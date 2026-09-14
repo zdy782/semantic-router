@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "4905de382e4434229fe7331e2a3ad45140d54351"
+  source_commit: "8d35d0310539e6fd7a771b0a208358ae8bb0be5e"
   source_file: "docs/tutorials/plugin/router-replay.md"
   outdated: false
 ---

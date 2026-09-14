@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "e56591a9cb24f073bf159927e87116ba6d278741"
+  source_commit: "8d35d0310539e6fd7a771b0a208358ae8bb0be5e"
   source_file: "docs/tutorials/learning/overview.md"
   outdated: false
 ---
