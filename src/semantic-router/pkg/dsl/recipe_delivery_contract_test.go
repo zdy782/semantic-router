@@ -131,6 +131,13 @@ func assertMergedRecipeDSL(
 		t.Fatalf("%s changes after compile, base merge, and runtime parse", dslPath)
 	}
 	assertDecisionAdaptationsPreserved(t, yamlPath, baseConfig.Decisions, mergedConfig.Decisions)
+	for _, recipe := range baseConfig.Recipes {
+		mergedRecipe, ok := mergedConfig.RecipeByName(recipe.Name)
+		if !ok {
+			t.Fatalf("%s lost recipe %q", yamlPath, recipe.Name)
+		}
+		assertDecisionAdaptationsPreserved(t, yamlPath+" recipe "+string(recipe.Name), recipe.Profile.Decisions, mergedRecipe.Profile.Decisions)
+	}
 }
 
 func assertDecisionAdaptationsPreserved(

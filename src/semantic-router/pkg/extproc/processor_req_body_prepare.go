@@ -148,7 +148,7 @@ func (r *OpenAIRouter) respondRoutingRejected(
 ) *ext_proc.ProcessingResponse {
 	resp := r.createErrorResponse(503, routingErr.Error())
 	if ctx.RouterReplayPluginConfig == nil && r.Config != nil {
-		ctx.RouterReplayPluginConfig = r.Config.EffectiveRouterReplayConfig(nil)
+		ctx.RouterReplayPluginConfig = r.effectiveReplayConfigForRequest(ctx, nil)
 	}
 	r.startRouterReplay(ctx, originalModel, "", "")
 	r.updateRouterReplayStatus(ctx, 503, false)

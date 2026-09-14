@@ -8,6 +8,7 @@ import (
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/decision"
+	modelselection "github.com/vllm-project/semantic-router/src/semantic-router/pkg/selection"
 )
 
 // ClassifyIntentForEval performs intent classification specifically for evaluation scenarios.
@@ -94,7 +95,9 @@ func (s *ClassificationService) populateEvalModelSelection(
 		response.SelectionReason = "live model selector is unavailable"
 		return
 	}
+	demand, _ := modelselection.EffectiveCandidateDemand(input.semanticRequest, decisionResult.Decision)
 	selection := selector.SelectModelForEval(EvalModelSelectionInput{
+		Demand:            demand,
 		Recipe:            response.Recipe,
 		Decision:          decisionResult.Decision,
 		Query:             input.currentUserText,

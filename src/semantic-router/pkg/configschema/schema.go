@@ -234,6 +234,9 @@ func setCoreEnums(root *jsonschema.Schema) {
 		string(routerconfig.ConfigSourceKubernetes),
 	})
 	setDefinitionPropertyEnum(root, "AlgorithmConfig", "type", routerconfig.SupportedDecisionAlgorithmTypes())
+	setDefinitionPropertyEnum(root, "CandidateRequirements", "capabilities", []string{routerconfig.CandidateCapabilitiesDeclared})
+	setDefinitionPropertyEnum(root, "CandidateRequirements", "context", []string{routerconfig.CandidateContextKnownLimits})
+	setDefinitionPropertyEnum(root, "MultiFactorSelectionConfig", "latency_metric", []string{"ttft", "tpot"})
 	setDefinitionPropertyEnum(root, "DecisionPlugin", "type", routerconfig.SupportedDecisionPluginTypes())
 	conditionTypes := append(routerconfig.SupportedDecisionSignalTypes(), routerconfig.SignalTypeProjection)
 	setDefinitionPropertyEnum(root, "RuleNode", "type", conditionTypes)

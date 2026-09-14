@@ -271,13 +271,15 @@ type InlineModels struct {
 
 // IntelligentRouting captures user-facing signal and decision configuration.
 type IntelligentRouting struct {
-	ModelBindings   map[string]ModelBinding `yaml:"model_bindings,omitempty"`
-	Signals         `yaml:",inline"`
-	Projections     Projections          `yaml:"projections,omitempty"`
-	Decisions       []Decision           `yaml:"decisions,omitempty"`
-	Strategy        RoutingStrategy      `yaml:"strategy,omitempty"`
-	ModelSelection  ModelSelectionConfig `yaml:"model_selection,omitempty"`
-	ReasoningConfig `yaml:",inline"`
+	CandidateRequirements *CandidateRequirements  `yaml:"candidate_requirements,omitempty"`
+	DataPolicy            *RoutingDataPolicy      `yaml:"data_policy,omitempty"`
+	ModelBindings         map[string]ModelBinding `yaml:"model_bindings,omitempty"`
+	Signals               `yaml:",inline"`
+	Projections           Projections          `yaml:"projections,omitempty"`
+	Decisions             []Decision           `yaml:"decisions,omitempty"`
+	Strategy              RoutingStrategy      `yaml:"strategy,omitempty"`
+	ModelSelection        ModelSelectionConfig `yaml:"model_selection,omitempty"`
+	ReasoningConfig       `yaml:",inline"`
 }
 
 // BackendModels captures configured backend endpoints and model metadata.

@@ -44,7 +44,7 @@ func initializeIsolatedReplayRecorders(
 
 	for _, ref := range cfg.RoutingDecisionRefs() {
 		decision := ref.Decision
-		pluginCfg := cfg.EffectiveRouterReplayConfig(decision)
+		pluginCfg := replayConfigForDecisionRef(cfg, ref)
 		if pluginCfg == nil {
 			continue
 		}
@@ -73,7 +73,7 @@ func initializeSharedReplayRecorders(
 
 	for _, ref := range cfg.RoutingDecisionRefs() {
 		decision := ref.Decision
-		pluginCfg := cfg.EffectiveRouterReplayConfig(decision)
+		pluginCfg := replayConfigForDecisionRef(cfg, ref)
 		if pluginCfg == nil {
 			continue
 		}

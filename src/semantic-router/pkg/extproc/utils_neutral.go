@@ -4,7 +4,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/llmprotocol"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/looper"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/utils/imageurl"
@@ -91,17 +90,16 @@ func extractSemanticRequestSignals(request *llmprotocol.Request) *requestSignalS
 			result.SystemMessageCount++
 		}
 		recordNonUserSignalMessage(result, string(instruction.Role), text)
-		consumeNeutralContext(result, instruction.Content)
 	}
 	for _, message := range request.Messages {
 		consumeSemanticMessage(result, message)
 	}
 	result.ToolDefinitionCount = len(request.Tools)
-	for _, tool := range request.Tools {
-		addContextBytes(result, len(tool.Name)+len(tool.Description), len(tool.InputSchema))
-	}
-	result.ContextTokenFloor = neutralContextTokenFloor(result, len(request.Messages)+len(request.Instructions))
-	result.ContextEquivalentBytes = saturatingNeutralMultiply(result.ContextTokenFloor, classification.RequestContextBytesPerToken)
+	estimate := llmprotocol.EstimateInput(request)
+	result.ContextTokenFloor = estimate.Tokens
+	result.ContextTextBytes = estimate.TextBytes
+	result.ContextEquivalentBytes = estimate.EquivalentBytes
+	result.ContextHasNonText = estimate.HasNonText
 	return result
 }
 
@@ -157,7 +155,6 @@ func consumeSemanticMessage(result *requestSignalSnapshot, message llmprotocol.M
 				if content.ToolCall.Name != "" {
 					result.AssistantToolNames = append(result.AssistantToolNames, content.ToolCall.Name)
 				}
-				addContextBytes(result, 0, len(content.ToolCall.Name)+len(content.ToolCall.Arguments))
 			}
 		case llmprotocol.ContentToolResult:
 			result.ToolResultCount++
@@ -167,7 +164,6 @@ func consumeSemanticMessage(result *requestSignalSnapshot, message llmprotocol.M
 			}
 		}
 	}
-	consumeNeutralContext(result, message.Content)
 }
 
 // neutralInlineImageDataURL returns the classifier-safe representation of one
@@ -212,53 +208,9 @@ func recordUserInputModalities(result *requestSignalSnapshot, contents []llmprot
 	}
 }
 
-func consumeNeutralContext(result *requestSignalSnapshot, contents []llmprotocol.Content) {
-	for _, content := range contents {
-		switch content.Kind {
-		case llmprotocol.ContentText, llmprotocol.ContentRefusal, llmprotocol.ContentReasoning:
-			addContextBytes(result, len(content.Text), 0)
-		case llmprotocol.ContentImage:
-			result.ContextHasNonText = true
-		case llmprotocol.ContentAudio, llmprotocol.ContentVideo, llmprotocol.ContentFile:
-			result.ContextHasNonText = true
-			addContextBytes(result, 0, len(content.URL)+len(content.Data)+len(content.FileID))
-		case llmprotocol.ContentToolResult:
-			result.ContextHasNonText = true
-			if content.ToolResult != nil {
-				consumeNeutralContext(result, content.ToolResult.Content)
-			}
-		}
-	}
-}
-
-func addContextBytes(result *requestSignalSnapshot, text, structured int) {
-	result.ContextTextBytes = saturatingNeutralAdd(result.ContextTextBytes, text)
-	result.ContextEquivalentBytes = saturatingNeutralAdd(result.ContextEquivalentBytes, structured)
-}
-
-func neutralContextTokenFloor(result *requestSignalSnapshot, messages int) int {
-	textTokens := (result.ContextTextBytes + classification.RequestContextBytesPerToken - 1) / classification.RequestContextBytesPerToken
-	structured := result.ContextEquivalentBytes
-	images := saturatingNeutralMultiply(result.ImageContentCount, classification.RequestContextImageTokenBudget)
-	framing := saturatingNeutralMultiply(messages, classification.RequestContextMessageFramingTokens)
-	framing = saturatingNeutralAdd(framing, saturatingNeutralMultiply(result.AssistantToolCallCount, classification.RequestContextToolCallFramingTokens))
-	framing = saturatingNeutralAdd(framing, saturatingNeutralMultiply(result.ToolDefinitionCount, classification.RequestContextToolDefinitionFramingTokens))
-	return saturatingNeutralAdd(saturatingNeutralAdd(textTokens, structured), saturatingNeutralAdd(images, framing))
-}
-
 func saturatingNeutralAdd(left, right int) int {
 	if right > 0 && left > math.MaxInt-right {
 		return math.MaxInt
 	}
 	return left + right
-}
-
-func saturatingNeutralMultiply(left, right int) int {
-	if left <= 0 || right <= 0 {
-		return 0
-	}
-	if left > math.MaxInt/right {
-		return math.MaxInt
-	}
-	return left * right
 }

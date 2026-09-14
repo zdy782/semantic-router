@@ -410,6 +410,7 @@ type ModelParams struct {
 	Catalog              string                                         `yaml:"catalog,omitempty"`
 	ParamSize            string                                         `yaml:"param_size,omitempty"`
 	ContextWindowSize    int                                            `yaml:"context_window_size,omitempty"`
+	MaxOutputTokens      int                                            `yaml:"max_output_tokens,omitempty"`
 	APIFormat            string                                         `yaml:"api_format,omitempty"`
 	Description          string                                         `yaml:"description,omitempty"`
 	Capabilities         []string                                       `yaml:"capabilities,omitempty"`

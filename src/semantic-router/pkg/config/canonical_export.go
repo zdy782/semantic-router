@@ -53,12 +53,14 @@ func CanonicalRoutingFromRouterConfig(cfg *RouterConfig) CanonicalRouting {
 	}
 
 	return CanonicalRouting{
-		ModelBindings: cloneModelMap(cfg.ModelBindings),
-		ModelCards:    routingModelsFromRouterConfig(cfg),
-		Signals:       canonicalSignalsFromSignals(cfg.RoutingProfileSignals()),
-		Projections:   canonicalProjectionsFromProjections(cfg.RoutingProfileProjections()),
-		Decisions:     copyDecisions(cfg.Decisions),
-		Strategy:      cfg.Strategy,
+		ModelBindings:         cloneModelMap(cfg.ModelBindings),
+		CandidateRequirements: cfg.CandidateRequirements.Clone(),
+		DataPolicy:            cfg.DataPolicy.Clone(),
+		ModelCards:            routingModelsFromRouterConfig(cfg),
+		Signals:               canonicalSignalsFromSignals(cfg.RoutingProfileSignals()),
+		Projections:           canonicalProjectionsFromProjections(cfg.RoutingProfileProjections()),
+		Decisions:             copyDecisions(cfg.Decisions),
+		Strategy:              cfg.Strategy,
 	}
 }
 
@@ -273,6 +275,7 @@ func routingModelsFromRuntimeConfig(cfg *RouterConfig) []RoutingModel {
 			Name:              cardName,
 			ParamSize:         params.ParamSize,
 			ContextWindowSize: params.ContextWindowSize,
+			MaxOutputTokens:   params.MaxOutputTokens,
 			Description:       params.Description,
 			Capabilities:      append([]string(nil), params.Capabilities...),
 			LoRAs:             copyLoRAAdapters(params.LoRAs),

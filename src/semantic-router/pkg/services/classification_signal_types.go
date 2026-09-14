@@ -6,6 +6,7 @@ import (
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/decision"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/selection"
 )
 
 const (
@@ -112,6 +113,7 @@ type EvalResponse struct {
 // from classification to the live Router selector. It intentionally excludes
 // raw tool schemas and message bodies beyond the current semantic query.
 type EvalModelSelectionInput struct {
+	Demand            selection.CandidateDemand
 	Recipe            config.RecipeName
 	Decision          *config.Decision
 	Query             string

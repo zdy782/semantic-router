@@ -74,12 +74,14 @@ type CanonicalEvaluationRecord struct {
 
 // CanonicalRouting contains the DSL-owned routing surface.
 type CanonicalRouting struct {
-	ModelBindings map[string]ModelBinding `yaml:"model_bindings,omitempty"`
-	ModelCards    []RoutingModel          `yaml:"modelCards,omitempty"`
-	Signals       CanonicalSignals        `yaml:"signals,omitempty"`
-	Projections   CanonicalProjections    `yaml:"projections,omitempty"`
-	Decisions     []Decision              `yaml:"decisions,omitempty"`
-	Strategy      RoutingStrategy         `yaml:"strategy,omitempty"`
+	CandidateRequirements *CandidateRequirements  `yaml:"candidate_requirements,omitempty"`
+	DataPolicy            *RoutingDataPolicy      `yaml:"data_policy,omitempty"`
+	ModelBindings         map[string]ModelBinding `yaml:"model_bindings,omitempty"`
+	ModelCards            []RoutingModel          `yaml:"modelCards,omitempty"`
+	Signals               CanonicalSignals        `yaml:"signals,omitempty"`
+	Projections           CanonicalProjections    `yaml:"projections,omitempty"`
+	Decisions             []Decision              `yaml:"decisions,omitempty"`
+	Strategy              RoutingStrategy         `yaml:"strategy,omitempty"`
 }
 
 // CanonicalSignals groups routing signals under routing.signals.
@@ -142,7 +144,9 @@ type RoutingModel struct {
 func isCanonicalConfig(raw map[string]interface{}) bool {
 	_, hasRouting := raw["routing"]
 	_, hasGlobal := raw["global"]
-	return hasRouting || hasGlobal
+	_, hasRecipes := raw["recipes"]
+	_, hasEntrypoints := raw["entrypoints"]
+	return hasRouting || hasGlobal || hasRecipes || hasEntrypoints
 }
 
 func normalizeCanonicalConfig(canonical *CanonicalConfig) (*RouterConfig, error) {
@@ -192,6 +196,8 @@ func normalizeCanonicalConfig(canonical *CanonicalConfig) (*RouterConfig, error)
 
 func applyCanonicalRoutingState(cfg *RouterConfig, canonical *CanonicalConfig) {
 	cfg.ModelBindings = cloneModelMap(canonical.Routing.ModelBindings)
+	cfg.CandidateRequirements = canonical.Routing.CandidateRequirements.Clone()
+	cfg.DataPolicy = canonical.Routing.DataPolicy.Clone()
 	cfg.Listeners = append([]Listener(nil), canonical.Listeners...)
 	cfg.Decisions = copyDecisions(canonical.Routing.Decisions)
 	ensureModelRefDefaults(cfg.Decisions)
@@ -205,6 +211,9 @@ func applyCanonicalRoutingState(cfg *RouterConfig, canonical *CanonicalConfig) {
 
 func validateCanonicalContract(canonical *CanonicalConfig) error {
 	if err := validateCanonicalVersion(canonical); err != nil {
+		return err
+	}
+	if err := canonical.Routing.CandidateRequirements.Validate(); err != nil {
 		return err
 	}
 	modelsByName, err := canonicalModelCardIndex(canonical.Routing)

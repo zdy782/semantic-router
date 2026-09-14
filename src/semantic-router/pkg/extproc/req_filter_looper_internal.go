@@ -240,7 +240,7 @@ func (r *OpenAIRouter) prepareLooperInternalContext(
 	ctx.VSRSelectedModel = modelName
 	ctx.RequestModel = modelName
 
-	if replayCfg := r.Config.EffectiveRouterReplayConfig(decision); replayCfg != nil {
+	if replayCfg := r.effectiveReplayConfigForRequest(ctx, decision); replayCfg != nil {
 		cfgCopy := *replayCfg
 		ctx.RouterReplayPluginConfig = &cfgCopy
 		logging.ComponentDebugEvent("extproc", "looper_router_replay_enabled", map[string]interface{}{

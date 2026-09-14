@@ -938,6 +938,7 @@ class RequestParamsPluginConfig(BaseModel):
     """Configuration for request_params plugin."""
 
     blocked_params: Optional[List[str]] = None
+    default_max_tokens: Optional[int] = Field(default=None, ge=1, strict=True)
     max_tokens_limit: Optional[int] = Field(default=None, ge=1)
     max_n: Optional[int] = Field(default=None, ge=1)
     strip_unknown: Optional[bool] = None
@@ -2279,6 +2280,23 @@ def _validate_unbound_classifier_selectors(profile):
     return profile
 
 
+class CandidateRequirements(BaseModel):
+    """Recipe candidate constraints; input token accounting remains estimated."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    capabilities: Optional[Literal["declared"]] = None
+    context: Optional[Literal["known_limits"]] = None
+
+
+class RoutingDataPolicy(BaseModel):
+    """Standing recipe restrictions; false replay cannot be enabled by a decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    replay: Optional[StrictBool] = None
+
+
 class Routing(BaseModel):
     """Canonical routing block."""
 
@@ -2286,6 +2304,8 @@ class Routing(BaseModel):
 
     model_cards: List[RoutingModel] = Field(default_factory=list, alias="modelCards")
     model_bindings: Dict[str, ModelBinding] = Field(default_factory=dict)
+    candidate_requirements: Optional[CandidateRequirements] = None
+    data_policy: Optional[RoutingDataPolicy] = None
     signals: Signals = Field(default_factory=Signals)
     projections: Projections = Field(default_factory=Projections)
     decisions: List[Decision] = Field(default_factory=list)
@@ -2331,6 +2351,8 @@ class RecipeRouting(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_bindings: Dict[str, ModelBinding] = Field(default_factory=dict)
+    candidate_requirements: Optional[CandidateRequirements] = None
+    data_policy: Optional[RoutingDataPolicy] = None
     signals: Signals = Field(default_factory=Signals)
     projections: Projections = Field(default_factory=Projections)
     decisions: List[Decision] = Field(default_factory=list)

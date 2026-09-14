@@ -1191,6 +1191,7 @@ routing:
             blocked_params:
               - logprobs
               - top_logprobs
+            default_max_tokens: 4096
             max_tokens_limit: 8192
             max_n: 4
             strip_unknown: false
@@ -1498,6 +1499,7 @@ routing:
             max_cost_per_1m: 5.0
             max_inflight: 50
           latency_percentile: 95
+          latency_metric: ttft
           on_no_candidates: cheapest
 
     - name: fallback_knn_route
@@ -1698,6 +1700,13 @@ recipes:
     description: Keeps privacy-sensitive traffic on the local default-tier model.
     routing:
       strategy: confidence
+      # Strict model facts; input accounting still uses an estimate.
+      candidate_requirements:
+        capabilities: declared
+        context: known_limits
+      # This deny also applies before a decision is available.
+      data_policy:
+        replay: false
       signals:
         keywords:
           - name: privacy_recipe_keywords

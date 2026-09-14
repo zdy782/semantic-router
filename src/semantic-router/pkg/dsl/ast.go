@@ -328,18 +328,20 @@ type ArrayVal struct {
 
 // Program is the root AST node, representing a complete DSL file.
 type Program struct {
-	ModelBindings        map[string]config.ModelBinding
-	Strategy             string
-	Entrypoints          []*EntrypointDecl
-	Recipes              []*RecipeDecl
-	Signals              []*SignalDecl
-	ProjectionPartitions []*ProjectionPartitionDecl
-	ProjectionScores     []*ProjectionScoreDecl
-	ProjectionMappings   []*ProjectionMappingDecl
-	Routes               []*RouteDecl
-	Models               []*ModelDecl
-	Plugins              []*PluginDecl
-	TestBlocks           []*TestBlockDecl
+	CandidateRequirements *config.CandidateRequirements
+	DataPolicy            *config.RoutingDataPolicy
+	ModelBindings         map[string]config.ModelBinding
+	Strategy              string
+	Entrypoints           []*EntrypointDecl
+	Recipes               []*RecipeDecl
+	Signals               []*SignalDecl
+	ProjectionPartitions  []*ProjectionPartitionDecl
+	ProjectionScores      []*ProjectionScoreDecl
+	ProjectionMappings    []*ProjectionMappingDecl
+	Routes                []*RouteDecl
+	Models                []*ModelDecl
+	Plugins               []*PluginDecl
+	TestBlocks            []*TestBlockDecl
 }
 
 // EntrypointDecl is the DSL form of one request-facing recipe binding.

@@ -442,15 +442,6 @@ def _workflow_configuration_errors(
 
     errors: List[ValidationError] = []
     mode = workflows_cfg.mode or "static"
-    planner = workflows_cfg.planner
-    planner_model = getattr(planner, "model", None) if planner is not None else None
-    if mode == "dynamic" and not planner_model:
-        errors.append(
-            ValidationError(
-                f"Decision '{decision.name}' uses workflows mode=dynamic but does not set planner.model",
-                field=f"{field_prefix}.{decision.name}.algorithm.workflows.planner.model",
-            )
-        )
     if mode == "dynamic" and workflows_cfg.roles:
         errors.append(
             ValidationError(

@@ -736,6 +736,11 @@ func validateDecisionMultiFactorAlgorithm(decisionName string, cfg *MultiFactorS
 	if cfg.LatencyPercentile < 0 || cfg.LatencyPercentile > 100 {
 		return fmt.Errorf("%s.latency_percentile must be within [1, 100] when declared", path)
 	}
+	switch cfg.LatencyMetric {
+	case "", "ttft", "tpot":
+	default:
+		return fmt.Errorf("%s.latency_metric must be %q or %q", path, "ttft", "tpot")
+	}
 	switch cfg.OnNoCandidates {
 	case "", "cheapest", "first", "fail":
 	default:

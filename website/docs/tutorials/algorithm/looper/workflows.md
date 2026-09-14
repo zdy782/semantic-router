@@ -92,9 +92,17 @@ normalization, or reference dereferencing. Extraction defaults to exact
 `content` matching; use `extract.sources` or `extract.mode: json_object` only
 when the decision explicitly permits a wider parser.
 
-The planner model is a control-plane model. It does not need to appear in
-`modelRefs`. Worker calls are constrained to `modelRefs`; if the planner names a
-model outside that list, the executor rejects the plan.
+The planner model generates the control plan. Omit `planner.model` to use the
+first assigned worker, in declared order, that is eligible for the complete
+planner request, including JSON output and its output/context budget. This scan
+makes no model calls. An explicit planner override keeps that target and must
+pass the same stage checks; it is not replaced by another model on failure.
+If no eligible planner exists, the request fails closed. An explicit planner
+may be a separately configured helper outside the worker `modelRefs`, but must
+still have an operator-assigned backend. Worker calls remain constrained to
+`modelRefs`; the executor rejects a plan that names a worker outside that list.
+Planner selection does not reduce a configured minimum of distinct successful
+workers.
 
 Static mode uses an explicit role plan. Each role model must be in the
 decision's `modelRefs`.
@@ -139,7 +147,7 @@ routing:
 | `roles` | list[object] | required for static | Ordered static roles, each with `name`, `models`, optional `prompt`, and optional `access_list` of earlier role ids or agent ids |
 | `final.model` | string | first worker response | Optional static final synthesis model from `modelRefs` |
 | `final.prompt` | string | built-in synthesis prompt | Optional static final synthesis instruction |
-| `planner.model` | string | required for dynamic | Control-plane model used to generate the workflow plan |
+| `planner.model` | string | first eligible assigned worker | Optional explicit model used to generate the workflow plan |
 | `planner.max_completion_tokens` | int | `2048` | Max completion tokens for the planner JSON plan only |
 | `minimum_candidates` | int | unset | Minimum distinct decision `modelRefs` required after Recipe materialization and context eligibility filtering |
 | `max_steps` | int | `3` | Maximum workflow steps accepted from the planner |

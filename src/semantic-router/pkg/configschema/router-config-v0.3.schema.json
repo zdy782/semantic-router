@@ -385,6 +385,24 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "CandidateRequirements": {
+      "properties": {
+        "capabilities": {
+          "type": "string",
+          "enum": [
+            "declared"
+          ]
+        },
+        "context": {
+          "type": "string",
+          "enum": [
+            "known_limits"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "CanonicalBackendRef": {
       "properties": {
         "name": {
@@ -1047,6 +1065,12 @@
     },
     "CanonicalRecipeRouting": {
       "properties": {
+        "candidate_requirements": {
+          "$ref": "#/$defs/CandidateRequirements"
+        },
+        "data_policy": {
+          "$ref": "#/$defs/RoutingDataPolicy"
+        },
         "model_bindings": {
           "additionalProperties": {
             "$ref": "#/$defs/ModelBinding"
@@ -1122,6 +1146,12 @@
     },
     "CanonicalRouting": {
       "properties": {
+        "candidate_requirements": {
+          "$ref": "#/$defs/CandidateRequirements"
+        },
+        "data_policy": {
+          "$ref": "#/$defs/RoutingDataPolicy"
+        },
         "model_bindings": {
           "additionalProperties": {
             "$ref": "#/$defs/ModelBinding"
@@ -4108,6 +4138,13 @@
         "latency_percentile": {
           "type": "integer"
         },
+        "latency_metric": {
+          "type": "string",
+          "enum": [
+            "ttft",
+            "tpot"
+          ]
+        },
         "on_no_candidates": {
           "type": "string"
         }
@@ -5160,6 +5197,10 @@
     },
     "RequestParamsPluginConfig": {
       "properties": {
+        "default_max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
         "blocked_params": {
           "items": {
             "type": "string"
@@ -5820,6 +5861,15 @@
         },
         "key_prefix": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "RoutingDataPolicy": {
+      "properties": {
+        "replay": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,

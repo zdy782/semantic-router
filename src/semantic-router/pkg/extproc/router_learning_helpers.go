@@ -75,7 +75,7 @@ func (r *OpenAIRouter) eligibleLearningModelRefs(refs []config.ModelRef, ctx *Re
 	for _, ref := range refs {
 		if strings.TrimSpace(ref.Model) == "" ||
 			!r.configuredBackendModel(ref.Model) ||
-			(ctx != nil && r.modelRefExceedsContextWindow(ref, ctx.VSRContextTokenCount)) ||
+			(ctx != nil && !selection.CandidateRequirementsEnabled(r.candidateRequirements(ctx)) && r.modelRefExceedsContextWindow(ref, ctx.VSRContextTokenCount)) ||
 			(ctx != nil && ctx.VSRPolicyEligibleModelRefs != nil && !modelRefInEligibility(ref, ctx.VSRPolicyEligibleModelRefs)) {
 			continue
 		}

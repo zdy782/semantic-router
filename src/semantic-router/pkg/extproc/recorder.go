@@ -111,7 +111,7 @@ func (r *OpenAIRouter) startRouterReplay(
 	selectedModel string,
 	decisionName string,
 ) {
-	if !shouldStartRouterReplay(ctx) {
+	if !shouldStartRouterReplay(ctx) || !r.replayAllowedForRequest(ctx) {
 		return
 	}
 
@@ -415,7 +415,7 @@ func (r *OpenAIRouter) finalizeRouterReplay(
 
 // attachRouterReplayResponse stores response payload (if configured) and optionally logs completion.
 func (r *OpenAIRouter) attachRouterReplayResponse(ctx *RequestContext, responseBody []byte, isFinal bool) {
-	if ctx == nil || ctx.RouterReplayID == "" {
+	if ctx == nil || ctx.RouterReplayID == "" || !r.replayAllowedForRequest(ctx) {
 		return
 	}
 
