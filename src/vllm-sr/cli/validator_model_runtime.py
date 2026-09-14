@@ -2,6 +2,7 @@
 
 from pathlib import PurePosixPath
 
+from cli.model_runtime_defaults import effective_model_deployments
 from cli.models import UserConfig
 from cli.validation_error import ValidationError
 
@@ -20,7 +21,7 @@ def validate_model_runtime_references(config: UserConfig) -> list[ValidationErro
                 field="global.model_catalog.modules.prompt_guard.protocol",
             )
         )
-    deployments = catalog.get("deployments", {})
+    deployments = effective_model_deployments(config)
     external_names = {item.get("name") for item in catalog.get("external", [])}
     for name, deployment in deployments.items():
         message = _deployment_error(name, deployment, external_names)

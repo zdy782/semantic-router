@@ -143,6 +143,19 @@ func defaultCanonicalModelCatalog() CanonicalModelCatalog {
 		KBs:        defaultCanonicalKnowledgeBases(),
 		Modules:    defaultCanonicalModelModules(),
 	}
+	// Declaring a deployment does not activate it. Recipes opt in through an
+	// independent-score binding that names the artifact's operating point.
+	hazard := ModelDeployment{
+		Artifact:  catalog.System.Hazard,
+		Provider:  "candle",
+		Device:    "cpu",
+		Precision: "fp32",
+		Input:     ModelInputBudget{MaxTokens: 32768, Overflow: "reject"},
+	}
+	if model := GetModelByPath(hazard.Artifact); model != nil {
+		hazard.Revision = model.Revision
+	}
+	catalog.Deployments = map[string]ModelDeployment{"hazard": hazard}
 	enabledSoftMatching := true
 	catalog.Embeddings.Semantic.EmbeddingConfig.EnableSoftMatching = &enabledSoftMatching
 	return catalog

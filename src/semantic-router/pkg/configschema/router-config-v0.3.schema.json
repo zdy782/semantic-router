@@ -766,7 +766,20 @@
           "additionalProperties": {
             "$ref": "#/$defs/ModelDeployment"
           },
-          "type": "object"
+          "type": "object",
+          "default": {
+            "hazard": {
+              "artifact": "models/Vela-1.0-Encoder-307M-Hazard",
+              "revision": "5dd25f2cc3c98f338e6a79b667662d60f936a28d",
+              "provider": "candle",
+              "device": "cpu",
+              "precision": "fp32",
+              "input": {
+                "max_tokens": 32768,
+                "overflow": "reject"
+              }
+            }
+          }
         },
         "embeddings": {
           "$ref": "#/$defs/CanonicalEmbeddingModels"

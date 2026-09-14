@@ -124,6 +124,13 @@ func GenerateFromSource(repositoryRoot string) ([]byte, error) {
 
 	addRecipeRoutingDefinition(schema)
 	setCoreEnums(schema)
+	deployments := definitionProperty(schema, "CanonicalModelCatalog", "deployments")
+	if deployments == nil {
+		return nil, fmt.Errorf("canonical model deployment schema is missing")
+	}
+	// Offline consumers resolve the same named defaults as the Router without
+	// copying artifact identities or materializing them in authoring documents.
+	deployments.Default = routerconfig.DefaultCanonicalGlobal().ModelCatalog.Deployments
 
 	pluginRefs, err := addPluginDefinitions(reflector, schema)
 	if err != nil {

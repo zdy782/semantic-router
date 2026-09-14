@@ -8,6 +8,7 @@ from cli.config_contract import (
     iter_routing_profiles,
 )
 from cli.models import UserConfig
+from cli.model_runtime_defaults import effective_model_deployments
 from cli.validation_error import ValidationError
 from cli.validator_model_runtime import project_classifier_rule
 
@@ -20,9 +21,7 @@ def validate_classifier_contracts(
 ) -> list[ValidationError]:
     errors: list[ValidationError] = []
     external_models = _external_models(config)
-    deployments = ((config.global_ or {}).get("model_catalog") or {}).get(
-        "deployments"
-    ) or {}
+    deployments = effective_model_deployments(config)
     for profile_name, routing in iter_routing_profiles(config):
         profile_field = (
             "routing"
