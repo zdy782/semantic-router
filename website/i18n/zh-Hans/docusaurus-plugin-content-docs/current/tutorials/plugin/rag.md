@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "d6d106f9ef5c3e09570a944d48d3bc7e1bc87dd3"
+  source_commit: "96399a94b9030d66f46c5d45f9a838defc091153"
   source_file: "docs/tutorials/plugin/rag.md"
   outdated: false
 ---
