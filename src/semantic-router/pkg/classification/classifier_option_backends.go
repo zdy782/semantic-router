@@ -149,6 +149,13 @@ func buildJailbreakDependencies(cfg *config.RouterConfig, jailbreakMapping *Jail
 }
 
 func buildPIIDependencies(cfg *config.RouterConfig, piiMapping *PIIMapping, models ...*classifierModelRuntime) (PIIInitializer, PIIInference, error) {
+	if cfg.PIIModel.Window != nil {
+		backend, err := newWindowedPIIBackend(cfg.PIIModel, piiMapping, models...)
+		if err != nil {
+			return nil, nil, err
+		}
+		return backend, backend, nil
+	}
 	if cfg.PIIModel.Backend != nil {
 		if piiMapping == nil {
 			// The mapping loader is skipped on purpose when no reachable routing

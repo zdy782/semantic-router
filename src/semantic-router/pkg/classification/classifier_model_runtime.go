@@ -43,6 +43,9 @@ func newClassifierModelRuntime(cfg *config.RouterConfig, runtime *native.Runtime
 	if err := models.resolveDefaultJailbreakWindow(); err != nil {
 		return nil, err
 	}
+	if err := models.resolveDefaultPIIWindow(); err != nil {
+		return nil, err
+	}
 	return models, nil
 }
 

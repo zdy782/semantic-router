@@ -1,6 +1,7 @@
 //! Exact token windows. Keep the Candle and ONNX implementations equivalent.
 //! No decode/re-encode step may alter tokens at a window boundary.
 
+#[derive(Debug, Clone)]
 pub struct TokenWindow {
     pub start: usize,
     pub end: usize,
@@ -14,6 +15,25 @@ pub fn encode_windows(
     size: usize,
     overlap: usize,
 ) -> Result<Vec<TokenWindow>, String> {
+    Ok(encode_token_windows(tokenizer, text, input_limit, size, overlap)?.windows)
+}
+
+/// Original token IDs and byte offsets share one content encoding. Window
+/// inference must never decode/re-tokenize slices of the source text.
+pub struct EncodedTokenWindows {
+    pub windows: Vec<TokenWindow>,
+    pub offsets: Vec<(usize, usize)>,
+    pub prefix_len: usize,
+    pub input_tokens: usize,
+}
+
+pub fn encode_token_windows(
+    tokenizer: &tokenizers::Tokenizer,
+    text: &str,
+    input_limit: usize,
+    size: usize,
+    overlap: usize,
+) -> Result<EncodedTokenWindows, String> {
     let content = tokenizer.encode(text, false).map_err(|e| e.to_string())?;
     let full = tokenizer.encode(text, true).map_err(|e| e.to_string())?;
     if full.len() > input_limit {
@@ -42,7 +62,19 @@ pub fn encode_windows(
     if [prefix, suffix].concat() != empty.get_ids() {
         return Err("window scanning requires a fixed special-token prefix and suffix".into());
     }
-    token_windows(content.get_ids(), prefix, suffix, size, overlap)
+    let offsets = content.get_offsets().to_vec();
+    if offsets
+        .iter()
+        .any(|&(start, end)| start > end || text.get(start..end).is_none())
+    {
+        return Err("tokenizer returned invalid original UTF-8 offsets".into());
+    }
+    Ok(EncodedTokenWindows {
+        windows: token_windows(content.get_ids(), prefix, suffix, size, overlap)?,
+        offsets,
+        prefix_len: prefix.len(),
+        input_tokens: full.len(),
+    })
 }
 
 fn token_windows(
@@ -157,5 +189,59 @@ mod tests {
         assert!(encode_windows(&tokenizer, "", 32768, 512, 255).is_err());
         assert!(encode_windows(&tokenizer, short, 512, 513, 0).is_err());
         assert!(encode_windows(&tokenizer, short, 512, 512, 510).is_err());
+    }
+    // Explicitly run against an operator-provided real tokenizer; no model is loaded.
+    #[test]
+    #[ignore = "requires SR_TEST_PII_TOKENIZER, never downloads model assets"]
+    fn real_tokenizer_windows_cover_unicode_and_document_limit() {
+        let path = std::env::var("SR_TEST_PII_TOKENIZER").expect("real tokenizer path required");
+        let mut tokenizer = tokenizers::Tokenizer::from_file(path).unwrap();
+        tokenizer.with_truncation(None).unwrap();
+        tokenizer.with_padding(None);
+        for text in [
+            "\u{20000}".repeat(128),
+            "\u{10400}".repeat(400),
+            "é猫 hello ".repeat(100),
+        ] {
+            let original = tokenizer.encode(text.as_str(), false).unwrap();
+            let plan = encode_token_windows(&tokenizer, &text, 32768, 512, 255).unwrap();
+            assert_eq!(plan.offsets, original.get_offsets());
+            let mut covered = vec![false; original.len()];
+            for window in &plan.windows {
+                assert!(window.ids.len() <= 512);
+                assert_eq!(
+                    &window.ids[plan.prefix_len..plan.prefix_len + window.end - window.start],
+                    &original.get_ids()[window.start..window.end]
+                );
+                covered[window.start..window.end].fill(true);
+            }
+            assert!(covered.iter().all(|v| *v));
+            for (offset, ch) in text.char_indices().filter(|(_, ch)| !ch.is_whitespace()) {
+                assert!(plan
+                    .offsets
+                    .iter()
+                    .any(|&(start, end)| start <= offset && end >= offset + ch.len_utf8()));
+            }
+        }
+        // This explicit test uses the maintained Vela PII tokenizer supplied
+        // by the caller, including its three-token framing for this text.
+        let at_limit = "word ".repeat(32765);
+        assert_eq!(
+            tokenizer.encode(at_limit.as_str(), true).unwrap().len(),
+            32768
+        );
+        let plan = encode_token_windows(&tokenizer, &at_limit, 32768, 512, 255).unwrap();
+        assert_eq!(plan.windows.last().unwrap().end, plan.offsets.len());
+        assert_eq!(plan.input_tokens, 32768);
+        let over_limit = at_limit + "word ";
+        assert_eq!(
+            tokenizer.encode(over_limit.as_str(), true).unwrap().len(),
+            32769
+        );
+        assert!(encode_token_windows(&tokenizer, &over_limit, 32768, 512, 255).is_err());
+        let text = "hello ".repeat(1000);
+        let limit = tokenizer.encode(text.as_str(), true).unwrap().len();
+        assert!(encode_token_windows(&tokenizer, &text, limit, 512, 255).is_ok());
+        assert!(encode_token_windows(&tokenizer, &text, limit - 1, 512, 255).is_err());
     }
 }

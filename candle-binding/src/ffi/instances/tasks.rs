@@ -28,6 +28,14 @@ pub(super) struct TokenOutput {
 }
 
 #[derive(Serialize)]
+pub(super) struct TokenWindowsOutput {
+    #[serde(flatten)]
+    output: TokenOutput,
+    content_tokens: usize,
+    windows: Vec<[usize; 2]>,
+}
+
+#[derive(Serialize)]
 pub(super) struct HallucinationOutput {
     has_hallucination: bool,
     confidence: f32,
@@ -196,6 +204,52 @@ impl Instance {
                 .collect(),
             _ => bail!("capability: handle is not a token classifier"),
         };
+        self.token_output(text, input, predictions)
+    }
+
+    pub(super) fn token_windows(
+        &self,
+        text: &str,
+        size: usize,
+        overlap: usize,
+    ) -> Result<TokenWindowsOutput> {
+        ensure!(self.info.task == "token", "capability: wrong task handle");
+        let Model::Token(model) = &self.model else {
+            bail!("capability: token windows require ModernBERT")
+        };
+        let input_tokens = self.count_tokens(text)?;
+        ensure!(
+            input_tokens <= self.info.max_input_tokens,
+            "input_limit: input has {input_tokens} tokens, task budget is {}",
+            self.info.max_input_tokens
+        );
+        let plan = crate::core::sequence_windows::encode_token_windows(
+            self.tokenizer()?,
+            text,
+            self.info.max_input_tokens,
+            size,
+            overlap,
+        )
+        .map_err(|e| anyhow!("configuration: {e}"))?;
+        let predictions = model.classify_token_windows(text, &plan)?;
+        let input = InputMetadata {
+            input_tokens: plan.input_tokens,
+            processed_tokens: plan.input_tokens,
+            truncated: false,
+        };
+        Ok(TokenWindowsOutput {
+            output: self.token_output(text, input, predictions)?,
+            content_tokens: plan.offsets.len(),
+            windows: plan.windows.iter().map(|w| [w.start, w.end]).collect(),
+        })
+    }
+
+    fn token_output(
+        &self,
+        text: &str,
+        input: InputMetadata,
+        predictions: Vec<(String, usize, f32, usize, usize)>,
+    ) -> Result<TokenOutput> {
         let spans = predictions
             .into_iter()
             .filter(|(_, _, _, start, end)| end > start)

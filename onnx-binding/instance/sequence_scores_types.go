@@ -45,3 +45,9 @@ func validSequenceWindow(options SequenceWindowOptions) error {
 	}
 	return nil
 }
+
+type WindowedTokenOutput struct {
+	TokenSpans
+	ContentTokens int      `json:"content_tokens"`
+	Windows       [][2]int `json:"windows"`
+}

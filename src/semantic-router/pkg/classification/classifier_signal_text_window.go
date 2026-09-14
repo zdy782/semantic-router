@@ -262,14 +262,14 @@ func (c *Classifier) hasLongContextClassifier(signalType string) bool {
 }
 
 func (c *Classifier) piiInputSpans(text string) []signalChunkSpan {
-	if c.hasLongContextClassifier(config.SignalTypePII) && text != "" {
+	if ((c != nil && c.Config != nil && c.Config.PIIModel.Window != nil) || c.hasLongContextClassifier(config.SignalTypePII)) && text != "" {
 		return []signalChunkSpan{{Text: text}}
 	}
 	return piiSignalChunkSpans(text)
 }
 
 func (c *Classifier) piiInputs(text string) []string {
-	if c.hasLongContextClassifier(config.SignalTypePII) {
+	if (c != nil && c.Config != nil && c.Config.PIIModel.Window != nil) || c.hasLongContextClassifier(config.SignalTypePII) {
 		return []string{text}
 	}
 	return piiSignalChunks(text)

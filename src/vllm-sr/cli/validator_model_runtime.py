@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from cli.model_runtime_defaults import effective_model_deployments
 from cli.models import UserConfig
 from cli.validation_error import ValidationError
+from cli.validator_pii_window import validate_pii_windows
 
 DEVICE_SELECTOR_PARTS = 2
 
@@ -67,6 +68,7 @@ def validate_model_runtime_references(config: UserConfig) -> list[ValidationErro
                         message, field=f"{prefix}.model_bindings.{consumer}"
                     )
                 )
+    errors.extend(validate_pii_windows(config, deployments))
     return errors
 
 

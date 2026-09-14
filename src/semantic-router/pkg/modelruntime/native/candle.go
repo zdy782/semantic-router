@@ -142,15 +142,47 @@ func (r *Runtime) Sequence(ctx context.Context, spec config.ResolvedModelBinding
 
 func (r *Runtime) Tokens(ctx context.Context, spec config.ResolvedModelBinding) (_ *binding.Resolved[string, tasks.TokenClassificationResult], callErr error) {
 	defer func() { observePreparationFailure(spec, callErr) }()
+	if spec.Deployment.Input.Overflow == "window" {
+		return nil, fmt.Errorf("%w: token window policy requires the typed window task", binding.ErrCapability)
+	}
 	if spec.Deployment.Provider == "ort" {
 		return r.ortTokens(ctx, spec)
 	}
 	if spec.Deployment.Provider != "candle" {
 		return nil, fmt.Errorf("%w: token provider %q is unavailable", binding.ErrCapability, spec.Deployment.Provider)
 	}
-	resource, err := r.candleResource(ctx, spec, true)
+	resource, model, info, err := r.prepareCandleTokens(ctx, spec)
 	if err != nil {
 		return nil, err
+	}
+	bound, err := r.tokens.Resolve(taskIdentity(spec), candleCapability(spec, info), resource, func(_ context.Context, _ io.Closer, text string) (tasks.TokenClassificationResult, error) {
+		result, inferErr := model.ClassifyTokens(text)
+		available := true
+		out := tasks.TokenClassificationResult{Input: candleInputUsage(result.Input), ScoresAvailable: &available, Entities: make([]tasks.TokenEntity, len(result.Spans))}
+		for i, span := range result.Spans {
+			out.Entities[i] = tasks.TokenEntity{EntityType: span.Label, Start: span.Start, End: span.End, Text: span.Text, Confidence: span.Confidence}
+		}
+		if result.Input.Truncated && inferErr == nil {
+			inferErr = tasks.ErrTokenSpansTruncated
+		}
+		return out, nativeError(inferErr)
+	})
+	if err == nil {
+		_, err = bound.Call(ctx, string(spec.Recipe), "warmup")
+	}
+	if err != nil {
+		_ = resource.Close()
+		return nil, err
+	}
+	bound.Ready()
+	return bound, nil
+}
+
+// prepareCandleTokens binds one token head while preserving pooled ownership.
+func (r *Runtime) prepareCandleTokens(ctx context.Context, spec config.ResolvedModelBinding) (*binding.Resource, *candle.TokenClassifier, candle.InstanceInfo, error) {
+	resource, err := r.candleResource(ctx, spec, true)
+	if err != nil {
+		return nil, nil, candle.InstanceInfo{}, err
 	}
 	var model *candle.TokenClassifier
 	err = resource.Use(ctx, func(value io.Closer) error {
@@ -179,39 +211,19 @@ func (r *Runtime) Tokens(ctx context.Context, spec config.ResolvedModelBinding) 
 			_ = model.Close()
 		}
 		_ = resource.Close()
-		return nil, err
+		return nil, nil, candle.InstanceInfo{}, err
 	}
 	if err = resource.Own(model); err != nil {
 		_ = model.Close()
 		_ = resource.Close()
-		return nil, err
+		return nil, nil, candle.InstanceInfo{}, err
 	}
 	info, err := model.Info()
 	if err != nil {
 		_ = resource.Close()
-		return nil, err
+		return nil, nil, candle.InstanceInfo{}, err
 	}
-	bound, err := r.tokens.Resolve(taskIdentity(spec), candleCapability(spec, info), resource, func(_ context.Context, _ io.Closer, text string) (tasks.TokenClassificationResult, error) {
-		result, inferErr := model.ClassifyTokens(text)
-		available := true
-		out := tasks.TokenClassificationResult{Input: candleInputUsage(result.Input), ScoresAvailable: &available, Entities: make([]tasks.TokenEntity, len(result.Spans))}
-		for i, span := range result.Spans {
-			out.Entities[i] = tasks.TokenEntity{EntityType: span.Label, Start: span.Start, End: span.End, Text: span.Text, Confidence: span.Confidence}
-		}
-		if result.Input.Truncated && inferErr == nil {
-			inferErr = tasks.ErrTokenSpansTruncated
-		}
-		return out, nativeError(inferErr)
-	})
-	if err == nil {
-		_, err = bound.Call(ctx, string(spec.Recipe), "warmup")
-	}
-	if err != nil {
-		_ = resource.Close()
-		return nil, err
-	}
-	bound.Ready()
-	return bound, nil
+	return resource, model, info, nil
 }
 
 func candleCapability(spec config.ResolvedModelBinding, info candle.InstanceInfo) binding.Capability {

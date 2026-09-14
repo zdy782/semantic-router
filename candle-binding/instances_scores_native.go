@@ -6,6 +6,7 @@ package candle_binding
 #include <stdint.h>
 #include <stddef.h>
 extern char* candle_instance_score(uint64_t, const char*);
+extern char* candle_instance_token_windows(uint64_t, const char*, size_t, size_t);
 extern char* candle_instance_classify_windows(uint64_t, const char*, size_t, size_t);
 extern char* candle_instance_score_windows(uint64_t, const char*, size_t, size_t);
 */
@@ -36,4 +37,13 @@ func nativeInstanceScoreWindows(handle uint64, text string, options SequenceWind
 	}
 	defer free()
 	return decodeInstanceResult[WindowedLabelScoresOutput](C.candle_instance_score_windows(C.uint64_t(handle), args[0], C.size_t(options.Size), C.size_t(options.Overlap)))
+}
+
+func nativeInstanceTokenWindows(handle uint64, text string, options SequenceWindowOptions) (WindowedTokenOutput, error) {
+	args, free, err := instanceStrings(text)
+	if err != nil {
+		return WindowedTokenOutput{}, err
+	}
+	defer free()
+	return decodeInstanceResult[WindowedTokenOutput](C.candle_instance_token_windows(C.uint64_t(handle), args[0], C.size_t(options.Size), C.size_t(options.Overlap)))
 }

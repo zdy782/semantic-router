@@ -11,3 +11,7 @@ func nativeInstanceClassifyWindows(uint64, string, SequenceWindowOptions) (Windo
 func nativeInstanceScoreWindows(uint64, string, SequenceWindowOptions) (WindowedLabelScoresOutput, error) {
 	return WindowedLabelScoresOutput{}, ErrBackendUnavailable
 }
+
+func nativeInstanceTokenWindows(uint64, string, SequenceWindowOptions) (WindowedTokenOutput, error) {
+	return WindowedTokenOutput{}, ErrBackendUnavailable
+}

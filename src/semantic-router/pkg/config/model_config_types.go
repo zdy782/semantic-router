@@ -21,7 +21,9 @@ type BertModel struct {
 }
 
 type CategoryModel struct {
-	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
+	// MaxSequenceLength bounds a complete text with Window, otherwise one
+	// inference. Implicit local Vela zero/nil resolves to a 32K document scan
+	// with 512-token forwards during owned preparation.
 	MaxSequenceLength int `yaml:"max_sequence_length,omitempty"`
 	// Enabled turns category classification on or off explicitly. Nil keeps the
 	// historical behaviour of running whenever a model is configured.
@@ -43,7 +45,10 @@ type CategoryModel struct {
 }
 
 type PIIModel struct {
-	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
+	Window *SequenceHeadWindowConfig `yaml:"window,omitempty"`
+	// MaxSequenceLength bounds a complete text with Window, otherwise one
+	// inference. Implicit local Vela zero/nil resolves to a 32K document scan
+	// with 512-token forwards during owned preparation.
 	MaxSequenceLength int `yaml:"max_sequence_length,omitempty"`
 	// Enabled turns PII classification on or off explicitly. Nil keeps the
 	// historical behaviour of running whenever a model is configured.
@@ -172,7 +177,9 @@ func (pc PromptCompressionConfig) SkipSignalsSet() map[string]bool {
 }
 
 type PromptGuardConfig struct {
-	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
+	// MaxSequenceLength bounds a complete text with Window, otherwise one
+	// inference. Implicit local Vela zero/nil resolves to a 32K document scan
+	// with 512-token forwards during owned preparation.
 	MaxSequenceLength    int                       `yaml:"max_sequence_length,omitempty"`
 	Backend              *RemoteClassifierBackend  `yaml:"backend,omitempty"`
 	Window               *SequenceHeadWindowConfig `yaml:"window,omitempty"`
@@ -199,7 +206,9 @@ type PromptGuardConfig struct {
 }
 
 type FeedbackDetectorConfig struct {
-	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
+	// MaxSequenceLength bounds a complete text with Window, otherwise one
+	// inference. Implicit local Vela zero/nil resolves to a 32K document scan
+	// with 512-token forwards during owned preparation.
 	MaxSequenceLength   int     `yaml:"max_sequence_length,omitempty"`
 	Enabled             bool    `yaml:"enabled"`
 	ModelID             string  `yaml:"model_id"`
@@ -321,7 +330,9 @@ type HallucinationMitigationConfig struct {
 }
 
 type FactCheckModelConfig struct {
-	// MaxSequenceLength selects the native mmBERT input budget; 0 preserves 512.
+	// MaxSequenceLength bounds a complete text with Window, otherwise one
+	// inference. Implicit local Vela zero/nil resolves to a 32K document scan
+	// with 512-token forwards during owned preparation.
 	MaxSequenceLength int     `yaml:"max_sequence_length,omitempty"`
 	ModelID           string  `yaml:"model_id"`
 	Threshold         float32 `yaml:"threshold"`

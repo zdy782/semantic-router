@@ -1579,7 +1579,24 @@ type CategoryModelConfig struct {
 // admission instead of by the router at load.
 //
 // +kubebuilder:validation:XValidation:rule="!has(self.backend) || !has(self.backend.contract) || self.backend.contract == 'token_spans.v1'",message="PII reads token_spans.v1 only; omit backend.contract or set it to token_spans.v1"
+// +kubebuilder:validation:XValidation:rule="!has(self.backend) || !has(self.use_mmbert_32k) || !self.use_mmbert_32k",message="backend cannot be combined with local use_mmbert_32k"
+// +kubebuilder:validation:XValidation:rule="!has(self.max_sequence_length) || self.max_sequence_length == 0 || (!has(self.backend) && has(self.use_mmbert_32k) && self.use_mmbert_32k)",message="max_sequence_length requires local use_mmbert_32k"
+// +kubebuilder:validation:XValidation:rule="!has(self.window) || (!has(self.backend) && has(self.use_mmbert_32k) && self.use_mmbert_32k)",message="window requires local use_mmbert_32k"
+// +kubebuilder:validation:XValidation:rule="!has(self.window) || self.window.size <= (has(self.max_sequence_length) && self.max_sequence_length > 0 ? self.max_sequence_length : 512)",message="window.size must not exceed max_sequence_length (512 when omitted or zero)"
 type PIIModelConfig struct {
+	// MaxSequenceLength is the total tokenized input budget, including special
+	// tokens. Omission or zero preserves the 512-token legacy limit.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxSequenceLength int `json:"max_sequence_length,omitempty"`
+	// UseMmBERT32K selects the local model that supports token windows.
+	// +optional
+	UseMmBERT32K bool `json:"use_mmbert_32k,omitempty"`
+	// Window scans original content tokens with explicit overlap. Omission or
+	// null leaves window selection unchanged; no CRD defaults are injected.
+	// +nullable
+	// +optional
+	Window *PromptGuardWindowConfig `json:"window,omitempty"`
 	// +optional
 	ModelID string `json:"model_id,omitempty"`
 	// +optional
@@ -1594,9 +1611,8 @@ type PIIModelConfig struct {
 	PIIMappingPath string `json:"pii_mapping_path,omitempty"`
 	// Backend names a remote token classifier speaking token_spans.v1. Its
 	// absence keeps local PII inference. The local selectors this replaces are
-	// model_id, use_modernbert and use_cpu above; the router also refuses a
-	// backend combined with the use_mmbert_32k selector that this CRD does not
-	// expose, so that combination cannot be written here.
+	// model_id, use_modernbert, use_mmbert_32k and use_cpu above. Explicit
+	// token windows are only supported by the local mmbert32k model.
 	// +optional
 	Backend *RemoteClassifierBackendConfig `json:"backend,omitempty"`
 	// OnError selects what a PII backend failure, or a provider-declared

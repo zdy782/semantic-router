@@ -361,3 +361,15 @@ pub unsafe extern "C" fn ort_instance_score_pairs(
         )
     })
 }
+
+/// # Safety
+/// `input` must point to a live NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn ort_instance_token_windows(
+    handle: u64,
+    input: *const c_char,
+    size: usize,
+    overlap: usize,
+) -> InstanceResult {
+    result(|| instances::detect_token_windows(handle, text(input)?, size, overlap))
+}

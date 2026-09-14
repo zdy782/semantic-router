@@ -345,3 +345,16 @@ pub unsafe extern "C" fn candle_instance_score_pairs(
 ) -> *mut c_char {
     reply(|| get(handle)?.score_pairs(serde_json::from_str(string(pairs)?)?))
 }
+
+/// Return globally decoded token spans after exact overlapping windows.
+/// # Safety
+/// `text` must point to a live NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn candle_instance_token_windows(
+    handle: u64,
+    text: *const c_char,
+    size: usize,
+    overlap: usize,
+) -> *mut c_char {
+    reply(|| get(handle)?.token_windows(string(text)?, size, overlap))
+}

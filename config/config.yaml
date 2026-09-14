@@ -2575,7 +2575,11 @@ global:
           # configured; false disables the classifier outright.
           enabled: true
           model_ref: pii_classifier
-          max_sequence_length: 0
+          # Document budget; each exact token window executes at most 512 tokens.
+          max_sequence_length: 32768
+          window:
+            size: 512
+            overlap: 255
           model_id: models/Vela-1.0-Encoder-307M-PII
           threshold: 0.9
           use_cpu: true

@@ -1224,6 +1224,85 @@ impl MmBertTokenClassifier {
         Ok(TokenClassificationResult { entities })
     }
 
+    /// Windows retain the original token offsets; BIO is decoded after the
+    /// deterministic token-level overlap merge, never independently per window.
+    pub fn detect_token_windows(
+        &mut self,
+        text: &str,
+        plan: &crate::core::sequence_windows::EncodedTokenWindows,
+        mut completed: impl FnMut(),
+    ) -> UnifiedResult<TokenClassificationResult> {
+        if !self
+            .config
+            .id2label
+            .values()
+            .any(|label| label.starts_with("B-") || label.starts_with("I-"))
+        {
+            return Err(errors::config_error(
+                "token_windows",
+                "token windows require a BIO token head",
+            ));
+        }
+        let mut merger = crate::core::token_windows::TokenWindowMerger::new(
+            plan.offsets.len(),
+            self.config.num_labels,
+        );
+        for window in &plan.windows {
+            let length = window.ids.len();
+            if length > self.max_sequence_length {
+                return Err(errors::validation(
+                    "input_tokens",
+                    &format!("at most {} tokens per window", self.max_sequence_length),
+                    &length.to_string(),
+                ));
+            }
+            let execution_len = self.session.execution_length(1, length)?;
+            let mut ids = vec![self.config.pad_token_id as i64; execution_len];
+            let mut mask = vec![0i64; execution_len];
+            for (index, &id) in window.ids.iter().enumerate() {
+                ids[index] = id as i64;
+                mask[index] = 1;
+            }
+            let outputs = self.session.run(ids, mask, 1, execution_len)?;
+            let logits = extract_token_logits_from_outputs(&outputs)
+                .map_err(|e| errors::inference_error("token_spans", &e.to_string()))?;
+            validate_classifier_logits(&logits, execution_len, self.config.num_labels)
+                .map_err(|e| errors::inference_error("token_spans", &e.to_string()))?;
+            completed();
+            let rows = logits
+                .rows()
+                .into_iter()
+                .take(length)
+                .map(|row| row.to_vec())
+                .collect::<Vec<_>>();
+            merger
+                .add(window, plan.prefix_len, &rows)
+                .map_err(|e| errors::inference_error("token_spans", &e))?;
+        }
+        let rows = merger
+            .finish()
+            .map_err(|e| errors::inference_error("token_spans", &e))?;
+        let logits = Array2::from_shape_vec(
+            (rows.len(), self.config.num_labels),
+            rows.into_iter().flatten().collect(),
+        )
+        .map_err(|e| errors::inference_error("token_spans", &e.to_string()))?;
+        let encoding = tokenizers::Encoding::from_tokens(
+            plan.offsets
+                .iter()
+                .map(|&(start, end)| tokenizers::Token {
+                    id: 0,
+                    value: String::new(),
+                    offsets: (start, end),
+                })
+                .collect(),
+            0,
+        );
+        Ok(TokenClassificationResult {
+            entities: bio_decode_entities(text, &encoding, &logits, &self.config)?,
+        })
+    }
+
     /// Get model info
     pub fn model_info(&self) -> String {
         format!(

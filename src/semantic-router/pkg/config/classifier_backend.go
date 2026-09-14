@@ -276,6 +276,9 @@ func ValidatePIIModelBackend(cfg *RouterConfig) error {
 		return fmt.Errorf("PII model configuration is nil")
 	}
 	model := &cfg.PIIModel
+	if err := ValidatePIIWindow(cfg); err != nil {
+		return err
+	}
 	if err := model.ClassifierOnErrorConfig.ValidateOnError(); err != nil {
 		return fmt.Errorf("classifier.pii.%w", err)
 	}

@@ -111,3 +111,17 @@ func (m *TokenClassifier) BindLabelScoreHead(path string) (*LabelScorer, error) 
 	}
 	return &LabelScorer{i}, nil
 }
+
+// WindowedTokenOutput contains globally decoded spans and exact coverage.
+type WindowedTokenOutput struct {
+	TokenOutput
+	ContentTokens int      `json:"content_tokens"`
+	Windows       [][2]int `json:"windows"`
+}
+
+func (m *TokenClassifier) ClassifyWindows(text string, options SequenceWindowOptions) (WindowedTokenOutput, error) {
+	if err := validSequenceWindow(options); err != nil {
+		return WindowedTokenOutput{}, err
+	}
+	return useInstance(m.instance, func(h uint64) (WindowedTokenOutput, error) { return nativeInstanceTokenWindows(h, text, options) })
+}

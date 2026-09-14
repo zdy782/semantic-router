@@ -58,3 +58,16 @@ func (m *LabelScorer) ScoreWindows(text string, options SequenceWindowOptions) (
 	})
 	return output, err
 }
+
+func (m *TokenClassifier) DetectWindows(text string, options SequenceWindowOptions) (WindowedTokenOutput, error) {
+	var output WindowedTokenOutput
+	if err := validSequenceWindow(options); err != nil {
+		return output, err
+	}
+	err := m.withHandle(func(handle C.uint64_t) error {
+		return withText(text, func(text *C.char) error {
+			return decode(C.ort_instance_token_windows(handle, text, C.size_t(options.Size), C.size_t(options.Overlap)), &output)
+		})
+	})
+	return output, err
+}

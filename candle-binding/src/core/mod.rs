@@ -45,3 +45,4 @@ pub mod tokenization_test;
 pub mod unified_error_test;
 
 pub mod sequence_windows;
+pub mod token_windows;

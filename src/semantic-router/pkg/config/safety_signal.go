@@ -107,7 +107,7 @@ func (c *RouterConfig) NeedsLocalSafetyHeadForRouting(hazard bool) bool {
 }
 
 // SequenceHeadWindowConfig enables scanning all content tokens in overlapping
-// windows. Omission keeps whole-input inference. Size includes special tokens;
+// windows. Each module resolves its own omission policy. Size includes special tokens;
 // Overlap counts content tokens. Scores are aggregated only after inference.
 type SequenceHeadWindowConfig struct {
 	Size    int `yaml:"size"`

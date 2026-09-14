@@ -13,3 +13,7 @@ func (*LabelScorer) ScoreWindows(string, SequenceWindowOptions) (WindowedLabelSc
 func (*SequenceClassifier) ClassifyWindows(string, SequenceWindowOptions) (WindowedClassificationOutput, error) {
 	return WindowedClassificationOutput{}, unavailable
 }
+
+func (*TokenClassifier) DetectWindows(string, SequenceWindowOptions) (WindowedTokenOutput, error) {
+	return WindowedTokenOutput{}, unavailable
+}

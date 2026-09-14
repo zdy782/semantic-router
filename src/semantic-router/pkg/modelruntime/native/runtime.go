@@ -35,6 +35,7 @@ type Runtime struct {
 	sequenceWindows *binding.Task[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution]
 	scoreWindows    *binding.Task[tasks.TextWindowsRequest, tasks.WindowedLabelScores]
 	tokens          *binding.Task[string, tasks.TokenClassificationResult]
+	tokenWindows    *binding.Task[tasks.TextWindowsRequest, tasks.WindowedTokenClassification]
 	grounded        *binding.Task[tasks.GroundedTextRequest, tasks.TokenClassificationResult]
 	pair            *binding.Task[tasks.TextPairRequest, tasks.LabelDistribution]
 	mu              sync.Mutex
@@ -50,6 +51,7 @@ func New(pool *binding.Pool) *Runtime {
 	scores, _ := binding.Register(registry, config.RemoteClassifierContractLabelScores, validateText, func(_ string, result tasks.LabelScores) error { return tasks.ValidateLabelScores(result.Scores) })
 	sequenceWindows, _ := binding.RegisterTask(registry, "windowed_label_distribution.v1", config.RemoteClassifierContractLabelDistribution, validateWindowInput, validateWindowDistribution)
 	scoreWindows, _ := binding.RegisterTask(registry, "windowed_label_scores.v1", config.RemoteClassifierContractLabelScores, validateWindowInput, validateWindowScores)
+	tokenWindows, _ := binding.RegisterTask(registry, "windowed_token_spans.v1", config.RemoteClassifierContractTokenSpans, validateWindowInput, validateWindowTokens)
 	tokens, _ := binding.Register(registry, config.RemoteClassifierContractTokenSpans, validateText, validateSpans)
 	grounded, _ := binding.RegisterTask(registry, "grounded_text.v1", config.RemoteClassifierContractTokenSpans, func(input tasks.GroundedTextRequest) error {
 		if err := validateText(input.Context); err != nil {
@@ -67,7 +69,7 @@ func New(pool *binding.Pool) *Runtime {
 	}, func(_ tasks.TextPairRequest, output tasks.LabelDistribution) error {
 		return validateDistribution("", output)
 	})
-	return &Runtime{Pool: pool, registry: registry, sequence: sequence, scores: scores, sequenceWindows: sequenceWindows, scoreWindows: scoreWindows, tokens: tokens, grounded: grounded, pair: pair, artifacts: make(map[string]string)}
+	return &Runtime{Pool: pool, registry: registry, sequence: sequence, scores: scores, sequenceWindows: sequenceWindows, scoreWindows: scoreWindows, tokens: tokens, tokenWindows: tokenWindows, grounded: grounded, pair: pair, artifacts: make(map[string]string)}
 }
 
 func validateText(text string) error {

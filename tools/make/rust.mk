@@ -54,7 +54,7 @@ RUST_CI_LIB_TESTS ?= \
 	model_architectures::generative::qwen3_with_lora::chunked_attention_tests::test_cached_suffix_generation_matches_uncached \
 	model_architectures::traditional::base_model_test::test_self_attention_matches_dense_reference
 
-RUST_CI_LIB_TEST_GROUPS ?= ffi::instances::tests::
+RUST_CI_LIB_TEST_GROUPS ?= ffi::instances::tests:: core::sequence_windows::tests:: core::token_windows::tests::
 
 test-rust-ci:
 	@$(LOG_TARGET)

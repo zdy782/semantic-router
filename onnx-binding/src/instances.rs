@@ -359,6 +359,71 @@ pub fn detect_tokens(handle: u64, text: &str) -> UnifiedResult<TokenSpans> {
 }
 
 #[derive(Debug, Serialize)]
+pub struct TokenWindows {
+    #[serde(flatten)]
+    output: TokenSpans,
+    content_tokens: usize,
+    windows: Vec<[usize; 2]>,
+}
+
+pub fn detect_token_windows(
+    handle: u64,
+    text: &str,
+    size: usize,
+    overlap: usize,
+) -> UnifiedResult<TokenWindows> {
+    let instance = get(handle)?;
+    let input = instance.input(text)?;
+    if input.truncated {
+        return Err(errors::validation(
+            "input_tokens",
+            &format!("at most {}", instance.effective_limit),
+            &input.original_tokens.to_string(),
+        ));
+    }
+    let plan = crate::core::sequence_windows::encode_token_windows(
+        &instance.tokenizer,
+        text,
+        instance.effective_limit,
+        size,
+        overlap,
+    )
+    .map_err(|e| errors::config_error("window", &e))?;
+    let mut model = instance.model.lock();
+    let Model::Token(model) = &mut *model else {
+        return Err(instance.wrong_task("token_classification"));
+    };
+    let result = model.detect_token_windows(text, &plan, || instance.completed())?;
+    let mut spans = Vec::with_capacity(result.entities.len());
+    for entity in result.entities {
+        if text.get(entity.start..entity.end) != Some(entity.text.as_str())
+            || !entity.confidence.is_finite()
+        {
+            return Err(errors::inference_error(
+                "token_spans",
+                "invalid original UTF-8 span or confidence",
+            ));
+        }
+        spans.push(Span {
+            text: entity.text,
+            entity_type: entity.entity_type,
+            start: entity.start,
+            end: entity.end,
+            confidence: entity.confidence,
+        });
+    }
+    Ok(TokenWindows {
+        output: TokenSpans {
+            spans,
+            offset_unit: "utf8_bytes",
+            input,
+        },
+        content_tokens: plan.offsets.len(),
+        windows: plan.windows.iter().map(|w| [w.start, w.end]).collect(),
+    })
+}
+
+#[derive(Debug, Serialize)]
 pub struct Embedding {
     pub values: Vec<f32>,
     pub normalized: bool,

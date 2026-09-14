@@ -77,6 +77,9 @@ func (r *SemanticRouter) validateSemanticRouter() error {
 	if err := r.validatePromptGuardContext(); err != nil {
 		return err
 	}
+	if err := r.validatePIIWindow(); err != nil {
+		return err
+	}
 
 	// Validate autoscaling configuration
 	if r.Spec.Autoscaling.Enabled != nil && *r.Spec.Autoscaling.Enabled {

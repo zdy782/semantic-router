@@ -844,6 +844,9 @@
     },
     "CanonicalPIIModule": {
       "properties": {
+        "window": {
+          "$ref": "#/$defs/SequenceHeadWindowConfig"
+        },
         "max_sequence_length": {
           "type": "integer"
         },

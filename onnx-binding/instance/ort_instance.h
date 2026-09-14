@@ -33,4 +33,5 @@ void ort_instance_result_free(OrtInstanceResult result);
 OrtInstanceResult ort_instance_score(uint64_t handle, const char *text);
 OrtInstanceResult ort_instance_classify_windows(uint64_t handle, const char *text, size_t size, size_t overlap);
 OrtInstanceResult ort_instance_score_windows(uint64_t handle, const char *text, size_t size, size_t overlap);
+OrtInstanceResult ort_instance_token_windows(uint64_t handle, const char* text, size_t size, size_t overlap);
 #endif

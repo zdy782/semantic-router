@@ -1624,6 +1624,97 @@ impl TraditionalModernBertTokenClassifier {
         run_on_inference_pool(&self.device, || self.classify_tokens_on_device(text))
     }
 
+    /// Execute exact token IDs, reconcile overlaps, and decode BIO only once.
+    pub fn classify_token_windows(
+        &self,
+        text: &str,
+        plan: &crate::core::sequence_windows::EncodedTokenWindows,
+    ) -> Result<Vec<TokenEntityTuple>> {
+        run_on_inference_pool(&self.device, || {
+            anyhow::ensure!(
+                self.labels
+                    .values()
+                    .any(|label| label.starts_with("B-") || label.starts_with("I-")),
+                "capability: token windows require a BIO token head"
+            );
+            let mut merger = crate::core::token_windows::TokenWindowMerger::new(
+                plan.offsets.len(),
+                self.labels.len(),
+            );
+            for window in &plan.windows {
+                anyhow::ensure!(
+                    window.ids.len() <= self.tokenizer.get_config().max_length,
+                    "input_limit: token window exceeds the prepared model budget"
+                );
+                let input_ids =
+                    Tensor::from_vec(window.ids.clone(), (1, window.ids.len()), &self.device)?;
+                let mask = Tensor::ones((1, window.ids.len()), DType::U32, &self.device)?;
+                let sequence = self.model.forward(&input_ids, &mask)?;
+                let hidden = match &self.head {
+                    Some(head) => head.forward(&sequence)?,
+                    None => sequence,
+                };
+                let logits = self
+                    .classifier
+                    .forward(&hidden)?
+                    .squeeze(0)?
+                    .to_vec2::<f32>()?;
+                merger
+                    .add(window, plan.prefix_len, &logits)
+                    .map_err(|e| anyhow::anyhow!("result_invalid: {e}"))?;
+            }
+            let logits = merger
+                .finish()
+                .map_err(|e| anyhow::anyhow!("result_invalid: {e}"))?;
+            let mut labeled = Vec::with_capacity(logits.len());
+            for (row, &(start, end)) in logits.iter().zip(&plan.offsets) {
+                // Stable first-index argmax, matching the ordinary Candle task.
+                let mut best = 0;
+                for index in 1..row.len() {
+                    if row[index] > row[best] {
+                        best = index;
+                    }
+                }
+                let maximum = row[best];
+                let denominator: f32 = row.iter().map(|v| (v - maximum).exp()).sum();
+                let label = self
+                    .labels
+                    .get(&best.to_string())
+                    .ok_or_else(|| anyhow::anyhow!("result_invalid: missing token label"))?;
+                labeled.push(BioToken {
+                    label,
+                    start,
+                    end,
+                    confidence: 1.0 / denominator,
+                });
+            }
+            let mut results = Vec::new();
+            for entity in merge_bio_entities(text, &labeled) {
+                let class = self
+                    .labels
+                    .iter()
+                    .filter_map(|(index, label)| {
+                        (label
+                            .strip_prefix("B-")
+                            .or_else(|| label.strip_prefix("I-"))
+                            == Some(entity.entity_type.as_str()))
+                        .then(|| index.parse::<usize>().ok())
+                        .flatten()
+                    })
+                    .min()
+                    .ok_or_else(|| anyhow::anyhow!("result_invalid: missing entity label"))?;
+                results.push((
+                    entity.text,
+                    class,
+                    entity.confidence,
+                    entity.start,
+                    entity.end,
+                ));
+            }
+            Ok(results)
+        })
+    }
+
     pub fn fit_prefix_to_window(&self, prefix: &str, suffix: &str) -> Result<String> {
         crate::core::tokenization_window::fit_prefix_to_window(
             self.tokenizer.as_ref(),

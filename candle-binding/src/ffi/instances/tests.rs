@@ -936,3 +936,37 @@ fn owned_reranker_uses_declared_normalization_without_legacy_flag() {
     std::fs::write(&path, layout.to_string()).unwrap();
     assert!(load(opts, "pair_scores").is_err());
 }
+
+#[test]
+fn token_windows_decode_boundary_entity_once_with_original_offsets() {
+    let dir = fixture(&["O", "I-SECRET"], 1);
+    let token = load(options(&dir), "token").unwrap();
+    let text = "é hello world Paris France 猫";
+    let whole = value(token.tokens(text).unwrap());
+    let windowed = value(token.token_windows(text, 5, 1).unwrap());
+    assert!(windowed["windows"].as_array().unwrap().len() > 1);
+    assert_eq!(windowed["spans"], whole["spans"]);
+    assert_eq!(windowed["spans"].as_array().unwrap().len(), 1);
+    assert_eq!(windowed["spans"][0]["text"], text);
+    assert_eq!(windowed["spans"][0]["end"], text.len());
+    assert_eq!(windowed["input"]["truncated"], false);
+    assert_eq!(
+        windowed["input"]["input_tokens"],
+        windowed["input"]["processed_tokens"]
+    );
+    assert!(token
+        .token_windows(&"hello ".repeat(511), 5, 1)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("input_limit"));
+    assert!(token.token_windows(text, 513, 1).is_err());
+    let unsupported = fixture(&["SUPPORTED", "HALLUCINATED"], 1);
+    assert!(load(options(&unsupported), "token")
+        .unwrap()
+        .token_windows(text, 5, 1)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("capability"));
+}
