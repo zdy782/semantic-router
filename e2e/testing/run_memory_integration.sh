@@ -105,11 +105,7 @@ trap cleanup EXIT INT TERM
 
 echo "Using memory integration temp dir: ${TEST_DIR}"
 
-if [[ "${USE_DETERMINISTIC_MEMORY_EMBEDDINGS}" == "1" ]]; then
-    python3 -m pip install -U requests pymilvus
-else
-    python3 -m pip install -U "huggingface_hub[cli]" hf_transfer requests pymilvus
-fi
+python3 -m pip install -U requests pymilvus
 
 prepare_model_dir() {
     mkdir -p "${MODEL_DIR}"
@@ -121,94 +117,13 @@ prepare_model_dir() {
     ln -s "${MODEL_DIR}" "${MODEL_MOUNT_DIR}"
 }
 
-download_hf_snapshot() {
-    local repo_id="$1"
-    local local_dir="$2"
-    local required="${3:-required}"
-    local max_attempts="${HF_DOWNLOAD_ATTEMPTS:-6}"
-    local attempt delay exit_code marker
-
-    if ! [[ "${max_attempts}" =~ ^[0-9]+$ ]] || (( max_attempts < 1 )); then
-        max_attempts=6
-    fi
-
-    marker="${local_dir}/.vsr-download-complete"
-    if [[ -f "${marker}" ]]; then
-        echo "Using cached Hugging Face model ${repo_id} from ${local_dir}"
-        return 0
-    fi
-
-    mkdir -p "${local_dir}"
-    exit_code=1
-    for attempt in $(seq 1 "${max_attempts}"); do
-        echo "Downloading Hugging Face model ${repo_id} to ${local_dir} (attempt ${attempt}/${max_attempts})"
-        if HF_HUB_ENABLE_HF_TRANSFER=1 python3 - "${repo_id}" "${local_dir}" <<'PY'
-import sys
-
-from huggingface_hub import snapshot_download
-
-repo_id, local_dir = sys.argv[1], sys.argv[2]
-snapshot_download(repo_id, local_dir=local_dir, local_dir_use_symlinks=False)
-PY
-        then
-            touch "${marker}"
-            return 0
-        else
-            exit_code=$?
-        fi
-
-        if (( attempt == max_attempts )); then
-            break
-        fi
-
-        delay=$((attempt * attempt * 10))
-        if (( delay > 120 )); then
-            delay=120
-        fi
-        echo "Hugging Face download failed for ${repo_id}; retrying in ${delay}s" >&2
-        sleep "${delay}"
-    done
-
-    if [[ "${required}" == "optional" ]]; then
-        echo "Warning: ${repo_id} download failed; router will skip it" >&2
-        return 0
-    fi
-
-    echo "ERROR: failed to download required Hugging Face model ${repo_id}" >&2
-    return "${exit_code}"
-}
-
 prepare_model_dir
 echo "Using memory integration model dir: ${MODEL_DIR}"
-# Detect requested embedding model from the e2e config so we can make a best-effort
-# attempt to ensure a compatible model is available during CI runs. This avoids
-# silent mismatches between the config and the model the test script downloads.
-CONFIG_EMBEDDING_MODEL="$(grep -m1 '^ *embedding_model:' "${REPO_ROOT}/e2e/config/config.memory-user.yaml" 2>/dev/null | awk -F: '{print $2}' | tr -d ' \"')"
-if [[ -z "${CONFIG_EMBEDDING_MODEL}" ]]; then
-    CONFIG_EMBEDDING_MODEL="mmbert"
-fi
-if [[ "${CONFIG_EMBEDDING_MODEL}" != "mmbert" ]]; then
-    echo "Note: config requests embedding_model='${CONFIG_EMBEDDING_MODEL}'. For CI stability we will still ensure the mmbert embeddings model is present unless deterministic mode is explicitly requested."
-fi
 if [[ "${USE_DETERMINISTIC_MEMORY_EMBEDDINGS}" == "1" ]]; then
     export VLLM_SR_DETERMINISTIC_EMBEDDINGS=1
-    echo "Using deterministic memory embeddings for CI; skipping Hugging Face model download"
+    echo "Using deterministic memory embeddings"
 else
-    echo "Attempting to download Hugging Face model for embeddings (will fall back to deterministic on failure)"
-    # Ensure the mmbert model used by the CI harness is available. Tests and
-    # configs may accidentally request a different model; providing mmbert keeps
-    # the CI stable and compatible with the rest of the harness (collection dims, etc.).
-    if download_hf_snapshot "llm-semantic-router/mmbert-embed-32k-2d-matryoshka" "${MODEL_DIR}/mmbert-embed-32k-2d-matryoshka"; then
-        echo "Hugging Face model downloaded successfully"
-    else
-        if [[ "${USE_DETERMINISTIC_MEMORY_EMBEDDINGS}" == "1" ]]; then
-            echo "Warning: Hugging Face model download failed; using deterministic embeddings due to USE_DETERMINISTIC_MEMORY_EMBEDDINGS=1"
-            export VLLM_SR_DETERMINISTIC_EMBEDDINGS=1
-        else
-            echo "ERROR: Hugging Face model download failed and deterministic fallback is disabled for CI. Exiting." >&2
-            exit 1
-        fi
-    fi
+    echo "Router startup will download the configured Vela model at its registered revision"
 fi
 make -C "${REPO_ROOT}" start-milvus
 
