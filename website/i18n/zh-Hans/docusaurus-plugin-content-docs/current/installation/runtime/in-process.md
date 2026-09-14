@@ -2,7 +2,7 @@
 title: 进程内模型
 description: 在本地运行 Vela，选择 CPU 或 GPU 推理，并查看实际路由信号。
 translation:
-  source_commit: "915ddf56e0335e2046c38aa17c4aec6233908039"
+  source_commit: "84056d41b0f64fd0b99f7ea50702c26eb982300e"
   source_file: "docs/installation/runtime/in-process.md"
   outdated: false
 ---
