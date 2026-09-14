@@ -43,11 +43,29 @@ backend ownership, logging, retention, and access controls remain necessary.
 | Image content without an attack signal | `omni` | Use the local visual-language model with filtered tools. |
 | PII, private-context, or local-only signal | `local_privacy_policy` | Keep the request local with privacy-oriented reasoning. |
 | Clearly non-sensitive deep reasoning | `cloud_frontier_reasoning` | Use the configured frontier backend. |
-| Everything else | `local_standard` | Use the local model. |
+| Everything else | `local_standard` | Use the local model with local-only tool access. |
 
 Security and privacy decisions outrank the frontier route. The frontier route
 requires positive reasoning evidence and exclusion of privacy or attack
 signals.
+
+Direct local-handling instructions and prohibitions on external transfer constrain
+the route independently of learned privacy scores. All local routes restrict
+tools to `local_search` and `local_read`; security containment removes tools.
+Only the frontier route permits external tools. The scoped English and Chinese
+patterns distinguish ordinary quotations from handling instructions. Mixed
+requests with a recognized handling instruction stay local even when other
+parts quote a phrase. These patterns are not a security DLP system or proof
+of where an operator-provided tool executes.
+
+The effort projection combines the observed reasoning similarity with independent
+request, structure, context, and complexity evidence. The similarity contribution
+alone cannot reach the frontier boundary. Its raw contribution does not mark the
+embedding predicate as matched or change that predicate's threshold. Missing or
+failed learned evidence cannot establish permission to use the frontier route.
+An unresolved security, privacy, or frontier decision fails the request instead
+of falling back without a decision tool policy. A known local restriction can
+still resolve independently of unrelated missing effort evidence.
 
 ## Requirements
 
@@ -64,7 +82,7 @@ still pass through the Router and any enabled supporting stores or logs. Review
 those components before claiming end-to-end local processing. Treat classifier
 errors as possible: conservative fallbacks reduce risk but do not eliminate it.
 
-All four checked-in routes enable in-memory Router Replay. The effective replay
+All five checked-in routes enable in-memory Router Replay. The effective replay
 defaults capture up to 2 KiB each from the request and response body, including
 the local security-containment and privacy routes. Local model placement does
 not make that replay data harmless. Disable body capture or replay when prompts
