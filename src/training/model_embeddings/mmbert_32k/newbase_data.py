@@ -57,6 +57,24 @@ def _contrastive_preferences(record: dict) -> set[str]:
     return preferences
 
 
+def _contrastive_ignored(record: dict) -> set[str]:
+    ignored = _unique_strings(
+        record.get("contrastive_ignored_component_ids", []),
+        "contrastive ignored candidates",
+    )
+    if ignored and (
+        not ignored <= set(record.get("unjudged_component_ids", []))
+        or not ignored <= set(record.get("candidate_component_ids", []))
+        or ignored & set(record.get("positive_component_ids", []))
+        or ignored & set(record.get("judged_negative_component_ids", []))
+        or ignored & _contrastive_preferences(record)
+    ):
+        raise ValueError(
+            "Ignored candidates must be explicit unjudged candidates without preferences"
+        )
+    return ignored
+
+
 def validate_record(record: dict, components: dict[str, dict], split: str) -> None:
     """Validate a query's complete positive/negative/unknown partition."""
     if not split or record.get("split") != split:
@@ -66,6 +84,7 @@ def validate_record(record: dict, components: dict[str, dict], split: str) -> No
     if not _unique_strings(record.get("parent_groups"), "parent_groups"):
         raise ValueError("Every record needs a parent group")
     preferences = _contrastive_preferences(record)
+    ignored = _contrastive_ignored(record)
     weak_field = "unjudged_preference_component_ids"
     if weak_field in record:
         weak = _unique_strings(record[weak_field], "unjudged preferences")
@@ -76,15 +95,21 @@ def validate_record(record: dict, components: dict[str, dict], split: str) -> No
         ):
             raise ValueError("Weak preferences require explicit unjudged candidates")
     if "component_id" in record:
-        if preferences or any(
-            key in record
-            for key in ("pair_component_ids", "query_component_id", "label")
+        if (
+            preferences
+            or ignored
+            or any(
+                key in record
+                for key in ("pair_component_ids", "query_component_id", "label")
+            )
         ):
             raise ValueError("Representation inputs cannot imply pair/relevance labels")
         refs = {record["component_id"]}
     elif "pair_component_ids" in record:
-        if preferences:
-            raise ValueError("Semantic pairs cannot declare retrieval preferences")
+        if preferences or ignored:
+            raise ValueError(
+                "Semantic pairs cannot declare retrieval preferences or ignored candidates"
+            )
         refs = _unique_strings(record.get("pair_component_ids"), "pair components")
         if len(refs) != _PAIR_SIZE or not 0 <= record.get("label", -1) <= 1:
             raise ValueError(
@@ -242,6 +267,7 @@ def retrieval_masks(
             components[key]["normalized_sha256"]
             for key in _contrastive_preferences(record)
         }
+        ignored = _contrastive_ignored(record)
         row_positive, row_valid = [], []
         for key in document_ids:
             item = components[key]
@@ -254,7 +280,7 @@ def retrieval_masks(
                 is_positive
                 or key in negative
                 or item["normalized_sha256"] in preference_hashes
-                or not related
+                or (key not in ignored and not related)
             )
         if not any(row_positive):
             raise ValueError("Logical candidate batch omitted a query's positive")

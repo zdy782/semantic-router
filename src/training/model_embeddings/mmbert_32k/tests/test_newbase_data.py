@@ -5,6 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
+if torch is not None:
+    from src.training.model_embeddings.mmbert_32k.newbase_objectives import (
+        multi_positive_loss,
+    )
+
 from src.training.model_embeddings.mmbert_32k.newbase_data import (
     FrozenCorpus,
     GroupCycle,
@@ -152,6 +162,68 @@ class NewBaseDataTest(unittest.TestCase):
             row["contrastive_preference_component_ids"] = invalid
             with self.assertRaises(ValueError):
                 retrieval_masks([row], list(components), components)
+
+    def test_ignored_unknown_retains_pool_and_known_judgments(self):
+        components = {
+            key: {"normalized_sha256": key, "parent_groups": [key]}
+            for key in ("q", "p", "n", "u", "other")
+        }
+        row = {
+            "id": "r",
+            "source": "retrieval",
+            "language": "en",
+            "split": "train",
+            "parent_groups": ["query"],
+            "query_component_id": "q",
+            "positive_component_ids": ["p"],
+            "judged_negative_component_ids": ["n"],
+            "unjudged_component_ids": ["u", "other"],
+            "candidate_component_ids": ["p", "n", "u", "other"],
+        }
+        documents = row["candidate_component_ids"][:]
+        baseline = retrieval_masks([row], documents, components)
+        row["contrastive_ignored_component_ids"] = []
+        self.assertEqual(retrieval_masks([row], documents, components), baseline)
+        row["contrastive_ignored_component_ids"] = ["u"]
+        validate_record(row, components, "train")
+        positive, valid = retrieval_masks([row], documents, components)
+        self.assertEqual(positive, baseline[0])
+        self.assertEqual(valid, [[True, True, False, True]])
+        self.assertEqual(row["candidate_component_ids"], documents)
+        self.assertEqual(row["unjudged_component_ids"], ["u", "other"])
+
+        for invalid in (["p"], ["n"], ["absent"], ["u", "u"]):
+            row["contrastive_ignored_component_ids"] = invalid
+            with self.assertRaises(ValueError):
+                validate_record(row, components, "train")
+            with self.assertRaises(ValueError):
+                retrieval_masks([row], documents, components)
+        row["contrastive_ignored_component_ids"] = ["u"]
+        row["contrastive_preference_component_ids"] = ["u"]
+        with self.assertRaises(ValueError):
+            retrieval_masks([row], documents, components)
+
+    @unittest.skipIf(torch is None, "torch is required for gradient validation")
+    def test_ignored_logit_has_zero_gradient_with_complete_candidate_pool(self):
+        components = {
+            key: {"normalized_sha256": key, "parent_groups": [key]}
+            for key in ("p", "n", "u", "other")
+        }
+        row = {
+            "positive_component_ids": ["p"],
+            "judged_negative_component_ids": ["n"],
+            "unjudged_component_ids": ["u", "other"],
+            "candidate_component_ids": ["p", "n", "u", "other"],
+            "contrastive_ignored_component_ids": ["u"],
+        }
+        positive, valid = retrieval_masks([row], list(components), components)
+        scores = torch.tensor([[1.0, 2.0, 100.0, 3.0]], requires_grad=True)
+        loss = multi_positive_loss(scores, torch.tensor(positive), torch.tensor(valid))
+        loss.backward()
+        self.assertEqual(scores.grad[0, 2].item(), 0)
+        self.assertLess(scores.grad[0, 0].item(), 0)
+        self.assertGreater(scores.grad[0, 1].item(), 0)
+        self.assertGreater(scores.grad[0, 3].item(), 0)
 
 
 if __name__ == "__main__":

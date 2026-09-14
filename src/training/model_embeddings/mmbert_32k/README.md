@@ -62,6 +62,12 @@ For a deliberately ordered pair that shares source parents, the producer can
 set `contrastive_preference_component_ids` to an explicit subset of its
 unjudged candidates. This enables that contrastive comparison while preserving
 the unknown relevance label; it does not admit the pair to BCE or Lambda loss.
+For suspected false negatives, `contrastive_ignored_component_ids` removes
+explicit unjudged candidates from the contrastive denominator. It cannot
+override positives, judged negatives, or explicit contrastive preferences.
+The candidate pool and labels remain unchanged, and an omitted or empty list
+preserves the default mask. Freeze the filtering method and teacher identity
+with the data manifest; the loader does not infer exclusions from scores.
 For reranking, optional `unjudged_preference_component_ids` selects which
 unjudged candidates the positive should outrank under the weak preference loss.
 An empty list disables that term for the query; omission retains all unjudged
