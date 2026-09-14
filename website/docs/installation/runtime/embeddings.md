@@ -1,38 +1,37 @@
 ---
 title: Embeddings
-description: Set up local or remote embeddings for semantic routing, caches, and vector stores.
+description: Use Vela for semantic routing and retrieval, or connect a remote embedding service.
 ---
 
-Use embeddings for semantic matching, caches, memory, and vector stores.
-Choose a local model or an OpenAI-compatible text embedding service. Merge
-the relevant fragment below into your existing `config.yaml`.
+Embeddings turn text into vectors for semantic matching, retrieval, caches, and
+memory. Vela Embedding is the default local model. Choose the local CPU setup
+below, [AMD GPU inference](#amd-gpu), or a [remote service](#remote-embeddings).
+Merge configuration fragments into an existing Router configuration.
 
 ## Local embeddings
 
-This example selects Vela Embedding, layer 22, and 768 dimensions:
+Select the full Vela representation: layer 22 and 768 dimensions.
 
 ```yaml
 global:
   model_catalog:
     embeddings:
       semantic:
+        mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
         embedding_config:
           model_type: mmbert
           preload_embeddings: true
-          target_dimension: 768
           target_layer: 22
-        mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
+          target_dimension: 768
 ```
 
-Use a matching Candle or ORT image and include the model's required files.
-For other model families and devices, see [In-process models](in-process.md).
-Your embedding signals keep their existing candidates and thresholds.
+Use the CPU image for Candle inference. The name `mmbert` selects the compatible
+inference architecture; the model path selects Vela. The normal serve workflow
+downloads the registered model.
 
 ### AMD GPU
 
-The AMD serve default keeps semantic embeddings on CPU. To select the qualified
-Vela CK graph explicitly, add this deployment and binding to the local
-configuration above:
+To run Vela Embedding on AMD, add an explicit ROCm deployment and binding:
 
 ```yaml
 global:
@@ -57,46 +56,66 @@ routing:
       head: onnx/model_fa.onnx
 ```
 
-Use an AMD image containing ORT ROCm and the CK custom operator library. The
-selected graph runs with native precision and rejects CPU fallback. The primary
-graph and matching flat `model_fa_layer_N.onnx` companions share external weights
-inside `onnx/`; retain them for every layer used by enabled consumers.
+Start with `vllm-sr serve --platform amd --config config.yaml`. The AMD image
+must include the ROCm execution provider and CK operator library. The published
+graph supports inputs through 32,768 tokens, including special tokens.
+The Router rejects CPU fallback for this GPU deployment.
 
-A positive GPU budget is required. This deployment rejects inputs beyond 32,768
-tokens, including special tokens; standalone Embedding execution is qualified
-through that length. Set `full_context: true` as described below when routing
-needs the complete text. Input acceptance does not establish retrieval quality.
+Keep the downloaded ONNX companion graphs and external weights together;
+enabled features may use different embedding layers. For a complete
+configuration including classifiers and reranking, use the
+[Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md).
+Its complete classifier pipeline has an 8K input limit.
 
-The [Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)
-provides all ten task bindings. Its complete signal pipeline uses an 8K
-classifier budget; it does not claim all-classifier 32K AMD execution.
+## Test an embedding
+
+After starting the Router, check readiness and generate two vectors:
+
+```bash
+curl -fsS http://localhost:8080/ready
+curl -fsS http://localhost:8080/api/v1/diagnostics/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"texts":["How do I reset my password?","I forgot my login password."],"model":"mmbert","target_layer":22,"dimension":768}' \
+  | jq '{total_count, total_processing_time_ms, embeddings: [.embeddings[] | {dimension, model_used, processing_time_ms}]}'
+```
+
+Expect two 768-dimensional results and measured processing times. To inspect
+how your semantic signals affect routing, use
+[Route Preview](lifecycle-diagnostics.md#inspect-the-executed-path).
+The [API reference](../../api/apiserver.md) also covers similarity requests.
 
 ## Input policy
 
-Routing signals use representative samples by default. Set
-`global.model_catalog.embeddings.semantic.embedding_config.full_context: true`
-to send complete routing text to the loaded model. An explicit embedding
-deployment's `input.max_tokens` sets its capacity; it does not override
-`full_context: false`.
+Semantic routing uses representative text samples by default. To embed the
+complete routing text, set:
 
-The deployment budget still must fit the artifact. A 32768-token budget is an
-explicit opt-in for an appropriate export, not a claim of long-document
-retrieval accuracy. Memory, response caches and vector stores retain their
-own layer, dimension and input requirements.
+```yaml
+global:
+  model_catalog:
+    embeddings:
+      semantic:
+        embedding_config:
+          full_context: true
+```
 
-Vela text embeddings use raw intermediate layers and the final-normalized full
-layer, FP32 masked-mean pooling, then dimension truncation before L2
-normalization. Preserve the artifact's representation metadata when exporting
-or changing engines. Evaluate a shallower or narrower exit before making it
-a latency optimization.
+The deployment's `input.max_tokens` still limits the accepted input.
+Increasing that limit does not turn on `full_context`. Choose a budget that
+fits the artifact and your latency target; long-input capacity alone does
+not establish retrieval accuracy.
+
+Vela offers layers 3, 6, 11, and 22 and dimensions 64, 128, 256, 512, and 768.
+Smaller representations can reduce cost; evaluate retrieval quality before
+changing `target_layer` or `target_dimension`.
 
 ## Remote embeddings
 
-Set the provider key in the Router environment:
+Set a provider key in the Router environment:
 
 ```bash
 export EMBEDDING_API_KEY="<provider-key>"
 ```
+
+Then configure the provider's model and vector size:
 
 ```yaml
 global:
@@ -118,47 +137,26 @@ global:
           dimensions: 1536
 ```
 
-Replace the URL, model, and dimensions with your provider's values. The Router
-appends `/embeddings` to the base URL unless it is already present. Both dimension
-settings must agree. Authentication uses a bearer token; the default response
-limit is 16 MiB.
+Replace the URL, model, and dimensions with your provider's values. Both
+dimension settings must match. The Router calls `/embeddings` using bearer
+authentication. The service receives the text being embedded.
 
-Remote embeddings support text only. They do not provide local tokenizer
-windows, layer selection, image, or audio encoding. A configuration that needs
-one of those features must use a compatible local model. The remote service
-receives the text being embedded.
+Remote embeddings support text. Features requiring local tokenizer windows,
+layer selection, image encoding, or audio encoding need a compatible local model.
 
-## Match the consumer's requirements
+## Change a model without mixing vector spaces
 
-| Consumer | Check before changing the model |
+Reindex stored documents when changing embedding weights, layer, or dimension.
+Equal vector dimensions do not make two embedding spaces compatible. Persistent
+caches and memory isolate representations; existing vector-store documents need
+re-ingestion when the space changes.
+
+| Feature | Before changing representations |
 | --- | --- |
-| Semantic signals and model selectors | Matching thresholds and the trained embedding space |
-| Vector stores and persistent caches | Stored representation identity, dimensions and re-ingestion requirements |
-| In-memory mmBERT cache | Layer 6, dimension 256 must be available |
-| Memory | Configured dimensions; mmBERT defaults to 256, multimodal to 384 |
-| Response cache and RAG windows | Local tokenizer-window support |
-| Image or audio features | A local model with the required encoder |
+| Semantic signals and model selectors | Recheck thresholds and selector compatibility |
+| Vector stores, memory, and persistent caches | Match dimensions and reindex affected data |
+| In-memory mmBERT cache | Retain the layer-6, 256-dimensional representation |
+| Response cache and RAG windows | Retain local tokenizer-window support |
 
-The Router binds supported local mmBERT stores and caches to the loaded
-representation, including actual artifacts, effective layer/dimension and
-input policy. Changing the space isolates persistent cache and memory data;
-incompatible vector-store data requires re-ingestion. Old vectors are kept,
-not adopted because their dimensions match. Remote mutable model identities
-do not provide the same local-artifact guarantee.
-
-Rebuild stored vectors when changing their embedding space, even if the new
-model has the same output dimension. ORT exports must include every layer used
-by enabled consumers. The Router warms these layers during startup; a missing
-or invalid layer prevents activation.
-
-## Start and inspect
-
-```bash
-vllm-sr config validate --config config.yaml
-vllm-sr serve --config config.yaml
-curl -fsS http://localhost:8080/startup-status | jq '.embedding_provider'
-```
-
-Startup checks the provider and vector dimensions. For test inputs, use
-`POST /api/v1/diagnostics/embeddings`; request examples are in the
-[API reference](../../api/apiserver.md). Status reports redact credentials.
+For ONNX deployments, include every layer used by enabled features. Missing
+layers prevent startup. See [Troubleshooting](lifecycle-diagnostics.md).

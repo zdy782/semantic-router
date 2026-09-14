@@ -1,75 +1,36 @@
 ---
 title: In-process models
-description: Choose local engines and hardware, configure a classifier, and run it.
+description: Run Vela locally, choose CPU or GPU inference, and inspect routing signals.
 ---
 
-Run models inside the Router when you want local inference without another
-model service. Install the CLI and a matching image using the
+Run [Vela models](../../tutorials/global/vela-models.md) inside the Router to
+classify requests, generate embeddings, and rerank documents. The CLI downloads
+registered models when their features are enabled. You need a separate backend
+to generate chat responses.
+
+## Choose your hardware
+
+Install the CLI and a matching Router image using the
 [installation guide](../installation.md).
 
-## Choose an engine and model
+| Hardware | Runtime | Vela model format | Start here |
+| --- | --- | --- | --- |
+| CPU | Candle | Native weights | The example below |
+| CPU | ONNX Runtime | ONNX | Use `provider: ort`, `device: cpu` |
+| AMD GPU | ONNX Runtime with ROCm or MIGraphX | ONNX | [Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md) |
+| NVIDIA GPU | Candle CUDA build | Native weights | Use `provider: candle`, `device: cuda:0`; validate on your GPU |
+| Apple GPU | Candle Metal build | Compatible native weights | Use `provider: candle`, `device: metal:0`; check model compatibility |
 
-| Engine | Hardware | Model format |
-| --- | --- | --- |
-| Candle | CPU (`cpu`), NVIDIA (`cuda:0`), Apple Metal (`metal:0`) | Compatible checkpoint weights; `native` or `fp32` precision |
-| ONNX Runtime | CPU (`cpu`) | ONNX graph; `precision: native` |
-| ONNX Runtime with ROCm | AMD GPU (`rocm:N`) | Compatible ONNX graph; `precision: native` preserves the graph’s precision |
-| ONNX Runtime with MIGraphX | AMD GPU (`migraphx:N`) | Compatible ONNX graph; `native` or explicit `fp16` conversion |
-| ML and NLP engines | CPU | Trained selectors or keyword-matching configuration |
+Candle supports GPU index `0`; BERT and BERT LoRA models do not support Metal.
+The CPU and AMD paths have runtime coverage. NVIDIA and Apple deployments need
+validation on the intended hardware. For a separately hosted model, use
+[External services](external.md).
 
-Candle supports GPU index 0. BERT, merged BERT LoRA, and LoRA token models do
-not support Metal. ORT accepts CPU, ROCm and MIGraphX devices; use Candle for
-the NVIDIA and Metal options above. CUDA is a supported build path; CPU or AMD
-results do not establish NVIDIA performance or model quality. The existing OpenVINO primary embedding integration remains a
-separate platform setup, without a deployment provider or cache/window API.
+## Run a Vela classifier on CPU
 
-| Model family | Supported uses |
-| --- | --- |
-| ModernBERT / mmBERT | Categorical classification, independent label scores, token spans and text embeddings |
-| Compatible Vela Reranker artifact | Joint query/document relevance scoring for vectorstore RAG |
-| BERT and merged BERT LoRA | Sequence/token classification; BERT text embeddings |
-| DeBERTa | Sequence classification |
-| Task-specific hallucination and NLI models | Grounding and sentence-pair checks with Candle |
-| Qwen3 and Gemma embedding models | Text embeddings with Candle |
-| Compatible multimodal models | Their available text, image, and audio encoders |
-| MLP, KNN, K-means, SVM | Model selection from embedding features, on CPU |
-| BM25 and N-gram | Keyword matching, on CPU |
-| TextRank, TF-IDF, and heuristics | Prompt compression and rules in Go |
-
-ORT supports exported mmBERT classifiers and mmBERT or multimodal embedding
-graphs, plus compatible pair-scoring graphs. Local classifier budgets default
-to **512 tokens**, including special tokens. An explicit deployment
-`input.max_tokens` can select a larger budget up to the actual checkpoint and
-graph capacity; zero preserves the existing default. A classifier needs a head and
-labels trained for its task, such as domain, prompt guard, PII, fact-check,
-feedback, or output modality. Qwen3/Gemma embedding models do not provide a
-local generative classifier.
-
-Sequence classification returns `label_distribution.v1`, whose probabilities
-sum to one. Hazard detection uses `label_scores.v1`, whose scores are independent
-and may sum above one. The loader checks the task head and its activation;
-these contracts are not interchangeable.
-
-For standalone independent-label routing, the generic classifier binding accepts
-an explicit immutable operating-point sidecar with Candle float32 or a qualified
-ORT native graph and execution provider. Its frozen
-window and threshold policy replaces manually repeated threshold predicates;
-see [Classifier signals](../../tutorials/signal/learned/classifier.md#independent-labels-with-a-frozen-operating-point).
-
-For setup of other local features, see [Embeddings](embeddings.md),
-[Safety models](safety.md), [MLP selection](../../tutorials/algorithm/selection/mlp.md),
-and [Keyword signals](../../tutorials/signal/heuristic/keyword.md).
-
-## Configure a classifier
-
-The example below uses a custom email classifier on CPU. Before starting:
-
-- Put a complete compatible checkpoint at `models/email-classifier`.
-- Replace `BENIGN` and `PHISHING` with the checkpoint's labels, in their trained order.
-- Replace the answer model's endpoint with one the Router can reach.
-
-A **deployment** specifies the model files and engine. A **binding** connects
-that deployment to the `email-risk` classifier rule. Save this as `config.yaml`:
+This configuration uses Vela Domain to recognize programming requests and sends
+answers to your existing backend. Replace `vllm:8000` with an endpoint reachable
+from the Router container, then save the file as `config.yaml`:
 
 ```yaml
 version: v0.3
@@ -84,175 +45,149 @@ providers:
     - name: answer-model
       backend_refs:
         - name: answer
-          endpoint: 127.0.0.1:8000
+          endpoint: vllm:8000
           protocol: http
 routing:
   model_bindings:
-    classifier.email-risk:
-      deployment: email-risk-cpu
+    domain_classifier:
+      deployment: vela-domain
       contract: label_distribution.v1
-      adapter: auto
+      adapter: modernbert
+      mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json
   signals:
-    classifiers:
-      - name: email-risk
-        type: local
-        labels: [BENIGN, PHISHING]
+    domains:
+      - name: computer science
+        description: Programming and computer science requests.
+        mmlu_categories: [computer science]
   decisions:
-    - name: inspect-email
+    - name: programming
       priority: 100
       rules:
         operator: AND
         on_unknown: fail_request
         conditions:
-          - type: classifier
-            name: email-risk
-            label: PHISHING
-            predicate:
-              gte: 0.8
+          - type: domain
+            name: computer science
       modelRefs:
         - model: answer-model
 global:
   model_catalog:
     deployments:
-      email-risk-cpu:
-        artifact: models/email-classifier
+      vela-domain:
+        artifact: models/Vela-1.0-Encoder-307M-Domain
         provider: candle
         device: cpu
-        precision: native
+        precision: fp32
         input:
           max_tokens: 512
           overflow: reject
 ```
 
-## Start and test
+A **deployment** selects the model, engine, device, and input budget. A
+**binding** connects it to a feature in the recipe. Here, `domain_classifier`
+uses `vela-domain`; both matched and unmatched requests use `answer-model`.
+Change the decision's backend or plugins to apply your routing policy.
 
 ```bash
 vllm-sr config validate --config config.yaml
 vllm-sr serve --config config.yaml
-curl -sS http://localhost:8899/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{"model":"auto","messages":[{"role":"user","content":"Review this email requesting a password reset."}]}'
+curl -fsS http://localhost:8080/ready
+curl -fsS 'http://localhost:8080/api/v1/routing/preview?trace=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","text":"Help me debug this Python program."}' \
+  | jq '{decision_result, signal_confidences, signal_errors, metrics}'
 ```
 
-The rule matches when the classifier's phishing score is at least 0.8. This
-example sends both matching and nonmatching requests to the same answer model;
-change the decision's model or plugins to apply your policy.
+Preview runs the classifier and reports the selected decision, signal scores,
+errors, and timings. It does not call the answer backend. To test a complete
+request:
 
-## Change the engine or model
-
-For an exported mmBERT ONNX model, change the deployment to `provider: ort`,
-point `artifact` at its complete ONNX directory, and set the binding's
-`adapter: mmbert` and `head: onnx/model.onnx`. Choose a device from the table above.
-
-Custom model directories need no registry entry. Include the checkpoint or
-ONNX graph, tokenizer, configuration, labels, and any external tensor files.
-For LoRA models, supply complete merged weights rather than adapter deltas alone.
-Registered models are downloaded by the normal serve workflow. Pin `revision`
-and use a new directory when replacing a model that is already in use.
-
-Bindings apply to one recipe. Put them in that recipe's `routing` block to
-change its model without changing other recipes. See the
-[configuration reference](../../api/configuration-schema.mdx) for all fields.
-
-For a source build, use `make vllm-sr-dev`, then add
-`--image-pull-policy never` to the serve command.
-
-## Choose a long-input or AMD deployment
-
-For a complete maintained configuration, use the
-[Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md).
-It pins all ten task models, uses CK ROCm for Embedding/Reranker and MIGraphX for
-classifiers, and exposes `vela-auto` over a backend served as `vela-default`.
-All-signals Preview is bounded to 8K. Standalone Embedding/Reranker execution is
-qualified through 32K; Hazard retains its artifact-bound 2,048-token windows and
-32K logical policy. This is not an all-classifier 32K AMD qualification.
-`--platform amd` selects the image and devices while explicit bindings own model
-placement, including any CPU deployments you authored.
-
-For another checkpoint and exported graph evaluated at 32K, an explicit deployment
-can use the following settings. Merge this fragment into a configuration with
-a compatible binding; it does not enable a task by itself.
-
-```yaml
-global:
-  model_catalog:
-    deployments:
-      long-classifier:
-        artifact: models/long-classifier
-        provider: ort
-        device: rocm:0
-        precision: native
-        input:
-          max_tokens: 32768
-          overflow: reject
+```bash
+curl -fsS http://localhost:8899/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Explain Python tuples briefly."}],"max_tokens":128}'
 ```
 
-For a native checkpoint on CPU, select `provider: candle` and `device: cpu`.
-For a graph exported with CK attention, select its exact graph in the binding
-and add `custom_ops_profile: ck_flash_attention` to the ROCm deployment.
-Vela Embedding and Reranker use `head: onnx/model_fa.onnx` for the full 22/768
-representation. A reduced Reranker uses `onnx/model_fa_layer_N_dim_D.onnx` and
-matching `pair_scorer.layer` / `pair_scorer.dimension`; graph metadata is checked
-at load. Portable and CK graph selections must not be mixed. Plain
-FP32 graphs do not require that profile. `native` means the graph's existing
-math, including any mixed precision; it does not mean every operation is FP32.
-GPU preparation rejects an unavailable provider or CPU fallback.
+## Run Vela on AMD
 
-For `provider: ort` with `device: migraphx:0`, optionally set
-`compilation_cache_dir: /var/cache/semantic-router/migraphx` on the deployment.
-Mount that absolute path as a persistent, writable directory outside the model
-and graph directories. The default leaves compiled caching disabled; CPU,
-Candle, HTTP, and plain ROCm deployments reject this option.
+Use the [Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)
+for all ten task models, including embeddings and RAG reranking. It supplies
+the model revisions, graph selections, device settings, and Preview examples.
 
-The cache separates graph and external weight contents, precision, execution
-shape, runtime/compiler libraries, GPU identity, and compiler settings. A new
-process can reuse a verified compiled program when those identities match.
-Cold compilation still occurs for a new identity. This does not enable CPU
-fallback or change input limits and model accuracy requirements. The runtime
-rejects conflicting global cache environment settings instead of combining
-them with the deployment option.
-
-A larger budget does not improve accuracy by itself. It can substantially
-increase CPU latency and GPU memory use. Keep short routing samples or a
-validated [window policy](safety.md#native-classifier-context) unless the task
-needs the complete input. Test quality and latency with the selected graph,
-precision, length and padding pattern.
-
-## Bind a RAG reranker
-
-A reranker consumes query/document pairs after retrieval. It is not a routing
-signal or a generation endpoint. In the recipe using vectorstore RAG, bind:
-
-```yaml
-routing:
-  model_bindings:
-    rag.reranker:
-      deployment: document-ranker
-      contract: relevance_scores.v1
-      adapter: vela_reranker
-      pair_scorer:
-        layer: 22
-        dimension: 768
-global:
-  model_catalog:
-    deployments:
-      document-ranker:
-        artifact: models/document-ranker
-        provider: candle
-        device: cpu
-        precision: native
-        input:
-          max_tokens: 4096
-          overflow: reject
+```bash
+curl -fL -o vela-amd.yaml \
+  https://raw.githubusercontent.com/vllm-project/semantic-router/main/config/recipes/vela-amd/config.yaml
+vllm-sr config validate --config vela-amd.yaml
+vllm-sr serve --platform amd --config vela-amd.yaml
 ```
 
-Enable `rerank` in that recipe's RAG plugin, as shown in the
-[RAG guide](../../tutorials/plugin/rag.md#neural-reranking).
-The deployment loads only when a reachable recipe uses it. Candle requires the
-encoder weights, tokenizer, config, `matryoshka_config.json` and
-`classification_heads.safetensors`. ORT needs a complete pair-scoring graph with
-its declared layer, dimension and relevance-logit metadata.
+Connect the recipe's `vela-default` backend before sending chat requests.
+`--platform amd` selects the image and GPU access; explicit deployments still
+control model placement. First startup may take several minutes to compile
+MIGraphX models. See [startup troubleshooting](lifecycle-diagnostics.md#check-startup).
 
-The fixed exit must exist in the artifact. Scores are raw relevance logits,
-not probabilities. The token budget covers both inputs and pair special tokens;
-oversized pairs fail instead of being silently shortened.
+| AMD recipe component | Input limit |
+| --- | --- |
+| Complete routing signal pipeline | 8,192 tokens |
+| Standalone Embedding and Reranker | 32,768 tokens |
+| Hazard | 2,048-token windows within a 32,768-token request |
+
+All limits include special tokens. The complete AMD pipeline currently has an
+8K limit even though individual retrieval models accept 32K.
+
+## Choose an input budget
+
+Local classifiers default to 512 tokens. Set a deployment's `input.max_tokens`
+to increase the budget for a compatible checkpoint and graph; for example,
+`32768` enables a 32K budget on the native Vela CPU path. `overflow: reject`
+returns an error for oversized inputs.
+
+Long-input CPU inference can be substantially slower. Choose the smallest
+budget that covers your workload and measure both quality and latency. For
+scanning local risks across a long request, see
+[Safety input policies](safety.md#native-classifier-context). Embedding signals
+also have a separate [full-context setting](embeddings.md#input-policy).
+
+## Add another model or task
+
+- [Embeddings](embeddings.md): semantic matching, memory, caches, and retrieval.
+- [Safety models](safety.md): Guard, Safety, Hazard, and PII.
+- [Neural reranking](../../tutorials/plugin/rag.md#neural-reranking): bind
+  `rag.reranker` and enable the RAG plugin's `rerank` option.
+- [Classifier signals](../../tutorials/signal/learned/classifier.md): custom labels
+  and independent category scores.
+
+Custom artifacts can use a local directory without a registry entry. Include
+complete weights, tokenizer, configuration, task labels, and any ONNX external
+tensor files. LoRA deployments need merged weights. An architecture name such
+as `modernbert` identifies the adapter; a compatible task head is still required.
+
+For ONNX classifiers, use `provider: ort`, select the device, and set the
+binding's `head` to the graph path, such as `onnx/model.onnx`. For GPU-specific
+graphs, follow the model's runtime configuration. The Router rejects unavailable
+GPU providers and CPU fallback.
+
+Bindings belong to a recipe. Put them in that recipe's `routing` block to change
+its models independently. See the [configuration reference](../../api/configuration-schema.mdx)
+and [model update guide](lifecycle-diagnostics.md#update-a-running-model).
+
+## Advanced MIGraphX settings
+
+These deployment options are optional and disabled by default:
+
+| Option | Use | Requirements |
+| --- | --- | --- |
+| `compilation_cache_dir` | Reuse compiled models after a restart | Persistent, writable absolute directory outside model directories |
+| `short_sequence_tokens` | Add a smaller session for short classifier requests | Dynamic-sequence graph, an explicit larger `input.max_tokens`, no artifact-bound `operating_point` |
+
+For example, `short_sequence_tokens: 512` alongside `input.max_tokens: 8192`
+creates two sessions. A request uses the smallest session that fits its complete
+input. Both sessions warm up before activation, increasing startup work, GPU
+memory, and cache storage. This option supports local ModernBERT classifiers,
+including token classification; it does not support embeddings or reranking.
+Evaluate it on the target GPU before enabling it in production.
+
+Both options require `provider: ort` and a `migraphx:N` device. A changed model,
+GPU, precision, or compiler can require new compilation. See
+[AMD troubleshooting](lifecycle-diagnostics.md#amd-startup-problems) for settings
+that conflict with deployment configuration.

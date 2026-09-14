@@ -1,111 +1,77 @@
 ---
 title: Train Vela Safety and Hazard
-sidebar_label: Safety Classifiers
+sidebar_label: Safety and Hazard
 ---
 
 # Train Vela Safety and Hazard
 
-Vela separates content safety from prompt attacks. **Safety** predicts whether
-content is safe or unsafe. **Hazard** identifies the types of content risk.
-**Guard** detects prompt injection and jailbreak instructions. A harmful request
-can contain no prompt attack; a prompt attack can request harmless output.
+Adapt Vela Safety and Hazard to your application's content policy.
+**Safety** predicts `safe` or `unsafe`. **Hazard** identifies the categories
+of risk, so you can choose a suitable response. Prompt injection and jailbreak
+detection use the separate Guard model.
 
-This guide covers training and exporting compatible Safety and Hazard models.
-Their Vela release qualification is ongoing. The commands below describe the
-supported workflow, not a claim that an arbitrary training run is ready to serve.
-For deployment, use the [Safety signal guide](../tutorials/signal/learned/safety.md).
+To use the published models, follow
+[Safety models](../installation/runtime/safety.md). This guide covers training
+your own compatible checkpoints.
 
-## Prerequisites
+## Define the outputs
 
-Use an isolated training environment with a platform-appropriate PyTorch build.
-The reference environment uses PyTorch 2.10, Transformers 4.57.6, datasets 4.1.1,
-and scikit-learn 1.7.2. LoRA additionally requires PEFT 0.18.1. Record the actual
-versions and accelerator build for each run. ROCm training uses PyTorch's `cuda`
-device API; installing a CUDA wheel does not provide AMD support.
+Both models use the Vela Encoder foundation and a sequence-classification head.
 
-Before starting, prepare:
-
-- A downloaded encoder checkpoint and its exact repository revision.
-- A task contract specifying labels, problem type, and pooling.
-- Separate training, development, and final evaluation files with stable source
-  IDs, source groups, and text hashes.
-- A written sampling recipe, training budget, and development acceptance criteria.
-
-Use the checkpoint's actual training parent. Attaching an old adapter to a new
-encoder does not establish that the task was trained on that encoder.
-
-## Model and label contracts
-
-Both tasks use standard `ModernBertForSequenceClassification` checkpoints.
-Safety uses `single_label_classification`; Hazard uses
-`multi_label_classification`. Preserve inverse `label2id` and `id2label` maps
-and the pooling mode used during training.
-
-| Model | Labels | Output and objective |
+| Model | Output | Training objective |
 | --- | --- | --- |
-| Safety | `safe`, `unsafe` | Two-class softmax; cross-entropy |
-| Hazard | The ordered categories below | Independent sigmoid; masked binary cross-entropy |
+| Safety | Two-class softmax: `safe`, `unsafe` | Cross-entropy |
+| Hazard | Twelve independent sigmoid scores | Masked binary cross-entropy |
 
-Hazard's output order is:
+Hazard uses this ordered label set:
 
-| ID | Category |
-| --- | --- |
-| 0 | `violence` |
-| 1 | `criminal_activity` |
-| 2 | `sexual_content` |
-| 3 | `child_exploitation` |
-| 4 | `hate` |
-| 5 | `harassment_abuse` |
-| 6 | `regulated_substances` |
-| 7 | `weapons` |
-| 8 | `self_harm` |
-| 9 | `privacy` |
-| 10 | `specialized_advice` |
-| 11 | `misinformation` |
+```text
+violence, criminal_activity, sexual_content, child_exploitation,
+hate, harassment_abuse, regulated_substances, weapons,
+self_harm, privacy, specialized_advice, misinformation
+```
 
-Hazard includes safe negatives and can predict multiple categories or none.
-An unannotated category is unknown, not a negative label: its `label_mask` entry
-must be zero. The mask removes that label's loss. Keep semantic category
-judgments distinct from weak mappings of another dataset's taxonomy.
+A request may have multiple hazards or none. Keep safe negative examples in
+Hazard training. If a category has not been reviewed, mark it unknown with
+`label_mask: 0` for that category instead of treating it as absent.
 
-## Prepare and inspect data
+## Prepare training and evaluation data
 
-The [Vela application recipes](https://github.com/vllm-project/semantic-router/blob/main/src/training/model_classifier/vela-applications.md)
-describe pinned AEGIS and CultureGuard sources, source crosswalks, reviewed
-supervision, boundary contrasts, and long-context construction. Source labels
-can refer to an entire dialogue or a sensitive topic, so a crosswalk is not
-independent evidence that the visible input violates the Vela rubric.
+Start with the
+[Safety and Hazard data builders](https://github.com/vllm-project/semantic-router/blob/main/src/training/model_classifier/vela-applications.md#data-preparation)
+for AEGIS and CultureGuard, or use your own labeled requests. Review source
+labels against your policy: mentioning a sensitive topic, quoting a threat,
+and requesting harmful action need different judgments.
 
-Keep article, conversation, translation, and paired-example families together.
-Check IDs, normalized duplicates, and text containment before training. Remove
-contaminated training groups while preserving held-out evaluation. Record
-removals and the final source proportions. Report authored stress tests and
-weakly supervised data separately from natural, independently judged examples.
+Include safe educational, preventive, and supportive requests alongside
+unsafe examples. Keep related documents, conversations, and translations in
+one split. Prepare training, development, and final test partitions separately.
 
-Include safe discussions of sensitive topics, quoted attacks, benign
-instructions, and cases requiring supportive handling. Safety and Guard need
-distinct labels for these boundaries. Inspect source and category exposure:
-balanced sampling can repeatedly draw a small authored set without adding
-coverage.
+Each task needs a `contract.json` with its label maps. Safety rows contain a
+single `label`; Hazard rows contain ordered `targets` and `label_mask` arrays.
+The [recipe reference](https://github.com/vllm-project/semantic-router/blob/main/src/training/model_classifier/vela-applications.md)
+documents the full formats and reviewed-data admission command.
 
-## Train the complete encoder
+## Train from Vela Encoder
 
-The single-GPU trainers support full parameter training and LoRA continuation.
-Full training starts from a complete checkpoint. `--fresh-head` initializes its
-task head while preserving the encoder; omit it only for deliberate continuation
-of a compatible trained head. These example paths assume each task's recipe has
-already materialized `contract.json`, `train.jsonl`, and `dev.jsonl`.
+Use an isolated environment with Transformers 4.57.6 and a platform-appropriate
+PyTorch build. The [training reference](https://github.com/vllm-project/semantic-router/blob/main/src/training/model_classifier/vela-applications.md#initialization-and-training)
+lists dependencies. ROCm training uses PyTorch's `cuda` device API.
 
-Set `VELA_BASE_REVISION` to the exact downloaded parent revision before running:
+Download a fixed Vela Encoder revision to `/models/vela-base` and set
+`VELA_BASE_REVISION` to that revision. The following commands assume your
+contract and data files are ready.
+
+Train Safety:
 
 ```bash
 python -m src.training.model_classifier.sequence_repair.train \
   --method full --fresh-head \
   --base /models/vela-base --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision "${VELA_BASE_REVISION:?Set the downloaded parent revision}" \
-  --contract /artifacts/safety/contract.json \
-  --train /artifacts/safety/train.jsonl --dev /artifacts/safety/dev.jsonl \
-  --output /artifacts/runs/safety \
+  --base-revision "${VELA_BASE_REVISION:?Set the downloaded revision}" \
+  --contract /data/safety/contract.json \
+  --train /data/safety/train.jsonl --dev /data/safety/dev.jsonl \
+  --output /data/safety/run \
   --steps 600 --batch-size 4 --accumulate 4 \
   --max-length 32768 --microbatch-token-budget 32768 \
   --learning-rate 0.00001 --head-learning-rate 0.0001 \
@@ -114,110 +80,64 @@ python -m src.training.model_classifier.sequence_repair.train \
   --selection-false-positive-budget 0.1
 ```
 
-Use the dedicated multi-label trainer for Hazard:
+Train Hazard with the multi-label trainer:
 
 ```bash
 python -m src.training.model_classifier.safety_classifier.train_vela_hazard \
   --method full --fresh-head \
   --base /models/vela-base --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision "${VELA_BASE_REVISION:?Set the downloaded parent revision}" \
-  --contract /artifacts/hazard/contract.json \
-  --train /artifacts/hazard/train.jsonl --dev /artifacts/hazard/dev.jsonl \
-  --output /artifacts/runs/hazard \
+  --base-revision "${VELA_BASE_REVISION:?Set the downloaded revision}" \
+  --contract /data/hazard/contract.json \
+  --train /data/hazard/train.jsonl --dev /data/hazard/dev.jsonl \
+  --output /data/hazard/run \
   --steps 600 --batch-size 4 --accumulate 4 \
   --max-length 32768 --microbatch-token-budget 32768 \
   --learning-rate 0.00001 --head-learning-rate 0.0001 \
   --eval-every 200 --evaluation-dtype float32 \
-  --selection fp-budget-macro-f1 --selection-false-positive-budget 0.05 \
-  --supervision-diagnostics
+  --selection fp-budget-macro-f1 --selection-false-positive-budget 0.05
 ```
 
-The step counts, learning rates, and false-positive budgets are examples.
-Choose them for the actual data and application before comparing candidates.
-Full runs save `best-model` and `last-model`, including the encoder, head, and
-training origin. LoRA runs use `--method lora --adapter /path/to/initial-adapter`
-and save adapter checkpoints instead; do not combine `--adapter` with full mode.
+These are example budgets and learning rates. Choose the allowed false-positive
+rate for your application before selecting a checkpoint. Full training saves
+complete `best-model` and `last-model` directories. To continue a compatible
+Vela task checkpoint, supply it as the base and omit `--fresh-head`.
 
-Both loops use FP32 parameters and losses with BF16 autocast. A separate head
-learning rate shares the encoder's schedule. Token-budget microbatches bound
-padded input size while retaining each example's weight in the complete
-optimizer batch. Source and length balancing are explicit recipe choices;
-inspect the recorded draws, unique examples, and label exposures.
+## Evaluate risks and long inputs
 
-## Evaluate accuracy and long context
+For Safety, measure unsafe recall and false positives on safe requests.
+For Hazard, measure each category's precision and recall, average precision,
+and how often safe requests trigger any category.
 
-Select checkpoints and thresholds using development data only. For Safety,
-report unsafe recall, safe-input false positives, and per-source macro F1. For
-Hazard, report supported-category precision/recall and average precision,
-unknown-label coverage, and the fraction of safe inputs triggering any category.
-A high average precision does not establish an acceptable false-positive rate
-at the serving threshold.
+Choose thresholds on development data, then keep them fixed for the final
+test. Report languages and categories separately so a large source cannot hide
+a weak one.
 
-The trainers do not impose a 512-token ceiling. `--max-length` must fit the
-actual checkpoint capacity, and budgets include special tokens. Oversize
-training examples are recorded as rejected; evaluation rejects overflow.
-Inspect those counts and resolve unintended exclusions before accepting a run.
+Test short requests alongside 8K, 16K, and 32K documents. Place relevant content
+at different positions and include benign quotations. The input budget includes
+special tokens; oversize training rows are reported, and evaluation rejects
+overflow. Full-context inference and window scanning need separate evaluation
+because they expose different context to the model.
 
-Evaluate short-input retention and actual 8K, 16K, and 32K inputs, including
-signals at different positions and instructions separated from their context.
-Keep natural documents distinct from constructed stress cases. Full-context
-and windowed inference are different policies and need separate thresholds,
-accuracy results, and latency measurements. A larger position limit alone does
-not establish better long-context understanding.
+## Export and connect the models
 
-## Export the selected model
+Use [the sequence exporter](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_classifier/sequence_repair#freeze-then-evaluate-the-independent-test)
+with `--method full`, the selected checkpoint, and `--runtime-task safety`
+or `--runtime-task hazard`. It preserves the trained label order and writes
+the weights, tokenizer, and runtime mappings. An ONNX deployment requires
+graphs exported from those same weights.
 
-Freeze the selected checkpoint before independent final evaluation. For a full
-Hazard checkpoint, export with its original training parent and run receipt:
+Configure the models through
+[local bindings](../installation/runtime/in-process.md) or a supported
+[external service](../installation/runtime/external.md).
+The [Safety signal guide](/docs/tutorials/signal/learned/safety) explains how
+to use a binary risk rule or a category condition. In a category-specific
+Safety rule, the router runs Hazard after Safety passes its threshold.
 
-```bash
-python -m src.training.model_classifier.sequence_repair.export \
-  --method full --runtime-task hazard \
-  --base /artifacts/runs/hazard/best-model \
-  --base-id llm-semantic-router/Vela-1.0-Encoder-307M \
-  --base-revision "${VELA_BASE_REVISION:?Set the downloaded parent revision}" \
-  --contract /artifacts/hazard/contract.json \
-  --run-manifest /artifacts/runs/hazard/run.json \
-  --output /artifacts/frozen/hazard
+Use [route preview](../installation/runtime/lifecycle-diagnostics.md) to verify
+scores, decisions, errors, and latency with your actual serving configuration.
 
-python -m src.training.model_classifier.safety_classifier.vela_hazard \
-  --base /artifacts/frozen/hazard --contract /artifacts/hazard/contract.json \
-  --data /artifacts/hazard/test.jsonl --dtype float32 --max-length 32768 \
-  --thresholds /artifacts/hazard/frozen-thresholds.json \
-  --output /artifacts/evaluation/hazard-final.json
-```
+## Earlier Safety models
 
-Create the threshold file from development results before final inference;
-follow the [threshold evaluation contract](https://github.com/vllm-project/semantic-router/blob/main/src/training/model_classifier/vela-applications.md#freeze-evaluate-and-export).
-For Safety, use `--runtime-task safety` when exporting and the shared
-`sequence_repair.evaluate` command for complete class probabilities.
-
-Export checks every saved tensor, the trained task contract, and identical FP32
-logits after reload. LoRA export additionally verifies the merge. It writes
-standard safetensors weights and runtime label mappings; it does not run final
-evaluation or publish to Hugging Face.
-
-## Validate the serving path
-
-Use [in-process model bindings](/docs/installation/runtime/in-process) to select
-the artifact, provider, and input policy. CPU and CUDA paths use supported native
-bindings; AMD acceleration requires a compatible ROCm serving build and a
-qualified ONNX graph/provider. Export new graphs whenever weights change and
-verify the provider actually used, numerical parity, memory, and request latency.
-Results on one accelerator do not qualify another.
-
-The router's category-specific Safety rule runs the binary head first and
-checks Hazard only when the Safety threshold passes. Hazard itself still has
-an unconditional multi-label training contract. Add a decision consuming the
-signal to apply a routing action; enabling a model alone does not block traffic.
-Use [runtime diagnostics](/docs/installation/runtime/lifecycle-diagnostics) to
-inspect real signal scores and latency through route preview.
-
-## Reproduce legacy models
-
-The historical workflow keeps its two-class Safety and nine-way single-label
-Hazard contracts, 512-token recipe, and adapter export commands under
-[safety_classifier](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_classifier/safety_classifier).
-Those artifacts and the `legacy-9-v1` label order remain compatibility assets.
-They are separate from Vela's twelve independent Hazard outputs; changing a
-label map cannot convert one into the other.
+The earlier mmBERT Safety adapters and nine-class Hazard head remain in the
+[legacy training workflow](https://github.com/vllm-project/semantic-router/tree/main/src/training/model_classifier/safety_classifier).
+Their label contracts differ from Vela's twelve independent Hazard categories.
