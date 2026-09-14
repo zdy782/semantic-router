@@ -19,7 +19,7 @@ x-session-id: tenant-42:conversation-7
 
 对于路由学习保护，`x-conversation-id` 可以标识该会话内更窄的对话。保护策略在 `scope: conversation` 时使用对话身份；`scope: session` 时使用更宽的会话身份。
 
-Responses API 管理自己的对话链。请求中的 `conversation` 值优先；否则由 `previous_response_id` 链继承原始对话；两者都不存在时会生成新的 conversation id。
+Responses API 将显式对话成员关系与响应链路分开。请求中的 `conversation` 值标识成员关系；`previous_response_id` 读取保留历史并提供内部链路跟踪键，不会加入或创建对话。两者都不存在时，Router 生成内部跟踪身份。这些遥测身份不能替代路由学习保护所要求的配置身份请求头。
 
 ## Chat 与 Messages API 优先级 {#chat-and-messages-api-priority}
 

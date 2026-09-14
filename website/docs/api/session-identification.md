@@ -18,10 +18,13 @@ conversation inside that session. A protection policy with
 `scope: conversation` uses the conversation identity; `scope: session` uses
 the broader session identity.
 
-The Responses API manages its own conversation chain. Its request
-`conversation` value wins, otherwise a `previous_response_id` chain inherits
-the original conversation, and a new conversation id is generated when neither
-is present.
+The Responses API keeps explicit conversation membership separate from response
+lineage. A request's `conversation` value identifies that membership;
+`previous_response_id` retrieves retained history and provides an internal
+lineage tracking key, without joining or creating a conversation. With neither,
+the router generates an internal tracking identity. These telemetry identities
+do not replace the configured identity headers required by Router Learning
+protection.
 
 ## Chat and Messages API priority
 

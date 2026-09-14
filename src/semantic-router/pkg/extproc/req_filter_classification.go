@@ -352,6 +352,13 @@ func nonPortableContextBinding(reqCtx *RequestContext) (bool, string) {
 		return false, ""
 	}
 	if strings.TrimSpace(reqCtx.PreviousResponseID) != "" {
+		// Router-owned history is fully expanded before signal extraction. Its
+		// retained public ID is lineage metadata, not opaque provider state.
+		state := reqCtx.ResponseObjectState
+		if state != nil && state.ProviderContextApplied && state.PreviousResponseID == reqCtx.PreviousResponseID &&
+			reqCtx.SemanticRequest != nil && reqCtx.SemanticRequest.PreviousResponseID == "" {
+			return false, ""
+		}
 		return true, "previous_response_id"
 	}
 	return false, ""

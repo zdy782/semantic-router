@@ -93,6 +93,14 @@ and session-continuity preferences may yield to rescue when those hard
 boundaries are absent. Adaptation and protection also preserve any candidate
 restrictions imposed by the decision's selector, including lexicographic bands.
 
+With protection in `apply` mode and the configured identity present, a hard
+ownership lock whose previous model is outside the admitted pool returns
+`503` instead of transferring ownership or forcing that model. Router-owned
+Responses history becomes portable after the router has expanded it into the
+complete stateless request; its retained `previous_response_id` alone does not
+create a lock. An active tool loop still does. Unknown response IDs fail during
+history lookup, before selection.
+
 ## Decision Boundaries
 
 Most decisions do not need local configuration. Use `bypass` for hard policy

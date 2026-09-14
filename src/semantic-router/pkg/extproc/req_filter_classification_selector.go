@@ -36,6 +36,9 @@ func (r *OpenAIRouter) selectModelFromCandidates(
 		return nil, "", nil
 	}
 	method := r.getSelectionMethod(algorithm)
+	if err := r.validateProtectedCandidateOwnership(selCtx, ctx); err != nil {
+		return nil, string(method), err
+	}
 	if err := selection.ValidateSelectionContext(selCtx); err != nil {
 		logging.Warnf("[ModelSelection] Invalid selection context: %v, using default candidate", err)
 		selected := r.recordSelectionFallback(
@@ -143,6 +146,9 @@ func (r *OpenAIRouter) selectWithSelector(
 	}
 	selCtx, err = applySelectionEligibility(selCtx, result, ctx)
 	if err != nil {
+		return nil, string(method), err
+	}
+	if err := r.validateProtectedCandidateOwnership(selCtx, ctx); err != nil {
 		return nil, string(method), err
 	}
 	recordCtx, result, selectedModel, learningApplied := r.applyRouterLearning(
