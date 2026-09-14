@@ -168,7 +168,7 @@ spec:
               ("llm-semantic-router/Vela-1.0-Encoder-307M-Domain", "Vela-1.0-Encoder-307M-Domain", "e18f9d3a91457249416e64bbc58236ebe350c7a5"),
               ("llm-semantic-router/Vela-1.0-Encoder-307M-PII", "Vela-1.0-Encoder-307M-PII", "6d3300c4bd7975f30a664503f6c725cf1fbbad48"),
               ("llm-semantic-router/Vela-1.0-Encoder-307M-Guard", "Vela-1.0-Encoder-307M-Guard", "ab27ec4efe2bdc45336df2d35abb6f687e41214e"),
-              ("llm-semantic-router/Vela-1.0-Encoder-307M-Embedding", "Vela-1.0-Encoder-307M-Embedding", "a72bbb73f1316553ddb915cff06e1fbc58f9af1c")
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-Embedding", "Vela-1.0-Encoder-307M-Embedding", "3ef35758e9e36c73830a10dec2c8f1f5200cbf54")
           ]
 
           cache_dir = "/app/cache/hf"

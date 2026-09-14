@@ -137,11 +137,11 @@ VELA_RELEASE_REVISIONS = {
     "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "6d3300c4bd7975f30a664503f6c725cf1fbbad48",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "5384b8997e3cbb79ca3a670e869577f4e4f4997e",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "47434a7fd7c245c0c7c17564a000b3c56ccfec41",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker": "ab3bba3ada7d2263a79fa4ca8187c808f32e1510",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker": "771e57c5da0aa3b068e21f9f321f7c68b1d1cac2",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Hazard": "5dd25f2cc3c98f338e6a79b667662d60f936a28d",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Safety": "6e70e725a5f4d86da10f5be5e4dfd1da0358bb85",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Guard": "ab27ec4efe2bdc45336df2d35abb6f687e41214e",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding": "a72bbb73f1316553ddb915cff06e1fbc58f9af1c",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding": "3ef35758e9e36c73830a10dec2c8f1f5200cbf54",
 }
 
 MODEL_REGISTRY = deepcopy(LEGACY_MODEL_REGISTRY)
