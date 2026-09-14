@@ -68,6 +68,10 @@ def validate_teacher_config(config: dict, task: str, *, anchor: bool = False) ->
         expected = "pointwise_cosine"
     if config.get("objective") != expected:
         raise ValueError("External teacher objective differs from the student task")
+    if "target_layers" in config:
+        if not anchor or task != "embedding":
+            raise ValueError("Layer targets apply only to embedding pointwise anchors")
+        _validate_target_layers(config["target_layers"])
     if "exit_supervision" in config and (
         task != "reranker" or config["exit_supervision"] not in ("full", "all")
     ):
@@ -86,6 +90,18 @@ def validate_teacher_config(config: dict, task: str, *, anchor: bool = False) ->
         raise ValueError("Teacher weight and temperature must be finite and valid")
     if weight and (not config.get("directory") or not config.get("manifest_sha256")):
         raise ValueError("A nonzero teacher requires an explicitly hashed cache")
+
+
+def _validate_target_layers(layers) -> None:
+    if (
+        not isinstance(layers, list)
+        or not layers
+        or any(type(layer) is not int or layer <= 0 for layer in layers)
+        or len(set(layers)) != len(layers)
+    ):
+        raise ValueError(
+            "Teacher target_layers must be ordered unique positive integers"
+        )
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,7 @@ class TeacherCache:
         corpus,
         draws: list[dict],
         draws_sha256: str,
+        target_layers: list[int] | None = None,
     ) -> TeacherCache:
         raw = (directory / "manifest.json").read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
@@ -123,8 +140,13 @@ class TeacherCache:
             or manifest.get("source_split") != corpus.manifest["split"]
             or manifest.get("draws_sha256") != draws_sha256
             or manifest.get("complete") is not True
+            or manifest.get("target_layers") != target_layers
         ):
             raise ValueError("Teacher cache differs from the configured training run")
+        if target_layers is not None:
+            _validate_target_layers(target_layers)
+            if task != "embedding":
+                raise ValueError("Layer targets apply only to embedding caches")
         teacher = manifest.get("teacher", {})
         if any(
             not teacher.get(key)
@@ -163,17 +185,22 @@ class TeacherCache:
             raise ValueError("Teacher cache must contain exactly its values tensor")
         values = tensors["values"]
         dimension = manifest.get("dimensions")
+        expected_shape = (
+            (len(entries), dimension)
+            if target_layers is None
+            else (len(entries), len(target_layers), dimension)
+        )
         if (
             type(dimension) is not int
             or dimension <= 0
             or values.dtype != torch.float32
-            or values.shape != (len(entries), dimension)
+            or values.shape != expected_shape
             or not torch.isfinite(values).all()
             or (task == "reranker" and dimension != 1)
         ):
             raise ValueError("Teacher values must have finite FP32 declared geometry")
         if task == "embedding" and not torch.allclose(
-            values.norm(dim=-1), torch.ones(len(entries)), atol=1e-4, rtol=1e-4
+            values.norm(dim=-1), torch.ones(values.shape[:-1]), atol=1e-4, rtol=1e-4
         ):
             raise ValueError("Embedding teacher cache must contain unit vectors")
         for name in ("entries.jsonl", "values.safetensors"):

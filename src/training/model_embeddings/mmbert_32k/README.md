@@ -149,6 +149,14 @@ with the same cache identity fields and a same-width teacher. It matches absolut
 unit-vector coordinates at every exit, explicitly normalizing each Matryoshka
 prefix. The loss is mean squared vector distance divided by two, without an
 additional division by width. Per-source `anchor_scale` adjusts its contribution.
+By default every student depth uses the same teacher vector. Set
+`anchor.target_layers` to an explicit ordered list, such as `[3, 6, 11, 22]`,
+to supply a separate teacher vector for each supervised depth. The list must
+cover exactly the student's trained depths. The cache manifest must declare
+the same ordered `target_layers`, with unit vectors shaped
+`[entries, len(target_layers), dimensions]`. Each student depth then matches
+its corresponding teacher vector; dimensions still use normalized prefixes.
+Layer-specific caches apply only to pointwise embedding anchors.
 The `representation` objective supports single-text batches with anchors and/or
 full-logical-batch relations; microbatch accumulation alone does not enlarge the
 relation pool. Different-width teachers remain valid for relation distillation.

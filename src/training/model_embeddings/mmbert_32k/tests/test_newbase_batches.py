@@ -41,6 +41,46 @@ class CompleteTokenizer:
 
 @unittest.skipIf(torch is None, "requires torch and transformers")
 class NewBaseBatchesTest(unittest.TestCase):
+    def test_matching_layer_anchors_train_all_encoder_layers(self):
+        class Cache:
+            def lookup(self, inputs, components, batch, device):
+                return torch.stack(
+                    [
+                        torch.stack(
+                            [
+                                torch.arange(1, 17).float().roll(i + layer)
+                                for layer in (3, 6, 11, 22)
+                            ]
+                        )
+                        for i in range(len(inputs))
+                    ]
+                ).to(device)
+
+        _, components = self.examples()
+        rows = [{"source": "natural", "component_id": key} for key in components]
+        model = self.model("embedding")
+        loss, _ = embedding_step(
+            model,
+            CompleteTokenizer(),
+            rows,
+            components,
+            device=torch.device("cpu"),
+            token_budget=8,
+            maximum=128,
+            objective=ObjectiveConfig("representation"),
+            amp=False,
+            anchor_cache=Cache(),
+            anchor_weight=1.0,
+            anchor_target_layers=[3, 6, 11, 22],
+        )
+        loss.backward()
+        self.assertGreater(loss.item(), 0)
+        for parameter in model.parameters():
+            self.assertIsNotNone(parameter.grad)
+            self.assertTrue(torch.isfinite(parameter.grad).all())
+        for layer in model.encoder.layers:
+            self.assertTrue(any(p.grad.abs().max() > 0 for p in layer.parameters()))
+
     def test_broad_anchors_train_every_layer_across_complete_microbatches(self):
         class Cache:
             def lookup(self, inputs, components, batch, device):

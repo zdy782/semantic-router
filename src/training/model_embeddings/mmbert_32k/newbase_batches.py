@@ -197,6 +197,7 @@ def embedding_step(
     teacher_temperature: float = 2.0,
     anchor_cache=None,
     anchor_weight: float = 0.0,
+    anchor_target_layers=None,
 ):
     objective.validate("embedding")
     source = records[0]["source"]
@@ -311,7 +312,9 @@ def embedding_step(
         reference = anchor_cache.lookup(
             [(key,) for key in component_ids], components, batch, device
         )
-        anchor = all_exit_anchor_loss(values, reference, model.exits)
+        anchor = all_exit_anchor_loss(
+            values, reference, model.exits, target_layers=anchor_target_layers
+        )
         total = total + anchor_weight * objective.anchor_scale * anchor
         metrics["pointwise_anchor_loss"] = anchor.detach().item()
     return total, metrics

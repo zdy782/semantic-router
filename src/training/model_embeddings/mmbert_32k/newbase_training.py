@@ -247,6 +247,11 @@ def validate_config(config: dict) -> None:
         validate_teacher_config(config["teacher"], config["task"])
     if config.get("anchor") is not None:
         validate_teacher_config(config["anchor"], config["task"], anchor=True)
+        layers = config["anchor"].get("target_layers")
+        if layers is not None and set(layers) != set(config["exits"]["layers"]):
+            raise ValueError(
+                "Anchor target_layers must cover every selected student depth"
+            )
     if config.get("initialization", "fresh_base") not in {
         "fresh_base",
         "continued_task",
@@ -306,6 +311,7 @@ def run(
             corpus=corpus,
             draws=draws,
             draws_sha256=stream["draws_sha256"],
+            target_layers=anchor.get("target_layers"),
         )
         if anchor.get("weight", 0)
         else None
@@ -474,6 +480,7 @@ def run(
                     {
                         "anchor_cache": anchor_cache,
                         "anchor_weight": anchor.get("weight", 0.0),
+                        "anchor_target_layers": anchor.get("target_layers"),
                     }
                     if task == "embedding"
                     else {

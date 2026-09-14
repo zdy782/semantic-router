@@ -32,16 +32,39 @@ def pointwise_cosine_loss(student, teacher):
     return (left - right).square().sum(-1).mean() / 2
 
 
-def all_exit_anchor_loss(values, teacher, exits):
-    """Explicit Matryoshka prefixes of one same-width teacher target.
+def all_exit_anchor_loss(values, teacher, exits, *, target_layers=None):
+    """Matryoshka prefixes of an explicitly shared or layer-matched target.
 
     Prefixes are re-normalized, never used to hide different teacher widths.
-    Every selected depth receives the target in the same coordinate system.
+    Without target_layers every depth shares one teacher matrix. Otherwise the
+    declared layer order binds the second axis of [input, layer, dimension];
+    missing layers never fall back to the teacher's final layer.
     """
-    if teacher.ndim != _MATRIX_DIMENSIONS or teacher.shape[1] != exits.dimensions[0]:
-        raise ValueError("Anchor teacher must match the full student width")
+    if target_layers is None:
+        if (
+            teacher.ndim != _MATRIX_DIMENSIONS
+            or teacher.shape[1] != exits.dimensions[0]
+        ):
+            raise ValueError("Anchor teacher must match the full student width")
+        references = dict.fromkeys(exits.layers, teacher)
+    else:
+        if (
+            not isinstance(target_layers, (list, tuple))
+            or not target_layers
+            or any(type(layer) is not int or layer <= 0 for layer in target_layers)
+            or len(set(target_layers)) != len(target_layers)
+            or set(target_layers) != set(exits.layers)
+            or teacher.ndim != _MATRIX_DIMENSIONS + 1
+            or teacher.shape[1:] != (len(target_layers), exits.dimensions[0])
+        ):
+            raise ValueError(
+                "Layer anchors must match every declared student depth and width"
+            )
+        references = {
+            layer: teacher[:, index] for index, layer in enumerate(target_layers)
+        }
     return sum(
-        weight * pointwise_cosine_loss(values[key], teacher[:, : key[1]])
+        weight * pointwise_cosine_loss(values[key], references[key[0]][:, : key[1]])
         for key, weight in exits.weighted()
     )
 

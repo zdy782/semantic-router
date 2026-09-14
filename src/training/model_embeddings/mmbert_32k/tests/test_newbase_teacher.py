@@ -41,7 +41,9 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch, transformers and safetensors")
 class NewBaseTeacherTest(unittest.TestCase):
-    def cache(self, path, task, rows, components, embedding_dimensions=16):
+    def cache(
+        self, path, task, rows, components, embedding_dimensions=16, target_layers=None
+    ):
         records = [{"id": str(index), **row} for index, row in enumerate(rows)]
         corpus = SimpleNamespace(
             records=records,
@@ -73,9 +75,11 @@ class NewBaseTeacherTest(unittest.TestCase):
                 }
             )
         torch.manual_seed(198)
-        values = torch.randn(
-            len(entries), embedding_dimensions if task == "embedding" else 1
-        )
+        shape = [len(entries)]
+        if target_layers is not None:
+            shape.append(len(target_layers))
+        shape.append(embedding_dimensions if task == "embedding" else 1)
+        values = torch.randn(*shape)
         if task == "embedding":
             values = torch.nn.functional.normalize(values, dim=-1)
         path.mkdir()
@@ -89,7 +93,7 @@ class NewBaseTeacherTest(unittest.TestCase):
             "train_manifest_sha256": corpus.manifest_sha256,
             "source_split": "train",
             "draws_sha256": "draw-digest",
-            "dimensions": values.shape[1],
+            "dimensions": values.shape[-1],
             "teacher": {
                 "repo_id": "synthetic/teacher",
                 "revision": "fixed-revision",
@@ -101,16 +105,80 @@ class NewBaseTeacherTest(unittest.TestCase):
                 for name in ("entries.jsonl", "values.safetensors")
             },
         }
+        if target_layers is not None:
+            manifest["target_layers"] = target_layers
         (path / "manifest.json").write_text(json.dumps(manifest))
         arguments = {
             "task": task,
             "corpus": corpus,
             "draws": draws,
             "draws_sha256": "draw-digest",
+            "target_layers": target_layers,
         }
         return arguments, TeacherCache.load(
             path, file_digest(path / "manifest.json"), **arguments
         )
+
+    def test_layer_cache_requires_explicit_geometry_and_complete_input_identity(self):
+        rows, components = batch_fixtures.NewBaseBatchesTest().examples()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cache"
+            arguments, cache = self.cache(
+                path, "embedding", rows, components, target_layers=[3, 22]
+            )
+            cache.validate_tokens(batch_fixtures.CompleteTokenizer(), components, 128)
+            entries = list(cache.entries.values())[::-1]
+            inputs = [
+                tuple(item["id"] for item in row["identity"]["components"])
+                for row in entries
+            ]
+            batch = TokenBatch.encode(
+                batch_fixtures.CompleteTokenizer(),
+                [components[ids[0]]["text"] for ids in inputs],
+                None,
+                128,
+            )
+            lookup = cache.lookup(inputs, components, batch, "cpu")
+            torch.testing.assert_close(lookup, cache.values.flip(0))
+            self.assertEqual(lookup.shape[1:], (2, 16))
+            self.assertFalse(lookup.requires_grad)
+            for declaration in (None, [22, 3], [3], [3, 3]):
+                changed = {**arguments, "target_layers": declaration}
+                with self.subTest(layers=declaration), self.assertRaises(ValueError):
+                    TeacherCache.load(
+                        path, file_digest(path / "manifest.json"), **changed
+                    )
+            values = cache.values.clone()
+            values[:, 1] *= 2
+            save_file({"values": values}, path / "values.safetensors")
+            manifest = copy.deepcopy(cache.manifest)
+            manifest["files"]["values.safetensors"] = file_digest(
+                path / "values.safetensors"
+            )
+            (path / "manifest.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "unit vectors"):
+                TeacherCache.load(
+                    path, file_digest(path / "manifest.json"), **arguments
+                )
+
+    def test_only_pointwise_embedding_anchors_accept_target_layers(self):
+        config = {
+            "objective": "pointwise_cosine",
+            "weight": 0,
+            "target_layers": [3, 22],
+        }
+        validate_teacher_config(config, "embedding", anchor=True)
+        for invalid in (None, [], [3, 3], [0, 22], [True, 22], [3.0, 22]):
+            with self.subTest(layers=invalid), self.assertRaises(ValueError):
+                validate_teacher_config(
+                    {**config, "target_layers": invalid}, "embedding", anchor=True
+                )
+        for task, objective in (
+            ("embedding", "relational_cosine"),
+            ("reranker", "query_order"),
+        ):
+            with self.subTest(task=task), self.assertRaises(ValueError):
+                validate_teacher_config({**config, "objective": objective}, task)
 
     def test_relations_are_basis_invariant_and_masked_with_detached_teacher(self):
         torch.manual_seed(11)
