@@ -40,11 +40,13 @@ python -m src.training.model_classifier.domain_classifier.prepare_data \
   --output artifacts/vela/domain
 ```
 
-The reference contract is the original 14-label classifier configuration. The
-initial continuation experiment uses the original fixed Domain adapter on
-`mmbert-32k-yarn@72a23a6640489471eb4ff7ad3ec5bc80af8a27de`; every candidate receipt
-must identify its actual base and adapter hashes. A later Base migration requires
-a development-only short/long comparison before freezing final lineage.
+The reference contract supplies the original 14 label IDs. New Vela Domain
+training starts from the shared Vela Base with a fresh classification head,
+using [`sequence_repair.train`](../sequence_repair/README.md). Record the exact
+Base revision and downloaded weights with the training run. Continuing a Vela
+Domain checkpoint must also preserve and identify its existing task head.
+Evaluate short and long inputs against the original mmBERT Domain baseline
+before selecting a release.
 
 Use source-balanced development selection to keep the small natural-request
 source visible. Report per-class and per-language quality, not only the aggregate
