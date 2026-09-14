@@ -185,7 +185,7 @@ func (s *MultiFactorSelector) Select(_ context.Context, selCtx *SelectionContext
 		return s.applyNoCandidatePolicy(selCtx, "quality_evidence", qualityExcluded)
 	}
 	mins, maxs := signalExtrema(signals)
-	bestIdx, allScores, bestScore, secondBest := s.chooseCandidate(signals, mins, maxs)
+	bestIdx, allScores, bestScore, secondBest, survivors := s.chooseCandidate(signals, mins, maxs)
 
 	chosen := kept[bestIdx]
 	confidence := 0.5
@@ -212,7 +212,7 @@ func (s *MultiFactorSelector) Select(_ context.Context, selCtx *SelectionContext
 		len(selCtx.CandidateModels), chosen.Model, bestScore, confidence, len(dropped))
 
 	return &SelectionResult{
-		EligibleModels: s.eligibleModels(kept),
+		EligibleModels: s.eligibleModels(kept, survivors),
 		SelectedModel:  chosen.Model,
 		LoRAName:       chosen.LoRAName,
 		Score:          bestScore,
@@ -224,10 +224,17 @@ func (s *MultiFactorSelector) Select(_ context.Context, selCtx *SelectionContext
 	}, nil
 }
 
-// Soft ranking alone does not restrict configured tier/global learning. When
-// a hard policy is active, even candidates outside the original inventory have
-// not passed that policy and must not be introduced downstream.
-func (s *MultiFactorSelector) eligibleModels(kept []config.ModelRef) []config.ModelRef {
+// Weighted soft ranking does not restrict configured tier/global learning.
+// Hard filters and lexicographic priority bands do: downstream choices must
+// remain within the exact survivors, including when all factors are unavailable.
+func (s *MultiFactorSelector) eligibleModels(kept []config.ModelRef, survivors []int) []config.ModelRef {
+	if survivors != nil {
+		eligible := make([]config.ModelRef, 0, len(survivors))
+		for _, index := range survivors {
+			eligible = append(eligible, kept[index])
+		}
+		return eligible
+	}
 	if s.config.SLO == (MultiFactorSLO{}) && s.config.QualityMinScore == nil &&
 		(!s.qualityRelevant() || s.config.QualityOnMissing != config.QualityEvidenceOnMissingExclude) {
 		return nil

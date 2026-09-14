@@ -77,6 +77,8 @@ switch if proposal_gain >= switch_margin + stability_weight * switch_cost
 
 当当前模型因重复失败、重试、校验失败或显式结果证据而显得能力不足时，防护还可以允许确定性的 `rescue_switch`。
 
+救援仅能在上下文可移植的轮次边界选择合格模型，不能覆盖活动工具循环或不可移植上下文的锁定。不存在这些硬边界时，最少轮次和会话连续性偏好可让位于救援。自适应与防护也保留决策选择器施加的候选限制，包括词典序容差范围。
+
 ## 决策边界 {#decision-boundaries}
 
 大多数决策不需要局部配置。硬策略边界使用 `bypass`：

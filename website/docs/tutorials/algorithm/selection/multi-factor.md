@@ -71,6 +71,11 @@ selector recovers to equal weights.
 the declared relative tolerance of the best observed value, then passes that
 band to the next stage.
 
+Only candidates surviving every priority remain eligible for later adaptation,
+session protection, and dispatch. These steps cannot restore a model excluded
+by an earlier quality or cost band. Recorded scores may still include excluded
+models to explain the selection.
+
 ```yaml
 algorithm:
   type: multi_factor

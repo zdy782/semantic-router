@@ -87,6 +87,12 @@ Protection can also allow a deterministic `rescue_switch` when the current
 model appears underpowered because of repeated failures, retries, failed
 verification, or explicit outcome evidence.
 
+Rescue is limited to eligible models at a portable turn boundary. It cannot
+override an active tool-loop lock or a nonportable-context lock. Minimum-turn
+and session-continuity preferences may yield to rescue when those hard
+boundaries are absent. Adaptation and protection also preserve any candidate
+restrictions imposed by the decision's selector, including lexicographic bands.
+
 ## Decision Boundaries
 
 Most decisions do not need local configuration. Use `bypass` for hard policy

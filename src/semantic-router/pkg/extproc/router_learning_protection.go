@@ -162,6 +162,11 @@ func (r *OpenAIRouter) protectionRescueDecision(
 	if preflight.mode != config.DecisionAdaptationModeApply || learningCtx == nil {
 		return routerLearningDecision{}, false
 	}
+	// Experience can justify a rescue at a portable turn boundary, but cannot
+	// transfer an in-flight tool loop or opaque provider state to another model.
+	if session := learningCtx.AgenticSession; session != nil && (session.ActiveToolLoop || session.HasNonPortableContext) {
+		return routerLearningDecision{}, false
+	}
 	current := currentLearningModel(learningCtx)
 	proposalResult := protectionRescueProposalResult(input, proposal, current)
 	proposalModel := selectedModelName(proposalResult)
