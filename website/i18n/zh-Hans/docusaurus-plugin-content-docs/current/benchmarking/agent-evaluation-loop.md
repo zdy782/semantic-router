@@ -2,7 +2,7 @@
 title: 调优与验证 Recipe
 description: 用真实请求改善路由质量、时延、成本和 Agent 连续性。
 translation:
-  source_commit: "c698e76b9be7e635f24d604fcc069a99db54530a"
+  source_commit: "4a05a3b9b911ffbaaa90b58c2eda57930024ec78"
   source_file: "docs/benchmarking/agent-evaluation-loop.md"
   outdated: false
 ---
@@ -37,6 +37,10 @@ Decision 名称保持简短，例如 `simple`、`medium` 和 `reasoning`。处�
 对必需工具、结构化输出等明确事实使用 heuristic。语义判断则使用 learned signals：Embedding 识别意图，Complexity 判断难度，Domain 配合 FactCheck 识别需要谨慎处理的问题，Feedback 配合 Reask 识别需要纠正的回答。单个信号过于宽泛时，通过 projection 组合证据。主题本身不等于难度；FactCheck 预测核实需求，并不核验陈述真假。
 
 检查未知信号如何影响每个 decision，尤其是使用 `NOT` 的条件。分类器失败不应成为选择更便宜路径的依据。加入关键词条件也不保证减少推理：被使用的信号族可能在计算 decision 前并行执行，需要测量真实请求的成本。
+
+测试回答恢复时，应包含之前的 assistant 回复：缺少这段历史时，Feedback 路由会跳过推理。将真正的纠错与调整语气、格式等普通修改请求对照测试。协作路由需要区分委派工作的指令与关于 Agent 的讨论。工作流负责内部阶段，用户不必说出每个阶段才能请求协作。
+
+检查多语言示例是否在原型压缩后仍被保留。规则级 `prototype_scoring` 配置随 Recipe 一起发布；省略时继承全局设置。使用 `enabled: false` 保留全部去重候选，并通过 `best_weight` 和 `top_m` 指定组合评分方式。替换基线前先测量实际效果。
 
 ## 校验并预览候选配方 {#validate-and-preview-the-candidate}
 
@@ -94,6 +98,10 @@ vllm-sr route probe \
 **风险处理。** [Guard](../tutorials/signal/learned/jailbreak) 检测提示词攻击；[Safety 和 Hazard](../tutorials/signal/learned/safety) 识别内容风险及类别。设计拒绝规则前，需要对照测试有害协助、求助和正常分析。PII 可以选择受限的模型池，但不会自动脱敏，也不能证明供应商的数据保留策略。
 
 **Agent 连续性。** 配合稳定的 session 和 conversation 标识使用 [Router Learning protection](../tutorials/learning/protection)。测试完整工具循环、连续追问、明确纠错、后端失败、decision 变化和新对话。对比 `apply`、`observe` 和 `bypass`：观测到的保持模型建议与真正的 hold 不同。联合检查选中的后端、路由响应头、Replay API 和 Dashboard。在不同 recipe 中复用同一个 session ID，验证隔离性。保持策略不能保留已经不符合候选要求的模型。
+
+接入 Agent 应用时，先启用 conversation protection，并显式关闭在线 adaptation。只打开 learning 总开关时，这两个组件默认都会启用。在评估应用中的实际结果后再采用 adaptation；protection 保持模型需要客户端提供稳定标识。
+
+激活下一个候选版本前，先检查 Replay 和 Dashboard。默认的内存 Replay 存储会在配置重载和进程重启时清空，应提前保存比较所需的轨迹。
 
 ## 保留确实改善目标的变更 {#keep-changes-that-improve-the-objective}
 
