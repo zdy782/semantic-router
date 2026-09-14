@@ -1,3 +1,10 @@
+import type {
+  InsightsTrajectoryRoute,
+  ReplayAdaptationScore,
+  ReplayRouteDiagnostics,
+  ReplaySessionPolicy,
+} from './insightsPageRoutingTypes'
+
 export interface Signal {
   keyword?: string[]
   embedding?: string[]
@@ -115,6 +122,18 @@ export interface InsightsRecord {
   confidence_score?: number | null
   confidence_score_available?: boolean
   selection_method?: string
+  route_diagnostics?: ReplayRouteDiagnostics
+  session_policy?: ReplaySessionPolicy
+  learning?: {
+    protection?: ReplaySessionPolicy
+    protection_preflight?: ReplaySessionPolicy
+    adaptation?: {
+      mode?: string
+      action?: string
+      reason?: string
+      scores?: Record<string, ReplayAdaptationScore>
+    }
+  }
   signals: Signal
   projections?: string[]
   projection_scores?: Record<string, number>
@@ -194,6 +213,8 @@ export interface InsightsTrajectoryMessage {
 export interface InsightsTrajectory {
   object: 'router_replay.trajectory'
   session_id: string
+  recipe?: string
+  routes?: InsightsTrajectoryRoute[]
   record_count: number
   turn_count: number
   messages: InsightsTrajectoryMessage[]

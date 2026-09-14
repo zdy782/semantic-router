@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 
 import type { InsightsCostSummary, InsightsRecord, Signal } from './insightsPageTypes'
 import { buildProjectionTraceFields } from './insightsPageProjectionTrace'
+import { buildRoutingExplanationSections } from './insightsPageRouting'
 import { renderToolNamesCell } from './insightsPageToolTrace'
 import styles from './InsightsPage.module.css'
 
@@ -328,8 +329,14 @@ export function buildInsightsRecordSections(
       { label: 'Original model', value: record.original_model || '-' },
       { label: 'Selected model', value: record.selected_model || '-' },
       { label: 'Selection method', value: record.selection_method || '-' },
+      {
+        label: 'Selection rationale',
+        value: record.route_diagnostics?.selection_reasoning || 'Not recorded',
+      },
     ],
   })
+
+  sections.push(...buildRoutingExplanationSections(record))
 
   sections.push({
     title: 'Usage & Cost',
@@ -507,9 +514,11 @@ function buildGuardrailsValue(record: InsightsRecord) {
         {record.jailbreak_detected ? (
           <span className={styles.alertDanger}>
             Jailbreak: {record.jailbreak_type || 'detected'} (
-            {record.jailbreak_score_available === true && typeof record.jailbreak_confidence === 'number'
+            {record.jailbreak_score_available === true &&
+            typeof record.jailbreak_confidence === 'number'
               ? `${(record.jailbreak_confidence * 100).toFixed(1)}%`
-              : 'Score unavailable'})
+              : 'Score unavailable'}
+            )
           </span>
         ) : null}
         {record.pii_detected ? (

@@ -35,9 +35,11 @@ type trajectoryMessage struct {
 type routerReplayTrajectoryResponse struct {
 	Object      string              `json:"object"`
 	SessionID   string              `json:"session_id"`
+	Recipe      string              `json:"recipe"`
 	RecordCount int                 `json:"record_count"`
 	TurnCount   int                 `json:"turn_count"`
 	Messages    []trajectoryMessage `json:"messages"`
+	Routes      []trajectoryRoute   `json:"routes"`
 }
 
 // handleRouterReplayTrajectoryAPI serves GET /api/v1/observability/replays/trajectory?session_id={id}.
@@ -63,6 +65,16 @@ func (r *OpenAIRouter) handleRouterReplayTrajectoryAPI(
 	}
 
 	records := filterTrajectoryRecordsBySession(r.collectRouterReplayRecords(), sessionID)
+	recipe, scoped := values.Get("recipe"), values.Has("recipe")
+	if !scoped {
+		for index, record := range records {
+			if index > 0 && record.Recipe != recipe {
+				return r.createErrorResponse(400, "recipe is required when a session spans multiple recipes")
+			}
+			recipe = record.Recipe
+		}
+	}
+	records = filterTrajectoryRecordsByRecipe(records, recipe)
 	// collectRouterReplayRecords returns newest-first; trajectory needs chronological order.
 	reverseRoutingRecords(records)
 	turns := buildTrajectoryTurns(records)
@@ -70,9 +82,11 @@ func (r *OpenAIRouter) handleRouterReplayTrajectoryAPI(
 	payload := routerReplayTrajectoryResponse{
 		Object:      "router_replay.trajectory",
 		SessionID:   sessionID,
+		Recipe:      recipe,
 		RecordCount: len(records),
 		TurnCount:   len(turns),
 		Messages:    buildTrajectoryMessages(turns),
+		Routes:      buildTrajectoryRoutes(records),
 	}
 	return r.createRouterReplayJSONResponse(200, payload)
 }

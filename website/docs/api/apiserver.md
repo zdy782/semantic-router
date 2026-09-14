@@ -336,7 +336,7 @@ Inspect routing replays and metrics, and submit outcome evidence.
 | `POST` | `/api/v1/observability/outcomes` | Submit Router Learning outcome feedback linked to a replay record |
 | `GET` | `/api/v1/observability/replays` | List Router Replay records |
 | `GET` | `/api/v1/observability/replays/aggregate` | Aggregate Router Replay routing and cost metadata |
-| `GET` | `/api/v1/observability/replays/trajectory` | Build a Router Replay session trajectory |
+| `GET` | `/api/v1/observability/replays/trajectory` | Build a recipe-scoped session trajectory with each recorded routing result |
 | `GET` | `/api/v1/observability/replays/{id}` | Read one Router Replay record |
 
 ### storage

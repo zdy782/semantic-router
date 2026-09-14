@@ -4095,8 +4095,8 @@
     },
     "/api/v1/observability/replays/trajectory": {
       "get": {
-        "summary": "Build a Router Replay session trajectory",
-        "description": "Build a Router Replay session trajectory",
+        "summary": "Build a recipe-scoped session trajectory with each recorded routing result",
+        "description": "Build a recipe-scoped session trajectory with each recorded routing result",
         "operationId": "get_api_v1_observability_replays_trajectory",
         "tags": [
           "observability"
@@ -4107,6 +4107,14 @@
             "in": "query",
             "description": "Logical session whose tool trajectory should be returned.",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "recipe",
+            "in": "query",
+            "description": "Exact recipe scope; an empty value selects legacy unscoped records. Required when the session ID occurs in multiple recipes.",
             "schema": {
               "type": "string"
             }

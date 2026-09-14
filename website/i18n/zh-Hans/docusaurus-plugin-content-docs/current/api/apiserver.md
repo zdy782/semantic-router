@@ -285,7 +285,7 @@ curl -sS http://localhost:8080/api/v1/observability/outcomes \
 | `POST` | `/api/v1/observability/outcomes` | 提交与回放记录关联的路由学习结果反馈 |
 | `GET` | `/api/v1/observability/replays` | 列出路由回放记录 |
 | `GET` | `/api/v1/observability/replays/aggregate` | 聚合路由回放路由和成本元数据 |
-| `GET` | `/api/v1/observability/replays/trajectory` | 构建路由回放会话轨迹 |
+| `GET` | `/api/v1/observability/replays/trajectory` | 构建配方内的回放会话轨迹和逐请求路由历史 |
 | `GET` | `/api/v1/observability/replays/{id}` | 读取单条路由回放记录 |
 
 ### storage {#storage}
