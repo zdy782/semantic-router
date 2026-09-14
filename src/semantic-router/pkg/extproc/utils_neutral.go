@@ -69,7 +69,10 @@ func prependSemanticOutputText(output []llmprotocol.OutputItem, prefix string) b
 // extractSemanticRequestSignals derives routing facts from the neutral request
 // accepted at ingress. Wire-specific JSON walkers are confined to codecs.
 func extractSemanticRequestSignals(request *llmprotocol.Request) *requestSignalSnapshot {
-	result := &requestSignalSnapshot{Model: request.Model, Stream: request.Stream}
+	result := &requestSignalSnapshot{
+		Model: request.Model, Stream: request.Stream,
+		JailbreakInput: extractJailbreakInput(request),
+	}
 	switch request.ToolChoice.Mode {
 	case llmprotocol.ToolChoiceRequired, llmprotocol.ToolChoiceNamed:
 		result.ToolChoiceRequired = true

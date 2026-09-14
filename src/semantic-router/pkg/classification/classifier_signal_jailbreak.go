@@ -35,6 +35,10 @@ const jailbreakEvaluationFailedCode = "jailbreak_evaluation_failed"
 // collectJailbreakClassifierContents returns the deduplicated set of text pieces
 // that need BERT classifier inference (contrastive rules are excluded).
 func (c *Classifier) collectJailbreakClassifierContents(jailbreakText string, nonUserMessages []string) []string {
+	return c.collectJailbreakClassifierContentPieces([]string{jailbreakText}, nonUserMessages)
+}
+
+func (c *Classifier) collectJailbreakClassifierContentPieces(current, history []string) []string {
 	seen := make(map[string]struct{})
 	var contents []string
 	addUnique := func(s string) {
@@ -50,11 +54,13 @@ func (c *Classifier) collectJailbreakClassifierContents(jailbreakText string, no
 		if rule.Method == "contrastive" {
 			continue
 		}
-		addUnique(jailbreakText)
+		for _, text := range current {
+			addUnique(text)
+		}
 		if !rule.IncludeHistory {
 			continue
 		}
-		for _, msg := range nonUserMessages {
+		for _, msg := range history {
 			addUnique(msg)
 		}
 	}
@@ -62,13 +68,17 @@ func (c *Classifier) collectJailbreakClassifierContents(jailbreakText string, no
 }
 
 func (c *Classifier) evaluateJailbreakSignal(ctx context.Context, results *SignalResults, mu *sync.Mutex, jailbreakText string, nonUserMessages []string) {
+	c.evaluateJailbreakSignalPieces(ctx, results, mu, []string{jailbreakText}, nonUserMessages)
+}
+
+func (c *Classifier) evaluateJailbreakSignalPieces(ctx context.Context, results *SignalResults, mu *sync.Mutex, current, history []string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	start := time.Now()
 
 	// Step 1: Collect unique content pieces needed by classifier (non-contrastive) rules.
-	classifierContents := c.collectJailbreakClassifierContents(jailbreakText, nonUserMessages)
+	classifierContents := c.collectJailbreakClassifierContentPieces(current, history)
 
 	// Step 2: Run classifier inference exactly once per unique content piece.
 	jailbreakCache := make(map[string][]cachedJailbreakResult, len(classifierContents))
@@ -95,7 +105,7 @@ func (c *Classifier) evaluateJailbreakSignal(ctx context.Context, results *Signa
 		ruleWg.Add(1)
 		go func() {
 			defer ruleWg.Done()
-			c.evaluateJailbreakRule(rule, jailbreakText, nonUserMessages, jailbreakCache, start, results, mu)
+			c.evaluateJailbreakRulePieces(rule, current, history, jailbreakCache, start, results, mu)
 		}()
 	}
 	ruleWg.Wait()
@@ -114,7 +124,19 @@ func (c *Classifier) evaluateJailbreakSignal(ctx context.Context, results *Signa
 }
 
 func (c *Classifier) evaluateJailbreakRule(rule config.JailbreakRule, jailbreakText string, nonUserMessages []string, jailbreakCache map[string][]cachedJailbreakResult, start time.Time, results *SignalResults, mu *sync.Mutex) {
-	contentToAnalyze := buildContentList(jailbreakText, nonUserMessages, rule.IncludeHistory)
+	c.evaluateJailbreakRulePieces(rule, []string{jailbreakText}, nonUserMessages, jailbreakCache, start, results, mu)
+}
+
+func (c *Classifier) evaluateJailbreakRulePieces(rule config.JailbreakRule, current, history []string, jailbreakCache map[string][]cachedJailbreakResult, start time.Time, results *SignalResults, mu *sync.Mutex) {
+	var contentToAnalyze []string
+	for _, text := range current {
+		if text != "" {
+			contentToAnalyze = append(contentToAnalyze, text)
+		}
+	}
+	if rule.IncludeHistory {
+		contentToAnalyze = append(contentToAnalyze, history...)
+	}
 	if len(contentToAnalyze) == 0 {
 		return
 	}

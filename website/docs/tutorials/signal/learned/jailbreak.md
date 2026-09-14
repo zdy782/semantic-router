@@ -52,6 +52,30 @@ routing:
 
 Use `include_history` for multi-turn attacks, and treat the pattern lists as tuning data for the configured detection method.
 
+### Request content and history
+
+For a routed request, Guard scores the consecutive user and tool messages at
+the end of the request, stopping at an assistant, system or developer message.
+This keeps all textual tool results together when a protocol represents them
+inside one user message. With
+`include_history: true`, it also scores earlier user and tool text. System and
+developer instructions and assistant replies are not independently scored as
+attack evidence. This narrows earlier versions' history behavior, which also
+scanned those trusted roles.
+
+If this current group has no eligible text, Guard does not substitute an older
+user turn or concatenate trusted instructions. Eligible earlier content is
+still inspected when `include_history` is enabled. No eligible text means no
+classification evidence, not a guarantee that the request is safe.
+
+This projection preserves complete text pieces and does not use the general
+routing text compressor. Each piece is scored separately; any matching piece
+can match the rule. It does not infer authority relationships across messages
+or inspect images, raw tool arguments, or content retrieved after routing.
+Message roles are a protocol boundary, not authenticated identity. The direct
+text detection API and response-direction scans retain their existing input
+contract; callers supplying flat text remain responsible for its scope.
+
 ### Token windows for a local classifier
 
 For a checkpoint evaluated with overlapping token windows, configure the same
