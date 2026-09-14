@@ -238,6 +238,9 @@ func (c *Classifier) CheckForJailbreakRiskWithThreshold(ctx context.Context, tex
 }
 
 func validateJailbreakDistribution(mapping *JailbreakMapping, positiveLabels []string, result SequenceClassificationResult) error {
+	if err := validateJailbreakInputCoverage(result.Input); err != nil {
+		return err
+	}
 	if mapping == nil || len(result.Probabilities) != mapping.GetJailbreakTypeCount() {
 		return fmt.Errorf("jailbreak distribution does not match the configured label set")
 	}
@@ -253,6 +256,16 @@ func validateJailbreakDistribution(mapping *JailbreakMapping, positiveLabels []s
 	}
 	if math.IsNaN(float64(jailbreakRiskScore(mapping, positiveLabels, result))) {
 		return fmt.Errorf("jailbreak positive-label probability is unavailable: %w", tasks.ErrProbabilitiesUnavailable)
+	}
+	return nil
+}
+
+// A provider may return valid probabilities for only a prefix. All Guard
+// consumers must treat that as an unresolved scan, not a clean full input.
+// Older backends without input metadata retain their existing contract.
+func validateJailbreakInputCoverage(input *tasks.InputUsage) error {
+	if input != nil && (input.Truncated || input.ProcessedTokens < input.OriginalTokens) {
+		return fmt.Errorf("jailbreak input is incomplete: processed %d of %d tokens (truncated=%t)", input.ProcessedTokens, input.OriginalTokens, input.Truncated)
 	}
 	return nil
 }

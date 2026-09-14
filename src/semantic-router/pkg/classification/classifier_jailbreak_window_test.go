@@ -17,6 +17,7 @@ import (
 
 type fakeJailbreakWindowModel struct {
 	windows []tasks.LabelDistributionWindow
+	usage   *tasks.InputUsage
 	inputs  []string
 	options []tasks.TextWindowsRequest
 	err     error
@@ -26,7 +27,7 @@ type fakeJailbreakWindowModel struct {
 func (m *fakeJailbreakWindowModel) ClassifyWindows(text string, options tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
 	m.inputs = append(m.inputs, text)
 	m.options = append(m.options, options)
-	return tasks.WindowedLabelDistribution{Windows: m.windows}, m.err
+	return tasks.WindowedLabelDistribution{Windows: m.windows, Input: m.usage}, m.err
 }
 
 func (m *fakeJailbreakWindowModel) Close() error { m.closed++; return nil }

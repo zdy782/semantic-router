@@ -99,6 +99,9 @@ func (c *windowedJailbreakBackend) Classify(ctx context.Context, text string) (S
 	if err != nil {
 		return SequenceClassificationResult{}, err
 	}
+	if coverageErr := validateJailbreakInputCoverage(output.Input); coverageErr != nil {
+		return SequenceClassificationResult{}, coverageErr
+	}
 	result, err := c.riskiestWindow(output.Windows)
 	result.Input = output.Input
 	return result, err
