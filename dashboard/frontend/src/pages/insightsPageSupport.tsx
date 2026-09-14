@@ -4,6 +4,7 @@ import { formatRoutingMetadataValue } from '../components/routingMetadataDisplay
 import type { ViewField, ViewSection } from '../components/ViewPanel'
 import { formatDateTime } from '../utils/dateTime'
 import { Link } from 'react-router-dom'
+import { ROUTER_CONFIG_EXTENSION } from '../generated/routerConfigContract'
 
 import type { InsightsCostSummary, InsightsRecord, Signal } from './insightsPageTypes'
 import { buildProjectionTraceFields } from './insightsPageProjectionTrace'
@@ -403,35 +404,11 @@ export function buildInsightsRecordSections(
 }
 
 export function collectSignals(signals: Signal): string[] {
-  const allSignals: string[] = []
-  const append = (key: keyof Signal) => {
-    allSignals.push(
-      ...(signals[key] ?? []).map((value) =>
-        formatRoutingMetadataValue(`x-vsr-matched-${key.replace(/_/g, '-')}`, value),
-      ),
-    )
-  }
-  const signalKeys: Array<keyof Signal> = [
-    'keyword',
-    'embedding',
-    'domain',
-    'fact_check',
-    'user_feedback',
-    'reask',
-    'preference',
-    'language',
-    'context',
-    'structure',
-    'complexity',
-    'modality',
-    'authz',
-    'jailbreak',
-    'safety',
-    'pii',
-    'kb',
-  ]
-  signalKeys.forEach(append)
-  return allSignals
+  return ROUTER_CONFIG_EXTENSION.signals.flatMap(({ type }) =>
+    (signals[type] ?? []).map((value) =>
+      formatRoutingMetadataValue(`x-vsr-matched-${type.replace(/_/g, '-')}`, value),
+    ),
+  )
 }
 
 export function hasCompleteCostData(record: InsightsRecord) {
@@ -447,32 +424,13 @@ export function hasCompleteCostData(record: InsightsRecord) {
 }
 
 function buildSignalFields(signals: Signal): ViewField[] {
-  const signalEntries: Array<[keyof Signal, string]> = [
-    ['keyword', 'Keyword matches'],
-    ['embedding', 'Embedding matches'],
-    ['domain', 'Domain matches'],
-    ['fact_check', 'Fact check results'],
-    ['user_feedback', 'User feedback'],
-    ['reask', 'Reask'],
-    ['preference', 'Preference signals'],
-    ['language', 'Language signals'],
-    ['context', 'Context signals'],
-    ['structure', 'Structure signals'],
-    ['complexity', 'Complexity signals'],
-    ['modality', 'Modality signals'],
-    ['authz', 'Authz signals'],
-    ['jailbreak', 'Jailbreak signals'],
-    ['safety', 'Safety signals'],
-    ['pii', 'PII signals'],
-    ['kb', 'Knowledge base signals'],
-  ]
-
-  return signalEntries.flatMap(([key, label]) => {
+  return ROUTER_CONFIG_EXTENSION.signals.flatMap(({ type: key, display_name }) => {
     const values = signals[key]
     if (!values?.length) {
       return []
     }
 
+    const label = `${display_name} signals`
     return [
       {
         label,

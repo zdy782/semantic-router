@@ -4,26 +4,9 @@ import type {
   ReplayRouteDiagnostics,
   ReplaySessionPolicy,
 } from './insightsPageRoutingTypes'
+import type { SignalType } from '../generated/routerConfigContract'
 
-export interface Signal {
-  keyword?: string[]
-  embedding?: string[]
-  domain?: string[]
-  fact_check?: string[]
-  user_feedback?: string[]
-  reask?: string[]
-  preference?: string[]
-  language?: string[]
-  context?: string[]
-  structure?: string[]
-  complexity?: string[]
-  modality?: string[]
-  authz?: string[]
-  jailbreak?: string[]
-  safety?: string[]
-  pii?: string[]
-  kb?: string[]
-}
+export type Signal = Partial<Record<SignalType, string[]>>
 
 export interface ToolTraceStep {
   type: string
