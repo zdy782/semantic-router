@@ -9,6 +9,7 @@ import (
 )
 
 type evalResponse struct {
+	SignalErrors      map[string]string  `json:"signal_errors"`
 	RequestedModel    string             `json:"requested_model"`
 	SelectedModel     string             `json:"selected_model"`
 	FinalModel        string             `json:"final_model"`
@@ -23,6 +24,7 @@ type evalResponse struct {
 }
 
 type evalDecisionResult struct {
+	SignalValues   map[string]any      `json:"signal_values"`
 	DecisionName   string              `json:"decision_name"`
 	Algorithm      string              `json:"algorithm"`
 	Plugins        []string            `json:"plugins"`
@@ -66,18 +68,20 @@ func compareEvalResponse(raw json.RawMessage, probe ProbeDetail, allProbes []Pro
 		actualSignals,
 		probe.Expected.SignalMatch,
 	)
+	valuesPassed, valueFailures := compareSignalValues(probe.Expected.SignalValues, response.DecisionResult.SignalValues, response.SignalErrors)
 	aliasPassed := aliasMatches(probe.Expected.Alias, actualModels)
 	selectionPassed, selectionFailures := compareExpectedSelection(probe.Expected, response, actualModels)
 	checks := ValidationChecks{
-		Decision:  actualDecision == probe.Expected.Decision,
-		Model:     probe.Model == "" || strings.TrimSpace(response.RequestedModel) == probe.Model,
-		Recipe:    strings.TrimSpace(response.Recipe) == expectedRecipe,
-		Algorithm: probe.Expected.Algorithm == "" || strings.TrimSpace(response.DecisionResult.Algorithm) == probe.Expected.Algorithm,
-		Selection: selectionPassed,
-		Plugins:   pluginsPassed,
-		Signals:   signalsPassed,
-		Alias:     aliasPassed,
-		Trace:     tracePassed,
+		Decision:     actualDecision == probe.Expected.Decision,
+		Model:        probe.Model == "" || strings.TrimSpace(response.RequestedModel) == probe.Model,
+		Recipe:       strings.TrimSpace(response.Recipe) == expectedRecipe,
+		Algorithm:    probe.Expected.Algorithm == "" || strings.TrimSpace(response.DecisionResult.Algorithm) == probe.Expected.Algorithm,
+		Selection:    selectionPassed,
+		Plugins:      pluginsPassed,
+		Signals:      signalsPassed,
+		SignalValues: valuesPassed,
+		Alias:        aliasPassed,
+		Trace:        tracePassed,
 	}
 
 	failures := []string{}
@@ -95,6 +99,7 @@ func compareEvalResponse(raw json.RawMessage, probe ProbeDetail, allProbes []Pro
 	}
 	failures = append(failures, pluginFailures...)
 	failures = append(failures, signalFailures...)
+	failures = append(failures, valueFailures...)
 	failures = append(failures, selectionFailures...)
 	if !checks.Alias {
 		failures = append(failures, fmt.Sprintf("recommended models %v do not contain expected alias %q", actualModels, probe.Expected.Alias))
@@ -113,6 +118,7 @@ func compareEvalResponse(raw json.RawMessage, probe ProbeDetail, allProbes []Pro
 		Plugins:           actualPlugins,
 		RecommendedModels: actualModels,
 		MatchedSignals:    actualSignals,
+		SignalValues:      response.DecisionResult.SignalValues,
 		TraceDecisions:    traceDecisions,
 	}, checks, failures, nil
 }

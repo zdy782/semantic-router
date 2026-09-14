@@ -30,6 +30,7 @@ from recipe_metadata_schema import (
 from router_calibration_evaluation import EVALUATION_SCOPES
 from router_calibration_manifest import Probe, load_probe_manifest
 from router_calibration_report import render_markdown_summary
+from router_calibration_signal_values import signal_value_reference
 from router_calibration_support import evaluate_probes, write_json
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -403,6 +404,11 @@ def _validate_probe_signals(
     probe: Probe,
     configured_signals: dict[str, set[str]],
 ) -> None:
+    for key in probe.expected_signal_values:
+        try:
+            signal_value_reference(key, configured_signals)
+        except ValueError as exc:
+            raise ValueError(f"{path}: probe {probe.probe_id}: {exc}") from exc
     for signal_type, name in probe.expected_signals:
         configured_names = configured_signals.get(signal_type, set())
         base_name = name.split(":", 1)[0]

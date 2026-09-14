@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Any
 
 from router_calibration_probe import Probe
+from router_calibration_signal_values import signal_value_reference
 
 SIGNAL_RESPONSE_TYPES = {
     "keywords": "keywords",
@@ -99,6 +100,13 @@ def collect_coverage(
     tag_counts: Counter[str] = Counter()
     for probe in probes:
         recipe = _probe_recipe(probe, entrypoints)
+        # Raw evidence counts only after resolving its rule in this recipe.
+        # Runtime evaluation separately requires the observed finite value.
+        local_signals = configured_signal_names(profiles.get(recipe, {}))
+        asserted_signals.update(
+            _signal_key(*signal_value_reference(key, local_signals))
+            for key in probe.expected_signal_values
+        )
         decision_key = _decision_key(recipe, probe.expected_decision)
         asserted_decisions.add(decision_key)
         asserted_signals.update(

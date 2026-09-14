@@ -244,6 +244,7 @@ def _render_decision_failures(
                 ("candidate alias", result.get("alias_matched", True)),
                 ("plugins", result.get("plugins_matched", True)),
                 ("signals", result.get("signals_matched", True)),
+                ("signal values", result.get("signal_values_matched", True)),
                 ("trace", result.get("trace_matched", True)),
             )
             if not passed
@@ -255,6 +256,9 @@ def _render_decision_failures(
                 "Candidate pool: "
                 f"`{', '.join(str(model) for model in result['recommended_models'])}`"
             )
+        if result.get("signal_value_errors"):
+            value_errors = "; ".join(result["signal_value_errors"])
+            lines.append(f"Signal value errors: `{value_errors}`")
         if result.get("trace_errors"):
             lines.append(f"Trace errors: `{'; '.join(result['trace_errors'])}`")
         if result.get("error"):

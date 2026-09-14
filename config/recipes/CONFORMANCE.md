@@ -71,6 +71,35 @@ authoring mechanics here and release operations in the maintainer guide.
 Each variant must contain exactly one of `query` or `messages`. Add `tools` when
 tool shape is part of the contract.
 
+### Raw signal values
+
+Use `expected_signal_values` when a projection consumes a raw score even below
+the signal's match threshold. Keys are exact runtime keys from
+`decision_result.signal_values`, rather than the plural families in
+`expected_signals`:
+
+```yaml
+expected_signal_values:
+  embedding:informational: {gte: -1, lte: 1}
+  structure:question_count: {gte: 2}
+```
+
+Each interval needs at least one inclusive `gte` or `lte` bound. Bounds must be
+finite numbers, not booleans, with `gte <= lte` when both are present. A group
+provides defaults; a variant replaces the whole mapping when specified, and
+`{}` clears it. Missing, nonnumeric or nonfinite values and corresponding
+`signal_errors` fail the assertion. An observed score below the match threshold
+can pass its interval without satisfying `expected_signals`; existing expected,
+forbidden, projection, decision and trace assertions remain independent.
+
+Scores use the evaluator's own units and are **not necessarily probabilities**.
+For example, cosine similarities may be negative, and structure values may be
+counts. A broad valid range proves observation, not semantic correctness; use
+decision and projection assertions to verify the intended policy. Static
+coverage resolves each value to a configured rule in that probe's recipe
+(`embedding:name` covers `embeddings:name`); unknown rules are rejected. Live
+reports retain observed values and interval errors in both evaluation scopes.
+
 ## Expected model selection
 
 Selection checks use the expected algorithm's normal preview statuses by default.

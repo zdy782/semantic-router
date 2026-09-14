@@ -16,6 +16,7 @@ from router_calibration_probe import (
     ProbeImageFixture,
     message_content_text_bytes,
 )
+from router_calibration_signal_values import compare_signal_values
 
 MAX_REQUEST_BYTES = 10 << 20
 EVALUATION_SCOPES = ("deployment", "policy")
@@ -152,6 +153,11 @@ def _compare_probe_outcome(
         actual=decision_result.get("matched_signals") or {},
         match_mode=probe.signal_match,
     )
+    value_comparison = compare_signal_values(
+        probe.expected_signal_values,
+        decision_result.get("signal_values"),
+        signal_errors,
+    )
     plugin_comparison = compare_expected_plugins(
         expected=probe.expected_plugins,
         forbidden=probe.forbidden_plugins,
@@ -182,6 +188,7 @@ def _compare_probe_outcome(
         ),
         "plugins": plugin_comparison["matched"],
         "signals": signal_comparison["matched"],
+        "signal_values": value_comparison["matched"],
         "alias": expected_alias_matches(probe.expected_alias, actual_models),
         "trace": trace_comparison["matched"],
         "signal_errors": not signal_errors,
@@ -229,6 +236,7 @@ def _compare_probe_outcome(
         "actual_algorithm": actual_algorithm,
         "actual_plugins": actual_plugins,
         "signal_comparison": signal_comparison,
+        "value_comparison": value_comparison,
         "plugin_comparison": plugin_comparison,
         "trace_comparison": trace_comparison,
         "selection_comparison": selection_comparison,
@@ -275,6 +283,9 @@ def _build_probe_result(
         "unexpected_plugins": plugins["unexpected"],
         "forbidden_plugin_matches": plugins["forbidden"],
         "expected_signals": expected_signals_by_type(probe.expected_signals),
+        "expected_signal_values": probe.expected_signal_values,
+        "observed_signal_values": outcome["value_comparison"]["observed"],
+        "signal_value_errors": outcome["value_comparison"]["errors"],
         "forbidden_signals": expected_signals_by_type(probe.forbidden_signals),
         "signal_match": probe.signal_match,
         "missing_expected_signals": signals["missing"],
@@ -302,6 +313,7 @@ def _build_probe_result(
         "algorithm_matched": checks["algorithm"],
         "plugins_matched": checks["plugins"],
         "signals_matched": checks["signals"],
+        "signal_values_matched": checks["signal_values"],
         "alias_matched": checks["alias"],
         "trace_matched": checks["trace"],
         "signal_errors_matched": checks["signal_errors"],

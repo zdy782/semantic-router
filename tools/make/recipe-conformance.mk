@@ -17,6 +17,7 @@ recipe-conformance-static: ## Validate all maintained recipe assets and probe co
 	@$(RECIPE_CONFORMANCE_PYTHON) -m unittest \
 		tools/dev/router-calibration/router_calibration_fixture_test.py \
 		tools/dev/router-calibration/router_calibration_support_test.py \
+		tools/dev/router-calibration/router_calibration_signal_values_test.py \
 		tools/dev/router-calibration/recipe_conformance_test.py
 	@$(RECIPE_CONFORMANCE_PYTHON) tools/dev/router-calibration/recipe_conformance.py \
 		--output-dir "$(RECIPE_CONFORMANCE_REPORT_DIR)" \

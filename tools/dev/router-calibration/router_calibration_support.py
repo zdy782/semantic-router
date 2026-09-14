@@ -49,6 +49,7 @@ from router_calibration_manifest import (
     summarize_decision_results,
     summarize_tag_results,
 )
+from router_calibration_signal_values import compare_signal_values
 
 __all__ = [
     "compare_eval_selection",
@@ -461,6 +462,11 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "unexpected_plugins": [],
         "forbidden_plugin_matches": [],
         "expected_signals": expected_signals_by_type(probe.expected_signals),
+        "expected_signal_values": probe.expected_signal_values,
+        "observed_signal_values": {},
+        "signal_value_errors": [
+            "Eval request failed; raw values do not establish success"
+        ],
         "forbidden_signals": expected_signals_by_type(probe.forbidden_signals),
         "signal_match": probe.signal_match,
         "missing_expected_signals": [
@@ -487,6 +493,7 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "algorithm_matched": False,
         "plugins_matched": False,
         "signals_matched": False,
+        "signal_values_matched": False,
         "alias_matched": False,
         "trace_matched": False,
         "signal_errors_matched": False,
@@ -509,6 +516,14 @@ def failed_probe_result(probe: Probe, exc: RuntimeError) -> dict[str, Any]:
         "error": str(exc),
     }
     result.update(_failed_response_diagnostics(result["raw_response"]))
+    payload = result["raw_response"]
+    decision = payload.get("decision_result") if isinstance(payload, dict) else None
+    values = decision.get("signal_values") if isinstance(decision, dict) else None
+    comparison = compare_signal_values(
+        probe.expected_signal_values, values, result["signal_errors"]
+    )
+    result["observed_signal_values"] = comparison["observed"]
+    result["signal_value_errors"].extend(comparison["errors"])
     return result
 
 
