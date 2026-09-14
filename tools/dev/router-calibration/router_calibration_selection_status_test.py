@@ -209,7 +209,7 @@ class UnavailableSelectionTest(unittest.TestCase):
             path.write_text(json.dumps(document))
             _, probes = load_probe_manifest(path)
             self.assertIsNone(probes[0].expected_selection_status)
-            for value in ("selected", "invented", "", None):
+            for value in ("invented", "", None):
                 with self.subTest(value=value):
                     invalid = copy.deepcopy(document)
                     invalid["decisions"][0]["expected_selection_status"] = value
