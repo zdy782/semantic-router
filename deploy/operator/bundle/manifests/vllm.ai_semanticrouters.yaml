@@ -1334,6 +1334,41 @@ spec:
                           description: Name of the complexity rule (e.g., "code-complexity",
                             "reasoning-complexity")
                           type: string
+                        prototype_scoring:
+                          description: |-
+                            PrototypeScoring replaces the family prototype-scoring configuration for
+                            this rule. Absence inherits the family; a present object is a complete
+                            override, including an empty object. Defaults remain Router-owned.
+                          properties:
+                            best_weight:
+                              description: BestWeight weights the best prototype against
+                                the top-M mean.
+                              pattern: ^-?[0-9]+(\.[0-9]+)?$
+                              type: string
+                            cluster_similarity_threshold:
+                              description: |-
+                                ClusterSimilarityThreshold is the clustering similarity threshold.
+                                Stored as a numeric string, like other fractional operator config fields.
+                              pattern: ^-?[0-9]+(\.[0-9]+)?$
+                              type: string
+                            enabled:
+                              description: Enabled controls prototype clustering.
+                                False retains every candidate.
+                              type: boolean
+                            margin_threshold:
+                              description: MarginThreshold is the minimum winner-versus-runner-up
+                                score margin.
+                              pattern: ^-?[0-9]+(\.[0-9]+)?$
+                              type: string
+                            max_prototypes:
+                              description: MaxPrototypes caps the number of cluster
+                                representatives.
+                              type: integer
+                            top_m:
+                              description: TopM is the number of highest-scoring prototypes
+                                included in the mean.
+                              type: integer
+                          type: object
                         threshold:
                           description: |-
                             Threshold for the local prototype-scoring path (0.0-1.0), stored as a

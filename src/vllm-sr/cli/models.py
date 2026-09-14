@@ -78,6 +78,7 @@ class EmbeddingSignal(BaseModel):
     candidates: List[str]
     aggregation_method: str = "max"
     query_modality: Optional[Literal["text", "image", "audio"]] = None
+    prototype_scoring: Optional["PrototypeScoringConfig"] = None
 
 
 class ProjectionPartition(BaseModel):
@@ -381,6 +382,7 @@ class ComplexityRule(BaseModel):
     easy: ComplexityCandidates
     description: Optional[str] = None
     composer: Optional["Rules"] = None  # Forward reference, defined below
+    prototype_scoring: Optional[PrototypeScoringConfig] = None
 
 
 class JailbreakRule(BaseModel):

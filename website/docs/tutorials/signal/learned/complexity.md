@@ -98,6 +98,27 @@ global:
           top_m: 2
 ```
 
+A complexity rule can also declare `prototype_scoring` beside `hard` and
+`easy`. Omitting it inherits the family settings above. A declared object is a
+complete override: omitted fields, including those in `{}`, use built-in
+defaults rather than family overrides. This keeps authored recipe settings with
+the rule when the recipe is exported or initialized.
+
+To retain all distinct candidates in both banks:
+
+```yaml
+prototype_scoring:
+  enabled: false
+  best_weight: 0.75
+  top_m: 2
+```
+
+This disables clustering and the prototype cap while retaining best/support
+aggregation. The same resolved settings apply to text and image hard/easy banks
+and their scores. With compression enabled, `max_prototypes: 0` uses the default
+cap of 8. These settings affect local prototype scoring, not a remote scorer's
+returned score; thresholds and explicit difficulty boundaries are unchanged.
+
 ### Local and remote scoring
 
 With no `backend`, complexity keeps its existing local behaviour: the `hard`

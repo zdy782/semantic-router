@@ -87,7 +87,29 @@ global:
             margin_threshold: 0.05
 ```
 
-`prototype_scoring` compresses each embedding rule's candidate bank into a smaller set of representative prototypes, then scores the rule from those prototypes instead of relying on one flat candidate list forever.
+The family-level `prototype_scoring` settings compress each rule's candidate
+bank and control its scoring. A rule can declare its own `prototype_scoring`
+object beside `candidates`. Omitting it inherits the family settings; declaring
+it replaces the complete object, with omitted fields using built-in defaults.
+An empty object therefore uses built-in defaults rather than family overrides.
+
+To retain every distinct authored candidate, including multilingual examples,
+set this on the rule:
+
+```yaml
+prototype_scoring:
+  enabled: false
+  best_weight: 0.75
+  top_m: 2
+```
+
+`enabled: false` disables clustering and the prototype cap, not aggregation.
+`max` still combines the best similarity and top-M support; `mean` still averages
+the retained bank. With compression enabled, `max_prototypes: 0` uses the default
+cap of 8. Retaining more candidates adds local scoring work; candidate embeddings
+are already computed before compression and request embedding calls are unchanged.
+Rule settings travel with an exported or initialized recipe and apply to both
+text and image queries.
 
 The Router scores every embedding rule. By default, `top_k: 0` retains every
 rule that meets its threshold, so independent predicates remain available to

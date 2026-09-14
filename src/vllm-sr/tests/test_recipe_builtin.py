@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+from cli import builtin_recipes
 from cli.builtin_recipes import list_builtin_recipes
 from cli.commands.runtime_kb import _resolve_kb_source_root
 from cli.main import main as cli
 from cli.model_bundle import model_bundle_digest
+from cli.parser import parse_user_config
 from click.testing import CliRunner
 
 
@@ -268,3 +270,76 @@ def test_immediate_guard_rejects_unused_backend_assignments(tmp_path):
     assert result.exit_code != 0
     assert "immediate" in result.output.lower()
     assert not output.exists()
+
+
+def test_init_preserves_rule_prototype_overrides_and_operator_global(
+    tmp_path, monkeypatch
+):
+    source, _, _ = _inputs(tmp_path)
+    operator = yaml.safe_load(source.read_text())
+    operator["global"] = {
+        "model_catalog": {
+            "modules": {"complexity": {"prototype_scoring": {"max_prototypes": 1}}}
+        }
+    }
+    source.write_text(yaml.safe_dump(operator))
+    original = source.read_bytes()
+    override = {"enabled": False, "best_weight": 0.75, "top_m": 2}
+    document = {
+        "recipes": [
+            {
+                "name": "authored",
+                "routing": {
+                    "signals": {
+                        "embeddings": [
+                            {
+                                "name": "intent",
+                                "threshold": 0.8,
+                                "candidates": ["a", "b"],
+                                "prototype_scoring": override,
+                            }
+                        ],
+                        "complexity": [
+                            {
+                                "name": "difficulty",
+                                "threshold": 0.1,
+                                "hard": {"candidates": ["hard"]},
+                                "easy": {"candidates": ["easy"]},
+                                "prototype_scoring": {},
+                            }
+                        ],
+                    },
+                    "decisions": [
+                        {
+                            "name": "answer",
+                            "priority": 1,
+                            "rules": {"operator": "AND", "conditions": []},
+                            "modelRefs": [],
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+    monkeypatch.setattr(builtin_recipes, "_bundle", lambda *args: ({}, document, None))
+    bindings = tmp_path / "authored-bindings.yaml"
+    bindings.write_text(yaml.safe_dump({"answer": [{"model": "model-a"}]}))
+    output = tmp_path / "authored.yaml"
+    builtin_recipes.initialize_builtin_recipe(
+        "authored",
+        bundle="synthetic",
+        config_path=source,
+        bindings_path=bindings,
+        model_name="my/authored",
+        output=output,
+    )
+    parsed = parse_user_config(str(output), log_summary=False)
+    signals = parsed.recipes[0].routing.signals
+    assert (
+        signals.embeddings[0].prototype_scoring.model_dump(exclude_none=True)
+        == override
+    )
+    assert signals.complexity[0].prototype_scoring.model_dump(exclude_none=True) == {}
+    assert yaml.safe_load(output.read_text())["global"] == operator["global"]
+    assert source.read_bytes() == original
+    assert document["recipes"][0]["routing"]["decisions"][0]["modelRefs"] == []

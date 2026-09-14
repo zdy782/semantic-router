@@ -1127,6 +1127,39 @@ type EmbeddingEndpointConfig struct {
 	Dimensions int `json:"dimensions,omitempty"`
 }
 
+// PrototypeScoringConfig overrides prototype-bank construction and scoring for
+// one embedding-backed signal rule. Router-owned defaults apply only after
+// translation; the operator preserves an absent override and an empty object.
+type PrototypeScoringConfig struct {
+	// Enabled controls prototype clustering. False retains every candidate.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// ClusterSimilarityThreshold is the clustering similarity threshold.
+	// Stored as a numeric string, like other fractional operator config fields.
+	// +kubebuilder:validation:Pattern=`^-?[0-9]+(\.[0-9]+)?$`
+	// +optional
+	ClusterSimilarityThreshold string `json:"cluster_similarity_threshold,omitempty"`
+
+	// MaxPrototypes caps the number of cluster representatives.
+	// +optional
+	MaxPrototypes int `json:"max_prototypes,omitempty"`
+
+	// BestWeight weights the best prototype against the top-M mean.
+	// +kubebuilder:validation:Pattern=`^-?[0-9]+(\.[0-9]+)?$`
+	// +optional
+	BestWeight string `json:"best_weight,omitempty"`
+
+	// TopM is the number of highest-scoring prototypes included in the mean.
+	// +optional
+	TopM int `json:"top_m,omitempty"`
+
+	// MarginThreshold is the minimum winner-versus-runner-up score margin.
+	// +kubebuilder:validation:Pattern=`^-?[0-9]+(\.[0-9]+)?$`
+	// +optional
+	MarginThreshold string `json:"margin_threshold,omitempty"`
+}
+
 // ComplexityRulesConfig defines complexity-based signal classification.
 //
 // The CEL rules below reject at admission the boundary combinations the Router
@@ -1143,6 +1176,12 @@ type EmbeddingEndpointConfig struct {
 // +kubebuilder:validation:XValidation:rule="!(has(self.hard_above) && has(self.easy_below)) || double(self.easy_below) < double(self.hard_above)",message="easy_below must be below hard_above; the band between them is medium"
 // +kubebuilder:validation:XValidation:rule="!(has(self.hard_below) && has(self.easy_above)) || double(self.hard_below) < double(self.easy_above)",message="hard_below must be below easy_above; the band between them is medium"
 type ComplexityRulesConfig struct {
+	// PrototypeScoring replaces the family prototype-scoring configuration for
+	// this rule. Absence inherits the family; a present object is a complete
+	// override, including an empty object. Defaults remain Router-owned.
+	// +optional
+	PrototypeScoring *PrototypeScoringConfig `json:"prototype_scoring,omitempty"`
+
 	// Name of the complexity rule (e.g., "code-complexity", "reasoning-complexity")
 	Name string `json:"name"`
 

@@ -252,6 +252,14 @@ routing:
       - name: technical_support
         threshold: 0.75
         aggregation_method: max
+        # A complete rule override; omission inherits the family configuration.
+        prototype_scoring:
+          enabled: true
+          cluster_similarity_threshold: 0.9
+          max_prototypes: 8
+          best_weight: 0.75
+          top_m: 2
+          margin_threshold: 0.0
         candidates:
           - how to configure the system
           - installation guide
@@ -444,6 +452,13 @@ routing:
       - name: needs_reasoning
         threshold: 0.10
         description: Escalate multi-step reasoning or synthesis-heavy prompts.
+        prototype_scoring:
+          enabled: true
+          cluster_similarity_threshold: 0.9
+          max_prototypes: 6
+          best_weight: 0.75
+          top_m: 2
+          margin_threshold: 0.0
         hard:
           candidates:
             - solve this step by step

@@ -188,9 +188,9 @@ func (c *ComplexityClassifier) classifyDetailedWithImageCached(query string, ima
 	if err != nil {
 		return nil, err
 	}
-	scoreOptions := defaultPrototypeScoreOptions(c.prototypeCfg)
 	results := make([]ComplexityRuleResult, 0, len(c.rules))
 	for _, rule := range c.rules {
+		scoreOptions := defaultPrototypeScoreOptions(rule.PrototypeScoring.Resolve(c.prototypeCfg))
 		result := c.classifyRuleWithEmbeddings(rule, queryEmbeddings, scoreOptions)
 		logComplexityRuleResult(rule, result, queryEmbeddings.image != nil)
 		results = append(results, result)

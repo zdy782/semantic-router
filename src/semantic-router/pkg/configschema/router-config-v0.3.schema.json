@@ -1553,6 +1553,9 @@
         "name": {
           "type": "string"
         },
+        "prototype_scoring": {
+          "$ref": "#/$defs/PrototypeScoringConfig"
+        },
         "threshold": {
           "type": "number"
         },
@@ -2411,6 +2414,9 @@
         },
         "query_modality": {
           "type": "string"
+        },
+        "prototype_scoring": {
+          "$ref": "#/$defs/PrototypeScoringConfig"
         }
       },
       "additionalProperties": false,
