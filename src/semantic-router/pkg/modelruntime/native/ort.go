@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,7 +21,10 @@ import (
 
 func ortOptions(spec config.ResolvedModelBinding) (ort.Options, error) {
 	d := spec.Deployment.WithDefaults()
-	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow, CustomOpsProfile: d.CustomOpsProfile, CompilationCacheDir: d.CompilationCacheDir}
+	options := ort.Options{ModelPath: d.Artifact, ModelFile: spec.Binding.Head, Precision: d.Precision, MaxInputTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow, CustomOpsProfile: d.CustomOpsProfile, CompilationCacheDir: d.CompilationCacheDir, ShortSequenceTokens: d.ShortSequenceTokens}
+	if err := d.ValidateShortSequence(); err != nil {
+		return options, fmt.Errorf("%w: %w", binding.ErrCapability, err)
+	}
 	if err := d.ValidateCompilationCache(); err != nil {
 		return options, fmt.Errorf("%w: %w", binding.ErrCapability, err)
 	}
@@ -178,6 +182,9 @@ func ortCapability(spec config.ResolvedModelBinding, info ort.Info) (binding.Cap
 		return binding.Capability{}, fmt.Errorf("%w: ORT returned no loaded session evidence", binding.ErrCapability)
 	}
 	d := spec.Deployment.WithDefaults()
+	if err := validateORTShortSessions(d, info); err != nil {
+		return binding.Capability{}, err
+	}
 	for _, session := range info.Sessions {
 		device := "cpu"
 		switch session.Provider {
@@ -213,6 +220,46 @@ func ortCapability(spec config.ResolvedModelBinding, info ort.Info) (binding.Cap
 		}
 	}
 	return binding.Capability{Contract: spec.Binding.Contract, Provider: "ort", Device: d.Device, Precision: d.Precision, Labels: info.Labels, Limits: binding.Limits{ModelTokens: info.ModelLimit, TaskTokens: info.TaskLimit, DeploymentTokens: d.Input.MaxTokens, Overflow: d.Input.Overflow}}, nil
+}
+
+func validateORTShortSessions(d config.ModelDeployment, info ort.Info) error {
+	if d.ShortSequenceTokens == 0 {
+		return nil
+	}
+	fail := func() error {
+		return fmt.Errorf("%w: actual classifier sessions differ from short/full execution", binding.ErrCapability)
+	}
+	if len(info.Sessions) != 2 || (info.Task != "sequence_classification" && info.Task != "token_classification" && info.Task != "label_scores") {
+		return fail()
+	}
+	first := info.Sessions[0]
+	maximum := info.EffectiveLimit
+	if first.ExecutionMaxInputTokens > 0 {
+		maximum = first.ExecutionMaxInputTokens
+	}
+	if maximum <= d.ShortSequenceTokens {
+		return fail()
+	}
+	for index, session := range info.Sessions {
+		length := d.ShortSequenceTokens
+		if index == 1 {
+			length = maximum
+		}
+		if session.Graph != first.Graph || session.RuntimeBuild != first.RuntimeBuild || !slices.Equal(session.Artifacts, first.Artifacts) || session.ExecutionMaxInputTokens != first.ExecutionMaxInputTokens {
+			return fail()
+		}
+		names := map[string]bool{}
+		for _, input := range session.ExecutionInputs {
+			if names[input.Name] || (input.Name != "input_ids" && input.Name != "attention_mask" && input.Name != "position_ids") || input.Dtype != "int64" || !slices.Equal(input.Shape, []int64{1, int64(length)}) {
+				return fail()
+			}
+			names[input.Name] = true
+		}
+		if !names["input_ids"] || !names["attention_mask"] {
+			return fail()
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) ortSequence(ctx context.Context, spec config.ResolvedModelBinding) (*binding.Resolved[string, tasks.LabelDistribution], error) {

@@ -25,6 +25,9 @@ type OperatingPointResult struct {
 }
 
 func (r *Runtime) OperatingPoint(ctx context.Context, spec config.ResolvedModelBinding, labels []string) (*OperatingPointScorer, error) {
+	if spec.Deployment.ShortSequenceTokens != 0 {
+		return nil, fmt.Errorf("%w: short_sequence_tokens is incompatible with artifact-bound operating_point execution", binding.ErrCapability)
+	}
 	policy, err := operatingpoint.Load(ctx, spec, labels)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", binding.ErrCapability, err)

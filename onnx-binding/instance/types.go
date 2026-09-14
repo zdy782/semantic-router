@@ -12,7 +12,8 @@ type Options struct {
 	MaxInputTokens          int    `json:"max_input_tokens,omitempty"`
 	ExecutionMaxInputTokens int    `json:"execution_max_input_tokens,omitempty"`
 	CompilationCacheDir     string `json:"compilation_cache_dir,omitempty"`
-	Overflow                string `json:"overflow,omitempty"` // reject (default) or truncate_right
+	ShortSequenceTokens     int    `json:"short_sequence_tokens,omitempty"` // Optional MIGraphX classifier short bucket; full budget is retained.
+	Overflow                string `json:"overflow,omitempty"`              // reject (default) or truncate_right
 	IntraThreads            int    `json:"intra_threads,omitempty"`
 	ProfilePrefix           string `json:"profile_prefix,omitempty"`
 	CustomOpsProfile        string `json:"custom_ops_profile,omitempty"` // none (default) or ck_flash_attention

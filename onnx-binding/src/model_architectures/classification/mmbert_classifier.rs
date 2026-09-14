@@ -10,10 +10,12 @@
 //! - CPU OpenVINO FP32: ~22ms
 //! - CPU ORT FP32: ~41ms
 
-use crate::core::compilation_cache::CompilationCacheLease;
-use crate::core::instance_options::{InstanceOptions, Provider};
+use crate::core::instance_options::InstanceOptions;
+#[cfg(test)]
+use crate::core::instance_options::Provider;
 use crate::core::unified_error::{errors, UnifiedResult};
 use crate::model_architectures::modernbert_inputs;
+use crate::model_architectures::modernbert_sessions::ClassifierSessions;
 use half::f16;
 use ndarray::Array2;
 use ort::session::{Session, SessionOutputs};
@@ -248,16 +250,11 @@ pub enum ClassifierExecutionProvider {
 /// - Feedback classification
 /// - Factcheck classification
 pub struct MmBertSequenceClassifier {
-    session: Session,
-    cache_lease: Option<CompilationCacheLease>,
+    sessions: ClassifierSessions,
     tokenizer: Arc<Tokenizer>,
     config: MmBertClassifierConfig,
     model_path: String,
     max_sequence_length: usize,
-    // MIGraphX compiles for one shape. Padding execution tensors to the owned
-    // budget avoids recompiling every time a request's actual length changes.
-    // Tokenization, offsets and reported input usage remain unpadded.
-    execution_sequence_length: Option<usize>,
 }
 
 impl MmBertSequenceClassifier {
@@ -316,18 +313,20 @@ impl MmBertSequenceClassifier {
         );
 
         Ok(Self {
-            session,
-            cache_lease: None,
+            sessions: ClassifierSessions::legacy(session),
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: model_path_str,
             max_sequence_length,
-            execution_sequence_length: None,
         })
     }
 
-    /// Load one owned session with an explicit provider and no provider fallback.
+    /// Load an owned classifier with an explicit provider and no provider fallback.
     pub fn load_with_options(options: &InstanceOptions) -> UnifiedResult<Self> {
+        Self::load_for_task(options, false)
+    }
+
+    fn load_for_task(options: &InstanceOptions, token_task: bool) -> UnifiedResult<Self> {
         options.validate()?;
         let config = MmBertClassifierConfig::from_pretrained(&options.model_path)?;
         let options = classifier_instance_options(options, config.max_position_embeddings)?;
@@ -345,17 +344,42 @@ impl MmBertSequenceClassifier {
             Self::find_onnx_models(&options.model_path, provider)?
         };
         let graph = options.select_graph(candidates)?;
-        let prepared = modernbert_inputs::prepare_session(&options, &graph, max_sequence_length)?;
-        modernbert_inputs::validate(&prepared.session.inputs)?;
+        let mut warmup = tokenizers::Encoding::default();
+        if options.short_sequence_tokens.is_some() {
+            warmup = tokenizer
+                .encode("", true)
+                .map_err(|e| errors::tokenization_error(&e.to_string()))?;
+            if warmup.is_empty() {
+                warmup = tokenizer
+                    .encode("warmup", true)
+                    .map_err(|e| errors::tokenization_error(&e.to_string()))?;
+            }
+        }
+        let sessions = ClassifierSessions::prepare(
+            &options,
+            &graph,
+            max_sequence_length,
+            &warmup,
+            i64::from(config.pad_token_id),
+            |outputs, length| {
+                let logits = if token_task {
+                    extract_token_logits_from_outputs(outputs)?
+                } else {
+                    extract_logits_from_outputs(outputs)?
+                };
+                validate_classifier_logits(
+                    &logits,
+                    if token_task { length } else { 1 },
+                    config.num_labels,
+                )
+            },
+        )?;
         Ok(Self {
-            session: prepared.session,
-            cache_lease: prepared.cache_lease,
+            sessions,
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: options.model_path.clone(),
             max_sequence_length,
-            execution_sequence_length: (options.provider == Provider::Migraphx)
-                .then_some(max_sequence_length),
         })
     }
 
@@ -363,10 +387,7 @@ impl MmBertSequenceClassifier {
         &self.tokenizer
     }
     pub fn finish_profiling(&mut self) -> UnifiedResult<Vec<String>> {
-        self.session
-            .end_profiling()
-            .map(|path| vec![path])
-            .map_err(|e| errors::ort_error(&e.to_string()))
+        self.sessions.finish_profiling()
     }
 
     /// Find ONNX model candidates in priority order.
@@ -731,7 +752,7 @@ impl MmBertSequenceClassifier {
         let max_len = max_len
             .min(self.config.max_position_embeddings)
             .min(self.max_sequence_length);
-        let max_len = self.execution_sequence_length.unwrap_or(max_len);
+        let max_len = self.sessions.execution_length(texts.len(), max_len)?;
 
         // Prepare input tensors
         let batch_size = texts.len();
@@ -763,7 +784,7 @@ impl MmBertSequenceClassifier {
                 "token window is empty or exceeds the classifier budget",
             ));
         }
-        let execution_len = self.execution_sequence_length.unwrap_or(ids.len());
+        let execution_len = self.sessions.execution_length(1, ids.len())?;
         if execution_len < ids.len() {
             return Err(errors::tokenization_error(
                 "execution budget is smaller than token input",
@@ -788,14 +809,9 @@ impl MmBertSequenceClassifier {
         max_len: usize,
         multi_label: bool,
     ) -> UnifiedResult<Vec<ClassificationResult>> {
-        let outputs = modernbert_inputs::run_cached(
-            &mut self.session,
-            &mut self.cache_lease,
-            input_ids,
-            attention_mask,
-            batch_size,
-            max_len,
-        )?;
+        let outputs = self
+            .sessions
+            .run(input_ids, attention_mask, batch_size, max_len)?;
 
         // Extract logits (inline to avoid borrow issues)
         let logits = extract_logits_from_outputs(&outputs)?;
@@ -1102,13 +1118,11 @@ fn logits_to_scores(
 ///
 /// Used for PII detection with BIO tagging
 pub struct MmBertTokenClassifier {
-    session: Session,
-    cache_lease: Option<CompilationCacheLease>,
+    sessions: ClassifierSessions,
     tokenizer: Arc<Tokenizer>,
     config: MmBertClassifierConfig,
     model_path: String,
     max_sequence_length: usize,
-    execution_sequence_length: Option<usize>,
 }
 
 impl MmBertTokenClassifier {
@@ -1165,27 +1179,23 @@ impl MmBertTokenClassifier {
         );
 
         Ok(Self {
-            session,
-            cache_lease: None,
+            sessions: ClassifierSessions::legacy(session),
             tokenizer: Arc::new(tokenizer),
             config,
             model_path: model_path_str,
             max_sequence_length,
-            execution_sequence_length: None,
         })
     }
 
     /// Own a token-classification session independently of all legacy role slots.
     pub fn load_with_options(options: &InstanceOptions) -> UnifiedResult<Self> {
-        let sequence = MmBertSequenceClassifier::load_with_options(options)?;
+        let sequence = MmBertSequenceClassifier::load_for_task(options, true)?;
         Ok(Self {
-            session: sequence.session,
-            cache_lease: sequence.cache_lease,
+            sessions: sequence.sessions,
             tokenizer: sequence.tokenizer,
             config: sequence.config,
             model_path: sequence.model_path,
             max_sequence_length: sequence.max_sequence_length,
-            execution_sequence_length: sequence.execution_sequence_length,
         })
     }
 
@@ -1196,10 +1206,7 @@ impl MmBertTokenClassifier {
         &self.tokenizer
     }
     pub fn finish_profiling(&mut self) -> UnifiedResult<Vec<String>> {
-        self.session
-            .end_profiling()
-            .map(|path| vec![path])
-            .map_err(|e| errors::ort_error(&e.to_string()))
+        self.sessions.finish_profiling()
     }
 
     /// Detect PII entities in text
@@ -1220,7 +1227,7 @@ impl MmBertTokenClassifier {
             .len()
             .min(self.config.max_position_embeddings)
             .min(self.max_sequence_length);
-        let execution_len = self.execution_sequence_length.unwrap_or(seq_len);
+        let execution_len = self.sessions.execution_length(1, seq_len)?;
 
         // Prepare inputs
         let mut input_ids = vec![self.config.pad_token_id as i64; execution_len];
@@ -1233,14 +1240,9 @@ impl MmBertTokenClassifier {
             attention_mask[i] = enc_attention_mask[i] as i64;
         }
 
-        let outputs = modernbert_inputs::run_cached(
-            &mut self.session,
-            &mut self.cache_lease,
-            input_ids,
-            attention_mask,
-            1,
-            execution_len,
-        )?;
+        let outputs = self
+            .sessions
+            .run(input_ids, attention_mask, 1, execution_len)?;
 
         // Validate every execution row, including padding. BIO decoding stops
         // at the original encoding's offsets and never emits padded entities.
@@ -1867,7 +1869,7 @@ mod tests {
                         model.tokenizer().get_truncation().unwrap().max_length,
                         expected
                     );
-                    assert_eq!(model.execution_sequence_length, None);
+                    assert_eq!(model.sessions.execution_length(2, 7).unwrap(), 7);
                 } else {
                     let model = MmBertTokenClassifier::load_with_options(&options).unwrap();
                     assert_eq!(model.max_sequence_length(), expected);
@@ -1875,10 +1877,54 @@ mod tests {
                         model.tokenizer().get_truncation().unwrap().max_length,
                         expected
                     );
-                    assert_eq!(model.execution_sequence_length, None);
+                    assert_eq!(model.sessions.execution_length(2, 7).unwrap(), 7);
                 }
             }
         }
+    }
+
+    #[test]
+    fn short_sessions_preserve_sequence_tail_and_pii_offsets() {
+        use crate::model_architectures::modernbert_sessions::tests::cpu_bank;
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("instance/testdata");
+        let options = |kind: &str| InstanceOptions {
+            model_path: fixtures.join(kind).display().to_string(),
+            max_input_tokens: Some(4096),
+            intra_threads: Some(1),
+            ..Default::default()
+        };
+        let mut sequence =
+            MmBertSequenceClassifier::load_with_options(&options("sequence")).unwrap();
+        sequence.sessions = cpu_bank(&fixtures.join("sequence/model.onnx"), &[512, 4096]);
+        let mut token = MmBertTokenClassifier::load_with_options(&options("token")).unwrap();
+        token.sessions = cpu_bank(&fixtures.join("token/model.onnx"), &[512, 4096]);
+        for length in [1, 511, 512, 513, 4096] {
+            let mut ids = vec![0; length];
+            ids[length - 1] = 4;
+            let result = sequence
+                .classify_tokens_with_activation(&ids, false)
+                .unwrap();
+            // This fixture intentionally averages over the physical width.
+            // Assert its known value, rather than assuming padding invariance
+            // of an arbitrary classifier graph.
+            let physical = if length <= 512 { 512.0_f32 } else { 4096.0 };
+            let expected = 1.0 / (1.0 + (-8.0 / physical).exp());
+            assert!((result.probabilities[1] - expected).abs() < 1e-6);
+            assert!(result.probabilities[1] > 0.5);
+            let text = format!("{}秘密", "hello ".repeat(length - 1));
+            let result = token.detect_entities(&text).unwrap();
+            assert_eq!(result.entities.len(), length); // Never decode padding as extra entities.
+            let tail = result.entities.last().unwrap();
+            assert_eq!(tail.text, "秘密");
+            assert_eq!(tail.start, text.len() - "秘密".len());
+            assert_eq!(tail.end, text.len());
+        }
+        assert!(sequence
+            .classify_tokens_with_activation(&vec![1; 4097], false)
+            .is_err());
+        assert!(token.detect_entities(&"hello ".repeat(4097)).is_err());
+        assert_eq!(sequence.max_sequence_length(), 4096);
+        assert_eq!(token.max_sequence_length(), 4096);
     }
 
     #[test]

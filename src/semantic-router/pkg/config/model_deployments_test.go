@@ -102,6 +102,8 @@ func TestNamedDeploymentAdmissionAndCanonicalRoundTrip(t *testing.T) {
 	cfg := testDeploymentConfig()
 	deployment := cfg.ModelDeployments["other-encoder"]
 	deployment.CompilationCacheDir = "/var/cache/semantic-router/migraphx"
+	deployment.ShortSequenceTokens = 128
+	deployment.Input.MaxTokens = 8192
 	cfg.ModelDeployments["other-encoder"] = deployment
 	if err := validateModelAdmissionContracts(cfg); err != nil {
 		t.Fatal(err)
@@ -127,6 +129,51 @@ func TestNamedDeploymentAdmissionAndCanonicalRoundTrip(t *testing.T) {
 	scoped := cfg.ConfigForRecipe(&cfg.Recipes[0])
 	if scoped.ModelBindings["domain_classifier"].Deployment != "shared-encoder" {
 		t.Fatal("recipe view lost bindings")
+	}
+}
+
+func TestShortSequencePreparationContract(t *testing.T) {
+	base := ModelDeployment{Artifact: "model", Provider: "ort", Device: "migraphx:0", Precision: "native", ShortSequenceTokens: 512, Input: ModelInputBudget{MaxTokens: 8192, Overflow: "reject"}}
+	if err := base.validate(&RouterConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*ModelDeployment){
+		"negative":         func(d *ModelDeployment) { d.ShortSequenceTokens = -1 },
+		"duplicate":        func(d *ModelDeployment) { d.ShortSequenceTokens = 8192 },
+		"oversized":        func(d *ModelDeployment) { d.ShortSequenceTokens = 8193 },
+		"implicit maximum": func(d *ModelDeployment) { d.Input.MaxTokens = 0 },
+		"cpu":              func(d *ModelDeployment) { d.Device = "cpu" },
+		"rocm":             func(d *ModelDeployment) { d.Device = "rocm:0" },
+		"candle":           func(d *ModelDeployment) { d.Provider, d.Device = "candle", "cpu" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := base
+			change(&d)
+			if d.validate(&RouterConfig{}) == nil {
+				t.Fatal("invalid bucket accepted")
+			}
+		})
+	}
+	for _, contract := range []string{RemoteClassifierContractLabelDistribution, RemoteClassifierContractTokenSpans} {
+		name := "domain_classifier"
+		if contract == RemoteClassifierContractTokenSpans {
+			name = "pii_classifier"
+		}
+		decl := ModelBinding{Adapter: "modernbert", Contract: contract}
+		if err := validateTaskModelBinding(name, decl, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, test := range []struct {
+		name    string
+		binding ModelBinding
+	}{
+		{"embedding", ModelBinding{Adapter: "mmbert", Contract: "embedding.v1"}},
+		{"classifier.risk", ModelBinding{Adapter: "modernbert", Contract: RemoteClassifierContractLabelScores, OperatingPoint: &OperatingPointReference{Path: "point.json", SHA256: strings.Repeat("a", 64)}}},
+	} {
+		if validateTaskModelBinding(test.name, test.binding, base) == nil {
+			t.Fatal("incompatible task accepted")
+		}
 	}
 }
 
