@@ -35,18 +35,8 @@ func (r *Runtime) SequenceWindows(ctx context.Context, spec config.ResolvedModel
 		return nil, err
 	}
 	capability := candleCapability(spec, info)
-	if window.Size > capability.Limits.EffectiveTokens() {
-		_ = resource.Close()
-		return nil, fmt.Errorf("%w: window exceeds effective token budget", binding.ErrCapability)
-	}
-	capability.Limits.Overflow = "window"
-	warmup := window
-	warmup.Text = "warmup"
-	return finishNativeTask(ctx, spec, r.sequenceWindows, capability, resource,
+	return finishWindowTask(ctx, spec, r.sequenceWindows, capability, resource, window,
 		func(_ context.Context, _ io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
-			if input.Size != window.Size || input.Overlap != window.Overlap {
-				return tasks.WindowedLabelDistribution{}, fmt.Errorf("%w: window settings differ from the prepared consumer", binding.ErrInvalidInput)
-			}
 			result, err := model.ClassifyWindows(input.Text, candle.SequenceWindowOptions{Size: input.Size, Overlap: input.Overlap})
 			if err != nil {
 				return tasks.WindowedLabelDistribution{}, nativeError(err)
@@ -59,7 +49,7 @@ func (r *Runtime) SequenceWindows(ctx context.Context, spec config.ResolvedModel
 				output.Windows[i] = tasks.LabelDistributionWindow{Start: item.Start, End: item.End, Probabilities: item.Probabilities}
 			}
 			return output, nil
-		}, warmup)
+		})
 }
 
 func (r *Runtime) ortSequenceWindows(ctx context.Context, spec config.ResolvedModelBinding, window tasks.TextWindowsRequest) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error) {
@@ -77,18 +67,8 @@ func (r *Runtime) ortSequenceWindows(ctx context.Context, spec config.ResolvedMo
 		_ = resource.Close()
 		return nil, err
 	}
-	if window.Size > capability.Limits.EffectiveTokens() {
-		_ = resource.Close()
-		return nil, fmt.Errorf("%w: window exceeds effective token budget", binding.ErrCapability)
-	}
-	capability.Limits.Overflow = "window"
-	warmup := window
-	warmup.Text = "warmup"
-	return finishNativeTask(ctx, spec, r.sequenceWindows, capability, resource,
+	return finishWindowTask(ctx, spec, r.sequenceWindows, capability, resource, window,
 		func(_ context.Context, value io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
-			if input.Size != window.Size || input.Overlap != window.Overlap {
-				return tasks.WindowedLabelDistribution{}, fmt.Errorf("%w: window settings differ from the prepared consumer", binding.ErrInvalidInput)
-			}
 			result, err := value.(*ort.SequenceClassifier).ClassifyWindows(input.Text, ort.SequenceWindowOptions{Size: input.Size, Overlap: input.Overlap})
 			if err != nil {
 				return tasks.WindowedLabelDistribution{}, ortError(err)
@@ -101,7 +81,7 @@ func (r *Runtime) ortSequenceWindows(ctx context.Context, spec config.ResolvedMo
 				output.Windows[i] = tasks.LabelDistributionWindow{Start: item.Start, End: item.End, Probabilities: item.Probabilities}
 			}
 			return output, nil
-		}, warmup)
+		})
 }
 
 // ScoreWindows retains every full window result; routing policy chooses its aggregate.
@@ -126,18 +106,8 @@ func (r *Runtime) ScoreWindows(ctx context.Context, spec config.ResolvedModelBin
 		return nil, err
 	}
 	capability := candleCapability(spec, info)
-	if window.Size > capability.Limits.EffectiveTokens() {
-		_ = resource.Close()
-		return nil, fmt.Errorf("%w: window exceeds effective token budget", binding.ErrCapability)
-	}
-	capability.Limits.Overflow = "window"
-	warmup := window
-	warmup.Text = "warmup"
-	return finishNativeTask(ctx, spec, r.scoreWindows, capability, resource,
+	return finishWindowTask(ctx, spec, r.scoreWindows, capability, resource, window,
 		func(_ context.Context, _ io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelScores, error) {
-			if input.Size != window.Size || input.Overlap != window.Overlap {
-				return tasks.WindowedLabelScores{}, fmt.Errorf("%w: window settings differ from the prepared consumer", binding.ErrInvalidInput)
-			}
 			result, err := model.ScoreWindows(input.Text, candle.SequenceWindowOptions{Size: input.Size, Overlap: input.Overlap})
 			if err != nil {
 				return tasks.WindowedLabelScores{}, nativeError(err)
@@ -150,7 +120,7 @@ func (r *Runtime) ScoreWindows(ctx context.Context, spec config.ResolvedModelBin
 				output.Windows[i] = tasks.LabelScoresWindow{Start: item.Start, End: item.End, Scores: item.Scores}
 			}
 			return output, nil
-		}, warmup)
+		})
 }
 
 func (r *Runtime) ortScoreWindows(ctx context.Context, spec config.ResolvedModelBinding, window tasks.TextWindowsRequest) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelScores], error) {
@@ -178,18 +148,8 @@ func (r *Runtime) ortScoreWindowsWithPolicy(ctx context.Context, spec config.Res
 			return nil, err
 		}
 	}
-	if window.Size > capability.Limits.EffectiveTokens() {
-		_ = resource.Close()
-		return nil, fmt.Errorf("%w: window exceeds effective token budget", binding.ErrCapability)
-	}
-	capability.Limits.Overflow = "window"
-	warmup := window
-	warmup.Text = "warmup"
-	return finishNativeTask(ctx, spec, r.scoreWindows, capability, resource,
+	return finishWindowTask(ctx, spec, r.scoreWindows, capability, resource, window,
 		func(_ context.Context, value io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelScores, error) {
-			if input.Size != window.Size || input.Overlap != window.Overlap {
-				return tasks.WindowedLabelScores{}, fmt.Errorf("%w: window settings differ from the prepared consumer", binding.ErrInvalidInput)
-			}
 			result, err := value.(*ort.LabelScorer).ScoreWindows(input.Text, ort.SequenceWindowOptions{Size: input.Size, Overlap: input.Overlap})
 			if err != nil {
 				return tasks.WindowedLabelScores{}, ortError(err)
@@ -202,6 +162,26 @@ func (r *Runtime) ortScoreWindowsWithPolicy(ctx context.Context, spec config.Res
 				output.Windows[i] = tasks.LabelScoresWindow{Start: item.Start, End: item.End, Scores: item.Scores}
 			}
 			return output, nil
+		})
+}
+
+// finishWindowTask owns the shared window contract across providers and head
+// types. Providers execute complete windows; routing policy reduces the output.
+func finishWindowTask[O any](ctx context.Context, spec config.ResolvedModelBinding, task *binding.Task[tasks.TextWindowsRequest, O], capability binding.Capability, resource *binding.Resource, window tasks.TextWindowsRequest, infer func(context.Context, io.Closer, tasks.TextWindowsRequest) (O, error)) (*binding.Resolved[tasks.TextWindowsRequest, O], error) {
+	if window.Size > capability.Limits.EffectiveTokens() {
+		_ = resource.Close()
+		return nil, fmt.Errorf("%w: window exceeds effective token budget", binding.ErrCapability)
+	}
+	capability.Limits.Overflow = "window"
+	warmup := window
+	warmup.Text = "warmup"
+	return finishNativeTask(ctx, spec, task, capability, resource,
+		func(ctx context.Context, value io.Closer, input tasks.TextWindowsRequest) (O, error) {
+			if input.Size != window.Size || input.Overlap != window.Overlap {
+				var zero O
+				return zero, fmt.Errorf("%w: window settings differ from the prepared consumer", binding.ErrInvalidInput)
+			}
+			return infer(ctx, value, input)
 		}, warmup)
 }
 

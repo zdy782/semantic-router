@@ -20,19 +20,6 @@ func checkResultLabels(got, want []string, size int) error {
 	return nil
 }
 
-func finishNativeTask[I, O any](ctx context.Context, spec config.ResolvedModelBinding, task *binding.Task[I, O], capability binding.Capability, resource *binding.Resource, infer func(context.Context, io.Closer, I) (O, error), warmup I) (*binding.Resolved[I, O], error) {
-	bound, err := task.Resolve(taskIdentity(spec), capability, resource, infer)
-	if err == nil {
-		_, err = bound.Call(ctx, string(spec.Recipe), warmup)
-	}
-	if err != nil {
-		_ = resource.Close()
-		return nil, err
-	}
-	bound.Ready()
-	return bound, nil
-}
-
 func (r *Runtime) prepareCandleScores(ctx context.Context, spec config.ResolvedModelBinding) (*binding.Resource, *candle.LabelScorer, error) {
 	resource, err := r.candleResource(ctx, spec, false)
 	if err != nil {
