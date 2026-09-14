@@ -112,7 +112,9 @@ list:
   emission is appropriate, a competing benign rule can also give ordinary
   inputs a better semantic match. Test it with your actual `top_k` and
   threshold settings; a benign rule is not a security blocklist.
-- Use `aggregation_method: max` when any strong example should match. Use
+- Use `aggregation_method: max` to favor the strongest example while considering
+  support from other prototypes. The rule threshold applies to the combined
+  score, so the best individual similarity can exceed it without a match. Use
   `mean` only when broad agreement across the candidate set is the behavior
   you want.
 - Calibrate `threshold` against labeled positive and negative traffic for the
