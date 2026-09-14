@@ -89,9 +89,13 @@ global:
 
 `prototype_scoring` compresses each embedding rule's candidate bank into a smaller set of representative prototypes, then scores the rule from those prototypes instead of relying on one flat candidate list forever.
 
-The Router scores every embedding rule and then applies `top_k` as the
-emission limit. The default is `1`, so only the strongest embedding signal is
-returned. Set `top_k: 0` to return every rule that meets its threshold.
+The Router scores every embedding rule. By default, `top_k: 0` retains every
+rule that meets its threshold, so independent predicates remain available to
+projections and decision priority. Set a positive `top_k`, such as `1` in the
+ranked example above, only when lower-ranked matches should be discarded.
+This limits emitted evidence; it does not reduce embedding inference work.
+Use recipe-local [partitions](../../projection/partitions) when a specific
+group of competing signals should have one winner.
 
 ## Design and validate candidate sets
 

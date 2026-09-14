@@ -97,7 +97,7 @@ func TestEmbeddingClassifier_SoftMatchingEnabledReturnsBestRule(t *testing.T) {
 	}
 }
 
-func TestEmbeddingClassifier_ClassifyAllDefaultTopKReturnsBestHardMatch(t *testing.T) {
+func TestEmbeddingClassifier_ClassifyAllExplicitTopOneReturnsBestHardMatch(t *testing.T) {
 	stubEmbeddingLookup(t, map[string][]float32{
 		"TensorFlow pipeline":  makeEmbedding(0.90, 0.85, 0.10),
 		"machine learning":     makeEmbedding(0.85, 0.0, 0.0),
@@ -108,14 +108,14 @@ func TestEmbeddingClassifier_ClassifyAllDefaultTopKReturnsBestHardMatch(t *testi
 		"ingredients":          makeEmbedding(0.0, 0.0, 0.25),
 	})
 
-	classifier := newTestEmbeddingClassifier(t, topicRules(), config.HNSWConfig{PreloadEmbeddings: true})
+	classifier := newTestEmbeddingClassifier(t, topicRules(), config.HNSWConfig{PreloadEmbeddings: true, TopK: intPtr(1)})
 
 	matched, err := classifier.ClassifyAll("TensorFlow pipeline")
 	if err != nil {
 		t.Fatalf("ClassifyAll failed: %v", err)
 	}
 	if len(matched) != 1 {
-		t.Fatalf("Expected 1 match with default top_k, got %d: %+v", len(matched), matched)
+		t.Fatalf("Expected 1 match with explicit top_k: 1, got %d: %+v", len(matched), matched)
 	}
 	if matched[0].RuleName != "programming" {
 		t.Fatalf("Expected top hard match to be 'programming', got %+v", matched)

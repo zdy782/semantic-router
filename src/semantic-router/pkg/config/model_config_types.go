@@ -92,10 +92,12 @@ type HNSWConfig struct {
 	// EnableSoftMatching allows below-threshold matches when no rule meets its
 	// threshold. This ranked fallback is opt-in; routing predicates default to
 	// the threshold declared by each rule.
-	EnableSoftMatching *bool                  `yaml:"enable_soft_matching,omitempty"`
-	TopK               *int                   `yaml:"top_k,omitempty"`
-	MinScoreThreshold  float32                `yaml:"min_score_threshold,omitempty"`
-	PrototypeScoring   PrototypeScoringConfig `yaml:"prototype_scoring,omitempty"`
+	EnableSoftMatching *bool `yaml:"enable_soft_matching,omitempty"`
+	// TopK limits emitted embedding matches only when positive. The default 0
+	// preserves all accepted predicates for projections and decision priority.
+	TopK              *int                   `yaml:"top_k,omitempty"`
+	MinScoreThreshold float32                `yaml:"min_score_threshold,omitempty"`
+	PrototypeScoring  PrototypeScoringConfig `yaml:"prototype_scoring,omitempty"`
 }
 
 func (c HNSWConfig) WithDefaults() HNSWConfig {
@@ -117,11 +119,8 @@ func (c HNSWConfig) WithDefaults() HNSWConfig {
 		defaultEnabled := false
 		result.EnableSoftMatching = &defaultEnabled
 	}
-	if result.TopK == nil {
-		defaultTopK := 1
-		result.TopK = &defaultTopK
-	} else if *result.TopK < 0 {
-		defaultTopK := 1
+	if result.TopK == nil || *result.TopK < 0 {
+		defaultTopK := 0
 		result.TopK = &defaultTopK
 	}
 	if result.MinScoreThreshold <= 0 {

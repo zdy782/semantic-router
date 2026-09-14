@@ -97,11 +97,11 @@ func (c *EmbeddingClassifier) sortMatches(matches []MatchedRule) []MatchedRule {
 
 func (c *EmbeddingClassifier) sortAndLimitMatches(matches []MatchedRule) []MatchedRule {
 	matches = c.sortMatches(matches)
-	topK := 1
+	topK := 0
 	if c.optimizationConfig.TopK != nil {
 		topK = *c.optimizationConfig.TopK
 	}
-	if topK == 0 || len(matches) <= topK {
+	if topK <= 0 || len(matches) <= topK {
 		return matches
 	}
 

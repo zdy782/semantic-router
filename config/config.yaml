@@ -2294,7 +2294,7 @@ global:
           target_dimension: 768
           target_layer: 22
           enable_soft_matching: false
-          top_k: 1
+          top_k: 0
           min_score_threshold: 0.45
           prototype_scoring:
             enabled: true

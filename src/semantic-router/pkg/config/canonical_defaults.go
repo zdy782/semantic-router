@@ -233,7 +233,7 @@ func defaultCanonicalEmbeddingModels() CanonicalEmbeddingModels {
 				PreloadEmbeddings: true,
 				TargetDimension:   768,
 				TargetLayer:       22,
-				TopK:              canonicalIntPtr(1),
+				TopK:              canonicalIntPtr(0),
 				MinScoreThreshold: 0.5,
 			},
 		},
