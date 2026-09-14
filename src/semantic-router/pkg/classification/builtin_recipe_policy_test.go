@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 
@@ -43,11 +44,11 @@ func TestBuiltinBalanceIntentAndRecovery(t *testing.T) {
 		{"reasoning opt out", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"deliberate", "no_analysis"}}, "medium"},
 		{"quoted execution vocabulary", SignalResults{MatchedKeywordRules: []string{"deliberate", "verify"}, MatchedStructureRules: []string{"quoted_request"}}, "medium"},
 		{"topic is not difficulty", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}, MatchedDomainRules: []string{"health"}, MatchedFactCheckRules: []string{"needs_fact_check"}}, "simple"},
-		{"consequential advice combines evidence", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}, MatchedDomainRules: []string{"health"}, MatchedFactCheckRules: []string{"needs_fact_check"}, MatchedEmbeddingRules: []string{"consequential"}}, "reasoning"},
-		{"financial stakes include economics", SignalResults{MatchedDomainRules: []string{"economics"}, MatchedFactCheckRules: []string{"needs_fact_check"}, MatchedEmbeddingRules: []string{"consequential"}}, "reasoning"},
+		{"consequential advice combines evidence", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}, MatchedDomainRules: []string{"health"}, MatchedFactCheckRules: []string{"needs_fact_check"}, SignalValues: map[string]float64{"embedding:consequential": 0.6, "embedding:informational": 0.4}}, "reasoning"},
+		{"financial stakes include economics", SignalResults{MatchedDomainRules: []string{"economics"}, MatchedFactCheckRules: []string{"needs_fact_check"}, SignalValues: map[string]float64{"embedding:consequential": 0.6, "embedding:informational": 0.4}}, "reasoning"},
 		{"repeat alone is not a failed answer", SignalResults{MatchedConversationRules: []string{"has_answer"}, MatchedReaskRules: []string{"repeat"}}, "medium"},
 		{"negative feedback after answer", SignalResults{MatchedConversationRules: []string{"has_answer"}, MatchedUserFeedbackRules: []string{"wrong_answer"}}, "reasoning"},
-		{"explicit correction without transmitted history", SignalResults{MatchedKeywordRules: []string{"correction"}, MatchedUserFeedbackRules: []string{"wrong_answer"}}, "reasoning"},
+		{"feedback cannot replace missing assistant history", SignalResults{MatchedKeywordRules: []string{"correction"}, MatchedUserFeedbackRules: []string{"wrong_answer"}}, "medium"},
 		{"repeat with correction", SignalResults{MatchedConversationRules: []string{"has_answer"}, MatchedReaskRules: []string{"repeat"}, MatchedKeywordRules: []string{"correction"}}, "reasoning"},
 		{"quoted feedback is not recovery", SignalResults{MatchedConversationRules: []string{"has_answer"}, MatchedUserFeedbackRules: []string{"wrong_answer"}, MatchedStructureRules: []string{"quoted_request"}}, "medium"},
 		{"classifier error does not fabricate low complexity", builtinComplexityUnavailable(c, SignalResults{}), "medium"},
@@ -96,13 +97,13 @@ func TestBuiltinAccuracyRequiresExecutionIntent(t *testing.T) {
 		{"hard does not imply fanout", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}}, "reasoning"},
 		{"review keyword alone", SignalResults{MatchedKeywordRules: []string{"review"}}, "simple"},
 		{"review semantics alone", SignalResults{MatchedEmbeddingRules: []string{"review_intent"}}, "simple"},
-		{"explicit independent review", SignalResults{MatchedKeywordRules: []string{"review"}, MatchedEmbeddingRules: []string{"review_intent"}}, "review"},
-		{"single model vetoes review", SignalResults{MatchedKeywordRules: []string{"review", "single"}, MatchedEmbeddingRules: []string{"review_intent"}}, "simple"},
-		{"quoted workflow does not execute", SignalResults{MatchedKeywordRules: []string{"workflow"}, MatchedEmbeddingRules: []string{"workflow_intent"}, MatchedStructureRules: []string{"quoted_request"}}, "simple"},
-		{"explicit workflow", SignalResults{MatchedKeywordRules: []string{"workflow"}, MatchedEmbeddingRules: []string{"workflow_intent"}}, "agent"},
-		{"client tool loop stays single", SignalResults{MatchedKeywordRules: []string{"workflow", "review"}, MatchedEmbeddingRules: []string{"workflow_intent", "review_intent"}, MatchedConversationRules: []string{"tool_loop"}}, "reasoning"},
+		{"explicit independent review", SignalResults{MatchedKeywordRules: []string{"plural_workers", "review_action", "independent_work"}}, "review"},
+		{"single model vetoes review", SignalResults{MatchedKeywordRules: []string{"plural_workers", "review_action", "independent_work", "single"}}, "simple"},
+		{"quoted workflow does not execute", SignalResults{MatchedKeywordRules: []string{"distributed_execution"}, MatchedStructureRules: []string{"quoted_request"}}, "simple"},
+		{"explicit distribution", SignalResults{MatchedKeywordRules: []string{"distributed_execution"}}, "agent"},
+		{"client tool loop stays single", SignalResults{MatchedKeywordRules: []string{"distributed_execution", "plural_workers", "review_action", "independent_work"}, MatchedConversationRules: []string{"tool_loop"}}, "reasoning"},
 		{"Router flow state resumes", SignalResults{MatchedConversationRules: []string{"flow", "tool_loop"}}, "agent"},
-		{"workflow semantics unavailable does not fanout", SignalResults{MatchedKeywordRules: []string{"workflow"}, SignalErrors: map[string]string{"embedding:workflow_intent": "unavailable"}}, "simple"},
+		{"workflow semantics unavailable does not fanout", SignalResults{MatchedKeywordRules: []string{"delegated_executors"}, SignalErrors: map[string]string{"embedding:workflow_intent": "unavailable"}}, "simple"},
 		{"unknown difficulty stays strong single", builtinComplexityUnavailable(c, SignalResults{}), "reasoning"},
 	} {
 		t.Run(tt.name, func(t *testing.T) { assertBuiltinPolicy(t, c, &tt.in, tt.want) })
@@ -179,4 +180,139 @@ func builtinComplexityUnavailable(c *Classifier, input SignalResults) SignalResu
 	var mu sync.Mutex
 	c.recordComplexityFailure(&input, &mu)
 	return input
+}
+
+// These inputs exercise the shipped heuristic pipeline. Learned values are
+// controlled component inputs, not predictions or claims about model accuracy.
+func TestBuiltinAccuracyWorkflowAuthorizationScope(t *testing.T) {
+	c := builtinPolicyClassifier(t, "accuracy")
+	attachBuiltinPolicyHeuristics(t, c)
+	for _, tt := range []struct {
+		name, text, want, fact string
+		margin                 float64
+		unknown                bool
+	}{
+		{name: "explicit coordination", text: "Coordinate a workflow with multiple agents.", want: "agent"},
+		{name: "explicit distribution", text: "Let two workers split the tasks.", want: "agent"},
+		{name: "delegation needs semantic direction", text: "Assign three agents to the work.", margin: .1, want: "agent"},
+		{name: "delegation tied evidence", text: "Assign three agents to the work.", want: "simple"},
+		{name: "delegation unavailable evidence", text: "Assign three agents to the work.", unknown: true, want: "simple"},
+		{name: "explaining is not executing", text: "Explain how two agents can divide the work.", margin: .1, want: "simple"},
+		{name: "plan without execution", text: "Assign the work to two agents, but only describe the plan; do not run them.", margin: .1, want: "simple"},
+		{name: "quotation is inert", text: "Quote: Coordinate a workflow with multiple agents.", margin: .1, want: "simple"},
+		{name: "unrelated worker mention", text: "Several agents are available. Assign the work to one worker.", margin: .1, want: "simple"},
+		{name: "active tool ownership", text: "Coordinate a workflow with multiple agents.", fact: "tool_loop", want: "reasoning"},
+		{name: "required client tool", text: "Coordinate a workflow with multiple agents.", fact: "tool_required", want: "reasoning"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in := evaluateBuiltinPolicyHeuristics(c, tt.text)
+			in.SignalValues["embedding:workflow_intent"] = .3 + tt.margin
+			in.SignalValues["embedding:informational"] = .3
+			if tt.unknown {
+				in.SignalErrors = map[string]string{"embedding:workflow_intent": "unavailable"}
+			}
+			if tt.fact != "" {
+				in.MatchedConversationRules = []string{tt.fact}
+			}
+			if tt.unknown && c.applyProjections(in).SignalErrors["projection:execution_direction"] == "" {
+				t.Fatal("unavailable learned input must remain unknown through projection")
+			}
+			assertBuiltinPolicy(t, c, in, tt.want)
+		})
+	}
+}
+
+func TestBuiltinAccuracyTranslationPreservesOuterScope(t *testing.T) {
+	c := builtinPolicyClassifier(t, "accuracy")
+	attachBuiltinPolicyHeuristics(t, c)
+	for _, tt := range []struct{ language, prefix, instruction string }{
+		{"en", "Translate: ", "Coordinate a workflow with multiple agents."},
+		{"zh", "翻译：", "协调多个智能体完成工作。"},
+		{"ar", "ترجم: ", "نسق العمل بين وكيلين."},
+		{"de", "Übersetze: ", "Koordiniere die Arbeit mit zwei Agenten."},
+		{"es", "Traduce: ", "Coordina un flujo de trabajo con dos agentes."},
+		{"ja", "翻訳してください：", "複数のエージェントを連携させてください。"},
+	} {
+		t.Run(tt.language, func(t *testing.T) {
+			assertBuiltinPolicy(t, c, evaluateBuiltinPolicyHeuristics(c, tt.instruction), "agent")
+			in := evaluateBuiltinPolicyHeuristics(c, tt.prefix+tt.instruction)
+			if !slices.Contains(in.MatchedStructureRules, "quoted_request") {
+				t.Fatal("actual structure evaluator must identify the outer translation scope")
+			}
+			assertBuiltinPolicy(t, c, in, "simple")
+		})
+	}
+}
+
+func TestBuiltinCareAndSupportRequireGrounding(t *testing.T) {
+	for _, tt := range []struct {
+		name, recipe, want string
+		in                 SignalResults
+	}{
+		{"care with either corroborator", "balance", "reasoning", SignalResults{MatchedFactCheckRules: []string{"needs_fact_check"}, SignalValues: map[string]float64{"embedding:consequential": .6, "embedding:informational": .4}}},
+		{"care direction without corroboration", "balance", "medium", SignalResults{SignalValues: map[string]float64{"embedding:consequential": .6, "embedding:informational": .4}}},
+		{"informational topic", "balance", "medium", SignalResults{MatchedDomainRules: []string{"health"}, SignalValues: map[string]float64{"embedding:consequential": .4, "embedding:informational": .6}}},
+		{"care unavailable direction", "balance", "medium", SignalResults{MatchedDomainRules: []string{"health"}, SignalValues: map[string]float64{"embedding:consequential": .6}, SignalErrors: map[string]string{"embedding:informational": "unavailable"}}},
+		{"weak support direction alone", "vault", "private", SignalResults{SignalValues: map[string]float64{"embedding:supportive_intent": .2, "embedding:informational": .1}}},
+		{"support cue plus direction", "vault", "sensitive", SignalResults{MatchedKeywordRules: []string{"personal_support"}, SignalValues: map[string]float64{"embedding:supportive_intent": .6, "embedding:informational": .5}}},
+		{"support unavailable direction", "vault", "", SignalResults{MatchedKeywordRules: []string{"personal_support"}, SignalErrors: map[string]string{"embedding:supportive_intent": "unavailable", "embedding:informational": "unavailable"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			assertBuiltinPolicy(t, builtinPolicyClassifier(t, tt.recipe), &tt.in, tt.want)
+		})
+	}
+}
+
+func TestBuiltinRecoveryUsesAssistantHistory(t *testing.T) {
+	for _, profile := range []struct{ name, fallback string }{{"balance", "medium"}, {"cost", "economy"}, {"accuracy", "simple"}} {
+		t.Run(profile.name, func(t *testing.T) {
+			c := builtinPolicyClassifier(t, profile.name)
+			if len(c.Config.UserFeedbackRules) == 0 {
+				t.Fatal("answer recovery requires the configured Feedback signal")
+			}
+			attachBuiltinPolicyHeuristics(t, c)
+			for _, tt := range []struct {
+				name, text, want  string
+				history, feedback bool
+			}{
+				{name: "negative correctness feedback", history: true, feedback: true, want: "reasoning"},
+				{name: "feedback cannot create history", feedback: true, want: profile.fallback},
+				{name: "self-contained correction", text: "The answer is incorrect. Correct the answer.", want: "reasoning"},
+				{name: "ordinary editing", text: "Rewrite the answer in a warmer tone.", want: profile.fallback},
+				{name: "quoted correction", text: "Translate: The answer is incorrect. Correct the answer.", want: profile.fallback},
+			} {
+				t.Run(tt.name, func(t *testing.T) {
+					in := evaluateBuiltinPolicyHeuristics(c, tt.text)
+					if tt.history {
+						in.MatchedConversationRules = []string{"has_answer"}
+					}
+					if tt.feedback {
+						in.MatchedUserFeedbackRules = []string{"wrong_answer"}
+					}
+					assertBuiltinPolicy(t, c, in, tt.want)
+				})
+			}
+		})
+	}
+}
+
+func attachBuiltinPolicyHeuristics(t *testing.T, c *Classifier) {
+	t.Helper()
+	var err error
+	c.keywordClassifier, err = NewKeywordClassifier(c.Config.KeywordRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.structureClassifier, err = NewStructureClassifier(c.Config.StructureRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func evaluateBuiltinPolicyHeuristics(c *Classifier, text string) *SignalResults {
+	in := &SignalResults{Metrics: &SignalMetricsCollection{}, SignalValues: map[string]float64{}, SignalConfidences: map[string]float64{}}
+	var mu sync.Mutex
+	c.evaluateKeywordSignal(in, &mu, text)
+	c.evaluateStructureSignal(in, &mu, text)
+	return in
 }

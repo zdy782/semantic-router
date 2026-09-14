@@ -610,8 +610,27 @@ fixtures:
         )
 
         _, probes = router_calibration_manifest.load_probe_manifest(manifest_path)
-        receipt = _mom_materialization_receipt(probes)
-        self.assertEqual(len(probes), 269)
+        self.assertEqual(len(probes), 280)
+        original_probes, added_probes = probes[:269], probes[269:]
+        self.assertEqual(
+            {probe.decision_id for probe in added_probes},
+            {
+                "contract-workflow-distribution",
+                "contract-workflow-delegation",
+                "contract-workflow-plan-only",
+                "contract-workflow-translation",
+                "contract-independent-review",
+                "contract-correctness-repair",
+                "contract-correction-prohibited",
+                "contract-formatting-revision",
+                "contract-quoted-correction",
+                "contract-consequential-advice",
+                "contract-personal-support",
+            },
+        )
+        # Preserve the original packet's complete materialization receipt.
+        # New contract probes have their own inventory and comparison group.
+        receipt = _mom_materialization_receipt(original_probes)
         self.assertEqual(receipt["message_probes"], 90)
         self.assertEqual(receipt["generated_probes"], 45)
         self.assertEqual(receipt["image_parts"], 53)

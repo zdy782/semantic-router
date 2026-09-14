@@ -5694,3 +5694,212 @@ decisions:
   forbidden_signals:
     jailbreak:
     - prompt_attack
+- id: contract-workflow-distribution
+  expected_recipe: accuracy
+  expected_decision: agent
+  expected_algorithm: workflows
+  expected_signals:
+    keywords:
+    - distributed_execution
+  objective: An operative request to distribute work among multiple workers authorizes
+    orchestration without requiring internal stage names.
+  variants:
+  - id: en
+    query: Let two workers split the tasks.
+    tags:
+    - en
+    - contract
+    - orchestration
+- id: contract-workflow-delegation
+  expected_recipe: accuracy
+  expected_decision: agent
+  expected_algorithm: workflows
+  expected_signals:
+    keywords:
+    - delegated_executors
+    projection:
+    - execution_direction
+  expected_signal_values:
+    embedding:informational:
+      gte: -1
+      lte: 1
+  objective: Delegation names multiple actual executors and requires learned evidence
+    favoring execution over explanation.
+  variants:
+  - id: en
+    query: Assign the work to two agents.
+    tags:
+    - en
+    - contract
+    - orchestration
+- id: contract-workflow-plan-only
+  expected_recipe: accuracy
+  expected_decision: simple
+  expected_algorithm: multi_factor
+  expected_signals:
+    keywords:
+    - no_workflow_execution
+  objective: A request that explicitly prohibits running workers remains a single-model
+    planning task.
+  variants:
+  - id: en
+    query: Assign the work to two agents, but only describe the plan; do not run them.
+    tags:
+    - en
+    - contract
+    - negative
+    - orchestration
+- id: contract-workflow-translation
+  expected_recipe: accuracy
+  expected_decision: simple
+  expected_algorithm: multi_factor
+  expected_signals:
+    structure:
+    - quoted_request
+  objective: An outer translation request treats the enclosed orchestration instruction
+    as data.
+  variants:
+  - id: en
+    query: 'Translate: Coordinate a workflow with multiple agents.'
+    tags:
+    - en
+    - contract
+    - negative
+    - orchestration
+- id: contract-independent-review
+  expected_recipe: accuracy
+  expected_decision: review
+  expected_algorithm: fusion
+  expected_signals:
+    keywords:
+    - plural_workers
+    - review_action
+    - independent_work
+  objective: Explicit independent assessments of the same task authorize review, rather
+    than delegated workflow stages.
+  variants:
+  - id: en
+    query: Ask two models to assess this independently.
+    tags:
+    - en
+    - contract
+    - review
+- id: contract-correctness-repair
+  expected_recipe: cost
+  expected_decision: reasoning
+  expected_algorithm: multi_factor
+  expected_signals:
+    keywords:
+    - answer_error
+    - answer_revision
+  objective: A self-contained claim that an answer is incorrect plus an operative
+    repair request warrants correctness recovery without invented assistant history.
+  variants:
+  - id: en
+    query: The answer is incorrect. Correct the answer.
+    tags:
+    - en
+    - contract
+    - correction
+- id: contract-correction-prohibited
+  expected_recipe: cost
+  expected_decision: economy
+  expected_algorithm: multi_factor
+  expected_signals:
+    keywords:
+    - answer_error
+    - no_revision
+  forbidden_signals:
+    keywords:
+    - answer_revision
+  objective: Discussing an error while explicitly prohibiting revision does not authorize
+    answer recovery.
+  variants:
+  - id: en
+    query: The answer is incorrect. Do not correct the answer.
+    tags:
+    - en
+    - contract
+    - negative
+    - correction
+- id: contract-formatting-revision
+  expected_recipe: cost
+  expected_decision: economy
+  expected_algorithm: multi_factor
+  forbidden_signals:
+    keywords:
+    - answer_error
+    - answer_revision
+  objective: Changing the tone of a response does not by itself allege a correctness
+    failure.
+  variants:
+  - id: en
+    query: Rewrite the answer in a warmer tone.
+    tags:
+    - en
+    - contract
+    - negative
+    - correction
+- id: contract-quoted-correction
+  expected_recipe: cost
+  expected_decision: economy
+  expected_algorithm: multi_factor
+  expected_signals:
+    structure:
+    - quoted_request
+  objective: An error and revision instruction inside material to translate is not
+    an operative correction request.
+  variants:
+  - id: en
+    query: 'Translate: The answer is incorrect. Correct the answer.'
+    tags:
+    - en
+    - contract
+    - negative
+    - correction
+- id: contract-consequential-advice
+  expected_recipe: balance
+  expected_decision: reasoning
+  expected_algorithm: multi_factor
+  expected_signals:
+    projection:
+    - actionable_care
+  expected_signal_values:
+    embedding:informational:
+      gte: -1
+      lte: 1
+  objective: Advice for an actual consequential decision needs reasoning; observing
+    the informational comparison score does not require that predicate to match.
+  variants:
+  - id: en
+    query: Help me decide whether to sign an employment contract after the employer
+      changed my pay.
+    tags:
+    - en
+    - contract
+    - consequential
+- id: contract-personal-support
+  expected_recipe: vault
+  expected_decision: sensitive
+  expected_algorithm: multi_factor
+  expected_signals:
+    keywords:
+    - personal_support
+    projection:
+    - support_requested
+  expected_signal_values:
+    embedding:supportive_intent:
+      gte: -1
+      lte: 1
+    embedding:informational:
+      gte: -1
+      lte: 1
+  objective: A personal request for support belongs with responsible private assistance,
+    without requiring an unsafe-content verdict or refusing the request.
+  variants:
+  - id: en
+    query: I feel overwhelmed and need someone to help me get through today.
+    tags:
+    - en
+    - contract
+    - support

@@ -27,9 +27,19 @@ varios
 tread
 ot
 Sie
-# German, Spanish, and Portuguese recipe vocabulary
+# German, Spanish, and Portuguese recipe vocabulary and regex word stems
 modell
 diagramas
+argumentos
+coordines
+erro
+finde
+incorret
+oder
+responde
+unter
+utiliza
+vor
 # Language codes (ISO 639-1) used in HuggingFace dataset configs
 te
 # NPM package names (not spelling errors)

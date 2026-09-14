@@ -17,7 +17,9 @@ publish one API entrypoint.
 
 MoM V1 is a family of routing policies. Policy version **3.0** uses the compact
 decision names above and keeps the existing public model IDs. Its recipes ship
-with vLLM Semantic Router; you supply the generation backends.
+with vLLM Semantic Router; you supply the generation backends. Embedding and
+complexity rules use rule-level settings to keep all declared candidate texts
+for scoring instead of compressing them to a global bank limit.
 
 ## Intended use
 
@@ -38,12 +40,16 @@ keep routing overhead small.
 
 **Cost** keeps requests on one model. Its base selector prefers the lowest
 estimated request cost within the decision's quality band, with stronger pools
-for reasoning and active tool use.
+for reasoning and active tool use. After an assistant answer, correctness
+feedback can escalate answer recovery; repetition or a formatting edit alone
+does not establish that the answer was wrong.
 
 **Accuracy** normally uses one strong model. An explicit request for independent
 review selects `review`, which compares two responses and synthesizes them.
-An explicit workflow request selects `agent`, with at most three steps and two
-workers in parallel. Long context or a subject label does not trigger fan-out.
+An explicit request to delegate work to multiple workers selects `agent`, with
+at most three steps and two workers in parallel. The router plans the internal
+stages and combines results; users need not name those stages. Describing,
+translating, or prohibiting a workflow does not authorize execution. Long context or a subject label does not trigger fan-out.
 A client-owned tool loop stays on the single-model reasoning path.
 
 **Vault** uses separate pools for ordinary and sensitive requests. `guard`

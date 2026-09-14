@@ -8,7 +8,7 @@ authors:
 - name: vLLM Semantic Router Maintainers
 license: Apache-2.0
 tags:
-- model-free
+- learned-signals
 - mixture-of-models
 - multimodal
 - entrypoint-assignments

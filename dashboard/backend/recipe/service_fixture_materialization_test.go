@@ -496,8 +496,9 @@ func TestMoMGeneratedTextPreservesPortableTextReceipt(t *testing.T) {
 		t.Fatalf("decodeProbes(%s): %v", path, err)
 	}
 	receipt := materializeMoMFixtureReceipt(t, manifest)
-	// Match the official Python probe materializer's portable bundle receipt.
-	if receipt.probeCount != 269 || receipt.messageProbes != 90 || receipt.generatedProbes != 45 ||
+	// The original 269 probes retain their portable message/image receipt;
+	// the 11 additional policy contracts use plain text requests.
+	if receipt.probeCount != 269+11 || receipt.messageProbes != 90 || receipt.generatedProbes != 45 ||
 		receipt.imageParts != 53 || receipt.textBytes != 20_730_898 {
 		t.Fatalf("receipt counts: probes=%d messages=%d generated=%d image_parts=%d text_bytes=%d",
 			receipt.probeCount, receipt.messageProbes, receipt.generatedProbes, receipt.imageParts, receipt.textBytes)
