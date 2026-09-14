@@ -118,9 +118,12 @@ over this skill.
 
    Replace starter placeholders and check listener
    addresses before launch. Preserve unrelated fields. Each routable physical
-   model needs a provider entry, a matching model card, and a decision model
-   reference. Keep credentials in environment variables and only environment
-   references in config.
+   model needs a provider entry and a decision model reference. Named recipes
+   place decisions under `recipes[].routing.decisions`; built-in recipes receive
+   model assignments when an Entrypoint is published. Keep optional model metadata
+   in the shared top-level `routing.modelCards`, adding metadata required by the
+   selected algorithm or capability. Keep credentials in environment variables
+   and only environment references in config.
 
    Check backend reachability from the deployment network. Before asserting
    routed response identity, inspect the backend's model listing and make a
@@ -189,7 +192,8 @@ allow 300 seconds. A timeout is failed or incomplete evidence. Management comman
 use `--token-env` (default `VSR_MGMT_TOKEN`); routed probe uses `--api-key-env`
 (default `OPENAI_API_KEY`). Pass only environment variable names, never values.
 
-Preview proves the decision path without invoking a backend. Probe sends a real
+Preview evaluates signals and decisions, including configured classifier and
+embedding inference, without backend generation. Probe sends a real
 request through Envoy. `--base-url` accepts the listener origin or its OpenAI
 `/v1` root. Set `SELECTED_MODEL` from the expected routing decision and set
 `RESPONSE_MODEL` from the direct backend calibration; omit the response assertion
