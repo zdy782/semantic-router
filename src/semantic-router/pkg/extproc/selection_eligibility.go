@@ -36,7 +36,7 @@ func applySelectionEligibility(selCtx *selection.SelectionContext, result *selec
 	}
 	if ctx != nil {
 		if err := validateMinimumEligibleDecisionModels(ctx.VSRSelectedDecision, eligible, selCtx.InputTokens); err != nil {
-			return nil, fmt.Errorf("%w: %v", selection.ErrNoEligibleCandidates, err)
+			return nil, fmt.Errorf("%w: %w", selection.ErrNoEligibleCandidates, err)
 		}
 		ctx.VSRPolicyEligibleModelRefs = cloneModelRefs(eligible)
 		ctx.VSREligibleModelRefs = cloneModelRefs(eligible)

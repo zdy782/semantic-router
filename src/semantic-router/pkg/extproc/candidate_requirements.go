@@ -34,7 +34,7 @@ func (r *OpenAIRouter) validateModelDemand(requirements *config.CandidateRequire
 	}
 	format, err := wireFormatForModel(r.Config.GetModelAPIFormat(model))
 	if err != nil {
-		return fmt.Errorf("%w: %v", selection.ErrNoEligibleCandidates, err)
+		return fmt.Errorf("%w: %w", selection.ErrNoEligibleCandidates, err)
 	}
 	supported, ok := r.codecCapabilitiesForFormat(format)
 	if !ok {

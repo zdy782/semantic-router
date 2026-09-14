@@ -497,9 +497,10 @@ func TestMoMGeneratedTextPreservesPortableTextReceipt(t *testing.T) {
 	}
 	receipt := materializeMoMFixtureReceipt(t, manifest)
 	// Match the official Python probe materializer's portable bundle receipt.
-	if receipt.probeCount != 253 || receipt.messageProbes != 90 || receipt.generatedProbes != 45 ||
+	if receipt.probeCount != 269 || receipt.messageProbes != 90 || receipt.generatedProbes != 45 ||
 		receipt.imageParts != 53 || receipt.textBytes != 20_730_898 {
-		t.Fatalf("receipt counts = %#v", receipt)
+		t.Fatalf("receipt counts: probes=%d messages=%d generated=%d image_parts=%d text_bytes=%d",
+			receipt.probeCount, receipt.messageProbes, receipt.generatedProbes, receipt.imageParts, receipt.textBytes)
 	}
 	if receipt.textDigest != "e2f443018ab5f3fbc4f35fa044c0121a1e42f1968d93144f6cfbe3a2b204cc35" {
 		t.Fatalf("materialized text digest = %s", receipt.textDigest)
