@@ -18,7 +18,7 @@ configOverride:
             deployment: local-pii
             contract: token_spans.v1
             adapter: mmbert
-            mapping_path: models/Vela-1.0-Encoder-307M-PII/pii_type_mapping.json
+            mapping_path: models/Vela-1.0-Encoder-307M-PII/pii_mapping.json
   global:
     model_catalog:
       deployments:
