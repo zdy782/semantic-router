@@ -2,7 +2,7 @@
 title: 嵌入模型
 description: 为语义路由、缓存和向量存储配置本地或远程嵌入模型。
 translation:
-  source_commit: "dc7f402642a8b8ecec8218e2086a4c6f186ea406"
+  source_commit: "70535875c9e1306b8f43212944cb8902f2a203f9"
   source_file: "docs/installation/runtime/embeddings.md"
   outdated: false
 ---

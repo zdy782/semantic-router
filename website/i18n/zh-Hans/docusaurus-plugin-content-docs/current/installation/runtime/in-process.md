@@ -2,7 +2,7 @@
 title: 进程内模型
 description: 选择本地引擎和硬件，配置并运行分类器。
 translation:
-  source_commit: "dc7f402642a8b8ecec8218e2086a4c6f186ea406"
+  source_commit: "70535875c9e1306b8f43212944cb8902f2a203f9"
   source_file: "docs/installation/runtime/in-process.md"
   outdated: false
 ---
