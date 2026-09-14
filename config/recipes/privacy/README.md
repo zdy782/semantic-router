@@ -49,23 +49,12 @@ Security and privacy decisions outrank the frontier route. The frontier route
 requires positive reasoning evidence and exclusion of privacy or attack
 signals.
 
-Direct local-handling instructions and prohibitions on external transfer constrain
-the route independently of learned privacy scores. All local routes restrict
-tools to `local_search` and `local_read`; security containment removes tools.
-Only the frontier route permits external tools. The scoped English and Chinese
-patterns distinguish ordinary quotations from handling instructions. Mixed
-requests with a recognized handling instruction stay local even when other
-parts quote a phrase. These patterns are not a security DLP system or proof
-of where an operator-provided tool executes.
-
-The effort projection combines the observed reasoning similarity with independent
-request, structure, context, and complexity evidence. The similarity contribution
-alone cannot reach the frontier boundary. Its raw contribution does not mark the
-embedding predicate as matched or change that predicate's threshold. Missing or
-failed learned evidence cannot establish permission to use the frontier route.
-An unresolved security, privacy, or frontier decision fails the request instead
-of falling back without a decision tool policy. A known local restriction can
-still resolve independently of unrelated missing effort evidence.
+Recognized local-handling instructions take precedence over reasoning demand,
+including mixed requests that also quote other text. Local routes allow only
+`local_search` and `local_read`; security containment removes tools. If the
+security, privacy, or frontier decision cannot be resolved, the request returns
+an error. These English and Chinese patterns are not a DLP system or a guarantee
+that an operator-provided tool executes locally.
 
 ## Requirements
 

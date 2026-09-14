@@ -71,6 +71,13 @@ func TestPrivacyRecipeLocalityOverridesEffort(t *testing.T) {
 		{"quoted review object", `Review the spelling of "process this locally".`, false},
 		{"programming scope", "Use a local variable in the example.", false},
 		{"ordinary processing", "Process a short example.", false},
+		{"sentence boundary inside quote", `Translate "A sentence. Keep this task local.".`, false},
+		{"conjunction inside quote", `Translate "Try once and keep this task local".`, false},
+		{"single quoted review object", `Review the spelling of 'process this locally'.`, false},
+		{"Chinese quoted sentence", "解释“第一句。只在本地处理。”的含义。", false},
+		{"single quoted prefix before real constraint", `Translate 'hello', but keep this task local.`, true},
+		{"ordinary contraction before real constraint", "I don't need a summary. Process this locally.", true},
+		{"explicit contraction prohibition", "Don't send this to an external service.", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := privacyPolicySignals(c, tc.text)
