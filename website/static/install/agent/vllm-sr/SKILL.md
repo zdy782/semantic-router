@@ -241,6 +241,9 @@ for isolation and model-pool changes; and
 [evaluation details](https://vllm-sr.ai/install/agent/vllm-sr/references/evaluation-loop.md) for branch coverage or a
 requested benchmark. Load only the reference needed for the current step.
 
+Use [recipe tuning](https://vllm-sr.ai/install/agent/vllm-sr/references/recipe-tuning.md) to improve signals, projections,
+decisions, retrieval, or agent continuity against representative requests.
+
 See the [Router API](https://vllm-sr.ai/docs/api/router) and
 [agent evaluation loop](https://vllm-sr.ai/docs/benchmarking/agent-evaluation-loop)
 when the task needs the full contract.
