@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "bce357c513f391824e8320267d03977794c20f76"
+  source_commit: "9e74fb3e66c5527eb19e3598ed0183345aed7554"
   source_file: "docs/tutorials/signal/learned/embedding.md"
   outdated: false
 ---
@@ -91,7 +91,9 @@ global:
 
 `prototype_scoring` 把每条嵌入规则的候选库压缩成更小的代表性原型集，再从这些原型给规则打分，而不是永远依赖一份扁平候选列表。
 
-Router 先给每条嵌入规则打分，再把 `top_k` 作为发出上限。默认是 `1`，因此只返回最强嵌入信号。设 `top_k: 0` 可返回所有达到阈值的规则。
+Router 会给每条嵌入规则打分。默认的 `top_k: 0` 保留所有达到阈值的规则，让独立条件继续参与投影与决策优先级判断。只有确实需要丢弃排名靠后的匹配时，才设置正数 `top_k`，例如上方排序示例中的 `1`。这限制的是发出的证据，不会减少嵌入推理工作量。
+
+若某组相互竞争的信号需要只保留一个胜者，请使用配方内的[分区](../../projection/partitions)。
 
 ## 设计并校验候选集 {#design-and-validate-candidate-sets}
 
