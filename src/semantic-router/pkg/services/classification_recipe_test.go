@@ -41,8 +41,8 @@ func TestEvalDecisionCandidatesSelectsEntrypointRecipe(t *testing.T) {
 		Text:  "hello",
 		Model: "router/speed-flash",
 	})
-	require.NoError(t, err)
-	assert.Equal(t, speedRecipe, response.Recipe)
+	require.ErrorIs(t, err, ErrClassifierUnavailable)
+	require.Nil(t, response)
 
 	_, err = service.ClassifyIntentForEval(context.Background(), IntentRequest{
 		Text:  "hello",

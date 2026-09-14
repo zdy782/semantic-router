@@ -4,6 +4,7 @@ package apiserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -16,8 +17,57 @@ import (
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/decision"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/routerruntime"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/services"
 )
+
+func TestPreviewHTTPRequiresPublishedClassifierThenEvaluatesHeuristicSignals(t *testing.T) {
+	cfg := contextEvalRouterConfig()
+	cfg.Decisions[0].Name = "small-request-context-route"
+	cfg.Decisions[0].Rules.Name = "small-request-context"
+	registry := routerruntime.NewRegistry(cfg)
+	api := &ClassificationAPIServer{config: cfg, runtimeRegistry: registry}
+	server := httptest.NewServer(api.setupRoutes())
+	t.Cleanup(server.Close)
+	request := func() (int, []byte) {
+		t.Helper()
+		response, err := server.Client().Post(server.URL+apiRoutingPreviewPath+"?trace=true", "application/json", strings.NewReader(`{"text":"hello"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, body
+	}
+	status, body := request()
+	if status != http.StatusServiceUnavailable || !strings.Contains(string(body), "CLASSIFIER_UNAVAILABLE") {
+		t.Fatalf("Preview before classifier publication = %d %s", status, body)
+	}
+	ready := newContextEvalServer(t, cfg)
+	service := ready.classificationSvc.(*services.ClassificationService)
+	t.Cleanup(func() {
+		if err := service.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	registry.SetClassificationService(service)
+	status, body = request()
+	if status != http.StatusOK {
+		t.Fatalf("Preview after classifier publication = %d %s", status, body)
+	}
+	var result services.EvalResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.DecisionResult == nil || result.DecisionResult.DecisionName != "small-request-context-route" ||
+		result.DecisionResult.MatchedSignals == nil || !containsString(result.DecisionResult.MatchedSignals.Context, "small-request-context") ||
+		result.Metrics == nil || len(result.EvalTrace) == 0 {
+		t.Fatalf("initialized heuristic classifier did not evaluate signals and decision: %+v", result)
+	}
+}
 
 type blockingPreviewService struct {
 	evalCaptureClassificationService

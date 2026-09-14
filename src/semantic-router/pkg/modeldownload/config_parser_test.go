@@ -682,7 +682,7 @@ func TestBuildModelSpecsSkipsRouterOwnedDefaultsForAgentSmokeConfigs(t *testing.
 	}
 }
 
-func TestBuildModelSpecsSkipsRouterOwnedDefaultsForMemoryE2EConfigs(t *testing.T) {
+func TestBuildModelSpecsDownloadsOnlyVelaEmbeddingForMemoryE2EConfigs(t *testing.T) {
 	for _, relParts := range [][]string{
 		{"..", "..", "..", "..", "e2e", "config", "config.memory-user.yaml"},
 		{"..", "..", "..", "..", "e2e", "config", "config.memory-user-valkey.yaml"},
@@ -709,8 +709,13 @@ func TestBuildModelSpecsSkipsRouterOwnedDefaultsForMemoryE2EConfigs(t *testing.T
 			if err != nil {
 				t.Fatalf("BuildModelSpecs() error = %v", err)
 			}
-			if len(specs) != 0 {
-				t.Fatalf("BuildModelSpecs() returned %d specs, want 0: %#v", len(specs), specs)
+			if len(specs) != 1 {
+				t.Fatalf("BuildModelSpecs() returned %d specs, want only the memory embedding: %#v", len(specs), specs)
+			}
+			if specs[0].LocalPath != "models/Vela-1.0-Encoder-307M-Embedding" ||
+				specs[0].RepoID != "llm-semantic-router/Vela-1.0-Encoder-307M-Embedding" ||
+				specs[0].Revision == "" || specs[0].CheckONNX {
+				t.Fatalf("memory E2E must download the pinned native Vela embedding: %#v", specs[0])
 			}
 		})
 	}

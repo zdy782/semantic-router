@@ -28,12 +28,7 @@ func (s *ClassificationService) ClassifyIntentForEval(ctx context.Context, req I
 	}
 
 	if classifier == nil {
-		return &EvalResponse{
-			OriginalText:   input.evaluationText,
-			RequestedModel: strings.TrimSpace(req.Model),
-			Recipe:         recipeName,
-			Metrics:        &classification.SignalMetricsCollection{},
-		}, nil
+		return nil, ErrClassifierUnavailable
 	}
 
 	wantTrace := req.Options != nil && req.Options.Trace
@@ -175,7 +170,7 @@ func (s *ClassificationService) evalRoutingScope(modelName string) (*classificat
 		var found bool
 		classifier, found = s.recipeClassifiers.ForRecipe(recipe.Name)
 		if !found {
-			return nil, nil, "", fmt.Errorf("classifier for routing recipe %q is unavailable", recipe.Name)
+			return nil, nil, "", fmt.Errorf("%w for routing recipe %q", ErrClassifierUnavailable, recipe.Name)
 		}
 	}
 	return classifier, recipe.Profile.Decisions, recipe.Name, nil
