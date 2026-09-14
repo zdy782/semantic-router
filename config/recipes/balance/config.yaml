@@ -219,8 +219,6 @@ routing:
                 type: domain
               - name: legal_risk_markers
                 type: keyword
-              - name: premium_legal_analysis
-                type: embedding
             operator: OR
           - conditions:
               - name: premium_legal_analysis
@@ -955,11 +953,13 @@ routing:
                 type: keyword
               - name: creative_tasks
                 type: embedding
-              - name: interpersonal_drafting
-                type: embedding
               - conditions:
-                  - name: drafting_action_markers
-                    type: keyword
+                  - conditions:
+                      - name: drafting_action_markers
+                        type: keyword
+                      - name: interpersonal_drafting
+                        type: embedding
+                    operator: OR
                   - conditions:
                       - name: personal_tone_markers
                         type: keyword

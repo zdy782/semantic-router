@@ -551,7 +551,7 @@ ROUTE omni (description = "Understand image-bearing requests with the dedicated 
 ROUTE premium_legal (description = "Premium-only route for high-value legal and compliance analysis.") {
   PRIORITY 260
   TIER 2
-  WHEN (domain("law") OR keyword("legal_risk_markers") OR embedding("premium_legal_analysis")) AND (embedding("premium_legal_analysis") OR projection("verification_required") OR complexity("legal_risk:medium") OR complexity("legal_risk:hard")) AND NOT (keyword("normative_topic_markers") AND keyword("argument_request_markers") AND NOT (keyword("legal_risk_markers") OR complexity("legal_risk:hard")))
+  WHEN (domain("law") OR keyword("legal_risk_markers")) AND (embedding("premium_legal_analysis") OR projection("verification_required") OR complexity("legal_risk:medium") OR complexity("legal_risk:hard")) AND NOT (keyword("normative_topic_markers") AND keyword("argument_request_markers") AND NOT (keyword("legal_risk_markers") OR complexity("legal_risk:hard")))
   MODEL "anthropic/claude-opus-4.6" (reasoning = true, effort = "high"),
         "openai/gpt5.4" (reasoning = true, effort = "high")
   PLUGIN router_replay {
@@ -701,7 +701,7 @@ ROUTE medium_explainer (description = "Low-cost business, history, and psycholog
 ROUTE medium_creative (description = "Low-cost creative writing, copywriting, and interpersonal drafting.") {
   PRIORITY 200
   TIER 12
-  WHEN (keyword("creative_request_markers") OR embedding("creative_tasks") OR embedding("interpersonal_drafting") OR keyword("drafting_action_markers") AND (keyword("personal_tone_markers") OR keyword("creative_form_markers"))) AND (projection("balance_simple") OR projection("balance_medium")) AND NOT (embedding("fast_qa_en") OR embedding("fast_qa_zh") OR embedding("health_guidance") OR embedding("code_general") OR embedding("architecture_design") OR embedding("agentic_workflows") OR embedding("premium_legal_analysis") OR projection("verification_required") OR keyword("verification_markers") OR keyword("reference_heavy_markers"))
+  WHEN (keyword("creative_request_markers") OR embedding("creative_tasks") OR (keyword("drafting_action_markers") OR embedding("interpersonal_drafting")) AND (keyword("personal_tone_markers") OR keyword("creative_form_markers"))) AND (projection("balance_simple") OR projection("balance_medium")) AND NOT (embedding("fast_qa_en") OR embedding("fast_qa_zh") OR embedding("health_guidance") OR embedding("code_general") OR embedding("architecture_design") OR embedding("agentic_workflows") OR embedding("premium_legal_analysis") OR projection("verification_required") OR keyword("verification_markers") OR keyword("reference_heavy_markers"))
   MODEL "qwen/qwen3.5-rocm" (reasoning = false),
         "google/gemini-2.5-flash-lite" (reasoning = false)
   PLUGIN router_replay {

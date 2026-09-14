@@ -66,6 +66,12 @@ a drafting action; fictional subject matter alone does not establish a need for
 medical or legal advice. Systems design can be supported by both the domain and
 semantic task signals, or by architecture language and a matching task signal.
 
+The premium legal lane requires a law-domain or legal-risk signal before
+semantic similarity, verification pressure, or legal complexity can qualify it.
+Interpersonal drafting similarity supplies drafting intent and still requires
+personal tone or creative form; explicit creative requests and creative-task
+signals can qualify independently.
+
 A mathematical topic with medium similarity does not override an overall
 simple difficulty result. Simple everyday messages also need an explanation
 anchor before a medium evidence-synthesis signal can move them into the
