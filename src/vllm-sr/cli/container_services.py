@@ -32,6 +32,10 @@ from cli.utils import get_logger
 log = get_logger(__name__)
 render_observability_template = _render_observability_template
 
+# The router allows 30 seconds to drain and close native model owners.
+CONTAINER_STOP_GRACE_SECONDS = 40
+CONTAINER_STOP_COMMAND_TIMEOUT_SECONDS = CONTAINER_STOP_GRACE_SECONDS + 10
+
 
 def container_status(container_name):
     """
@@ -117,16 +121,30 @@ def container_status_strict(container_name: str, *, timeout: float = 10) -> str:
 
 
 def container_stop_container(container_name):
-    """Stop a container."""
+    """Stop a container with time for router drain and a bounded CLI wait."""
     runtime = get_container_runtime()
     try:
         log.info(f"Stopping container: {container_name}")
         subprocess.run(
-            [runtime, "stop", container_name], check=True, capture_output=True
+            [
+                runtime,
+                "stop",
+                "--time",
+                str(CONTAINER_STOP_GRACE_SECONDS),
+                container_name,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=CONTAINER_STOP_COMMAND_TIMEOUT_SECONDS,
         )
         log.info(f"Container stopped: {container_name}")
         return True
-    except subprocess.CalledProcessError as exc:
+    except subprocess.TimeoutExpired:
+        log.error(
+            f"Timed out stopping container; stop is unconfirmed: {container_name}"
+        )
+        return False
+    except (OSError, subprocess.SubprocessError) as exc:
         log.error(f"Failed to stop container: {exc}")
         return False
 
