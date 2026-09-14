@@ -25,15 +25,13 @@ def test_reference_vela_policy_survives_runtime_materialization(
     assert catalog["system"]["domain_classifier"] == (
         "models/Vela-1.0-Encoder-307M-Domain"
     )
-    assert catalog["system"]["prompt_guard"] == (
-        "models/mmbert32k-jailbreak-detector-merged"
-    )
+    assert catalog["system"]["prompt_guard"] == "models/Vela-1.0-Encoder-307M-Guard"
     semantic = catalog["embeddings"]["semantic"]
     assert semantic["mmbert_model_path"] == "models/Vela-1.0-Encoder-307M-Embedding"
     assert semantic["embedding_config"]["full_context"] is False
     modules = catalog["modules"]
     fact_check = modules["hallucination_mitigation"]["fact_check"]
-    assert fact_check["threshold"] == 0.85
+    assert fact_check["threshold"] == 0.95
     for module in (
         modules["classifier"]["domain"],
         modules["classifier"]["pii"],
