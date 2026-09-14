@@ -174,7 +174,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Guard",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Guard",
-		Revision:                "ab27ec4efe2bdc45336df2d35abb6f687e41214e",
+		Revision:                "d9e9969c15eaa5df808a8679f45af8a2ede8ba53",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Guard"},
 		Purpose:                 PurposeJailbreakDetection,

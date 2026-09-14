@@ -374,7 +374,7 @@ global:
         input:
           max_tokens: 8192
           overflow: reject
-        revision: ab27ec4efe2bdc45336df2d35abb6f687e41214e
+        revision: d9e9969c15eaa5df808a8679f45af8a2ede8ba53
         compilation_cache_dir: /app/.vllm-sr/compilation-cache
       feedback-amd:
         artifact: models/Vela-1.0-Encoder-307M-Feedback
