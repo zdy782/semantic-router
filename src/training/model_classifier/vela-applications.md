@@ -79,11 +79,13 @@ the repository root. Download only the source files required by a builder.
   alone is insufficient, and excluded ambiguous cases are recorded.
 - [Guard builder](prompt_guard_fine_tuning_lora/vela_data.py) combines
   [LLMail](https://huggingface.co/datasets/microsoft/llmail-inject-challenge)
-  attack annotations with paired
-  [SALAD](https://huggingface.co/datasets/OpenSafetyLab/Salad-Data) attacks and
-  original questions. Normalized annotation conflicts are removed across
-  phases; submitter teams and paired questions stay in one partition. The
-  LLMail labels concern untrusted email context and remain weak annotations.
+  attack annotations with explicitly reviewed
+  [SALAD](https://huggingface.co/datasets/OpenSafetyLab/Salad-Data) augmented and
+  original requests. SALAD requires a source/text-hash-bound prompt-attack review
+  sidecar; wording changes and source attack flags do not supply gold labels.
+  Unreviewed, uncertain or conflicting question families and their transitive
+  text aliases are excluded. Submitter teams and question families stay in one
+  partition. LLMail labels concern untrusted email context and remain weak annotations.
   ToxicChat's noncommercial data is excluded from these Vela candidates.
 - [Safety/Hazard builder](safety_classifier/vela_data.py) reads
   [AEGIS 2](https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0).

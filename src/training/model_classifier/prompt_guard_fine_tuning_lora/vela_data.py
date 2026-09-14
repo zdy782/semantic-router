@@ -2,7 +2,8 @@
 
 LLMail labels are source weak annotations of attacks in an untrusted email
 setting, not general malicious-content labels or agent-resilience scores.
-SALAD attack/base-question pairs distinguish instruction attacks from harm.
+SALAD augmented/base-question pairs require explicit prompt-attack judgments;
+source attack flags and differences between the two texts do not supply labels.
 """
 
 import argparse
@@ -12,7 +13,12 @@ import random
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from .jailbreak_data_v2 import fingerprint, salad_examples, split_examples
+from .jailbreak_data_v2 import (
+    fingerprint,
+    load_salad_reviews,
+    salad_examples,
+    split_examples,
+)
 
 TRAIN_PARTITION_BUCKETS = 8
 MIN_TEXT_CHARS = 20
@@ -168,6 +174,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--llmail", required=True)
     parser.add_argument("--salad", type=Path, required=True)
+    parser.add_argument("--salad-review", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
@@ -179,7 +186,11 @@ def main():
         != "389da12f029a7f0c4a562f753e1dd5e53aed46d873ef1f568919d9f4b72e7062"
     ):
         raise ValueError("SALAD revision SHA mismatch")
-    salad, report = split_examples(salad_examples(json.loads(payload)))
+    salad, report = split_examples(
+        salad_examples(
+            json.loads(payload), load_salad_reviews(args.salad, args.salad_review)
+        )
+    )
     for split in splits:
         splits[split].extend(
             {
@@ -206,6 +217,9 @@ def main():
         "llmail_license": "mit",
         "salad_revision": "d21a325e276a99bd69b1fbb8aa51a9f249486b72",
         "salad_license": "apache-2.0",
+        "salad_review_sha256": hashlib.sha256(
+            args.salad_review.read_bytes()
+        ).hexdigest(),
         "llmail_audit": audit,
         "salad_group_audit": report,
         "limitations": "LLMail labels are weak and trust-context dependent. Team/question isolation does not guarantee all attack-method families are novel.",

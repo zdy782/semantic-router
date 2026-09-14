@@ -1,7 +1,8 @@
 """Prompt-injection data with content risk separated from instruction attacks.
 
 V2 uses toxic-chat's ``jailbreaking`` annotation, not ``toxicity``. SALAD attack
-and original-question pairs stay in one group. Repetition/augmentation happens
+and original-question candidates require explicit semantic review and stay in
+one group. Repetition/augmentation happens
 only after group assignment, and validation/test are never oversampled.
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import itertools
 import json
 import random
 import unicodedata
@@ -48,20 +50,101 @@ def toxic_examples(rows: list[dict]) -> list[dict]:
     return result
 
 
-def salad_examples(rows: list[dict]) -> list[dict]:
+def salad_candidates(rows: list[dict]) -> list[dict]:
+    """Keep source coordinates and complete text without inferring Guard labels."""
     result = []
-    for row in rows:
-        attack, original = row["augq"], row["baseq"]
-        if fingerprint(attack) == fingerprint(original):
-            continue  # A harmful request alone is not evidence of instruction injection.
-        group = fingerprint(original)
-        result.extend(
-            [
-                {"text": attack, "label": 1, "source": "salad", "group_id": group},
-                {"text": original, "label": 0, "source": "salad", "group_id": group},
-            ]
-        )
+    for index, row in enumerate(rows):
+        group = fingerprint(row["baseq"])
+        for field in ("augq", "baseq"):
+            text = row[field]
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            result.append(
+                {
+                    "id": f"salad:{index}:{field}:{digest}",
+                    "text": text,
+                    "text_sha256": digest,
+                    "source": "salad",
+                    "source_row": index,
+                    "source_field": field,
+                    "group_id": group,
+                }
+            )
     return result
+
+
+def load_salad_reviews(source: Path, review: Path) -> list[dict]:
+    """Bind reviewed labels to the complete pinned source before hydration."""
+    sidecar = json.loads(review.read_text(encoding="utf-8"))
+    if (
+        sidecar.get("version") != 1
+        or sidecar.get("task") != "prompt-attack"
+        or sidecar.get("source_revision") != DATA_REVISIONS["salad"]
+        or sidecar.get("source_sha256")
+        != hashlib.sha256(source.read_bytes()).hexdigest()
+    ):
+        raise ValueError("SALAD review must bind this source and prompt-attack task")
+    return sidecar["records"]
+
+
+def salad_examples(rows: list[dict], reviews: list[dict]) -> list[dict]:
+    """Admit only completely reviewed question families and their text aliases.
+
+    A changed augmented request is not evidence of an instruction attack. Both
+    source fields need independent task judgments; UNKNOWN or missing judgments
+    exclude the entire connected question family, rather than supplying negatives.
+    """
+    candidates = salad_candidates(rows)
+    lookup = {row["id"]: row for row in candidates}
+    judgments = {}
+    for review in reviews:
+        key = review["id"]
+        if key not in lookup or key in judgments:
+            raise ValueError("Unknown or duplicate SALAD review ID")
+        if (
+            review.get("text_sha256") != lookup[key]["text_sha256"]
+            or review.get("complete_input_reviewed") is not True
+            or not isinstance(review.get("reason"), str)
+            or not review["reason"].strip()
+            or review.get("label") not in (*LABEL2ID, "UNKNOWN")
+        ):
+            raise ValueError(
+                "SALAD review needs exact text and a complete scope judgment"
+            )
+        judgments[key] = review["label"]
+
+    excluded, aliases, labels = set(), defaultdict(set), defaultdict(set)
+    for row in candidates:
+        key, group = fingerprint(row["text"]), row["group_id"]
+        aliases[key].add(group)
+        label = judgments.get(row["id"], "UNKNOWN")
+        labels[key].add(label)
+        if label == "UNKNOWN":
+            excluded.add(group)
+    for key, values in labels.items():
+        if len(values) != 1:
+            excluded.update(aliases[key])
+    # A missing/uncertain sibling can connect several source question parents.
+    neighbors = defaultdict(set)
+    for groups in aliases.values():
+        ordered = sorted(groups)
+        for first, second in itertools.pairwise(ordered):
+            neighbors[first].add(second)
+            neighbors[second].add(first)
+    pending = list(excluded)
+    while pending:
+        for group in neighbors[pending.pop()] - excluded:
+            excluded.add(group)
+            pending.append(group)
+    return [
+        {
+            **row,
+            "label": LABEL2ID[judgments[row["id"]]],
+            "annotation_scope": "reviewed_prompt_attack",
+            "source_candidate_id": row["id"],
+        }
+        for row in candidates
+        if row["group_id"] not in excluded
+    ]
 
 
 def split_examples(rows: list[dict], seed: int = 42) -> tuple[dict, dict]:
@@ -189,11 +272,16 @@ def verify_sources(toxic_train: Path, salad: Path) -> None:
         raise ValueError("SALAD file does not match the pinned LFS digest")
 
 
-def prepare(toxic_train: Path, salad: Path, output_dir: Path) -> dict:
+def prepare(
+    toxic_train: Path, salad: Path, output_dir: Path, salad_review: Path
+) -> dict:
     verify_sources(toxic_train, salad)
     with toxic_train.open(encoding="utf-8") as handle:
         rows = toxic_examples(list(csv.DictReader(handle)))
-    rows += salad_examples(json.loads(salad.read_text(encoding="utf-8")))
+    rows += salad_examples(
+        json.loads(salad.read_text(encoding="utf-8")),
+        load_salad_reviews(salad, salad_review),
+    )
     splits, report = split_examples(rows)
     splits["train"] = balance_training(augment_training(splits["train"]))
     report.update(
@@ -206,6 +294,7 @@ def prepare(toxic_train: Path, salad: Path, output_dir: Path) -> dict:
         source_files={
             "toxic_train": hashlib.sha256(toxic_train.read_bytes()).hexdigest(),
             "salad": hashlib.sha256(salad.read_bytes()).hexdigest(),
+            "salad_review": hashlib.sha256(salad_review.read_bytes()).hexdigest(),
         },
         heldout_scope="source-question groups are isolated; attack-method families can recur across groups",
         final_external_tests="toxic-chat official test and deepset official test are excluded from preparation",
@@ -230,8 +319,29 @@ def prepare(toxic_train: Path, salad: Path, output_dir: Path) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--toxic-train", required=True, type=Path)
+    parser.add_argument("--toxic-train", type=Path)
     parser.add_argument("--salad", required=True, type=Path)
-    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--salad-review", type=Path)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--salad-candidates-output", type=Path)
     args = parser.parse_args()
-    print(json.dumps(prepare(args.toxic_train, args.salad, args.output_dir), indent=2))
+    if args.salad_candidates_output:
+        candidates = salad_candidates(
+            json.loads(args.salad.read_text(encoding="utf-8"))
+        )
+        with args.salad_candidates_output.open("x", encoding="utf-8") as handle:
+            for row in candidates:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    else:
+        if not all((args.toxic_train, args.output_dir, args.salad_review)):
+            parser.error(
+                "preparation requires --toxic-train, --output-dir and --salad-review"
+            )
+        print(
+            json.dumps(
+                prepare(
+                    args.toxic_train, args.salad, args.output_dir, args.salad_review
+                ),
+                indent=2,
+            )
+        )

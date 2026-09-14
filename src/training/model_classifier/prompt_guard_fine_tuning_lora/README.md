@@ -14,6 +14,31 @@ keeps ordinary requests, attacks, quotations and translations in their declared
 family partition. Training corpora and historical review snapshots are separate
 from the source checkout.
 
+## Review SALAD candidates
+
+SALAD's augmented request can differ from its original without attacking an
+instruction boundary. Neither field supplies a Guard gold label automatically.
+Export complete source candidates before reviewing them:
+
+```bash
+python -m src.training.model_classifier.prompt_guard_fine_tuning_lora.jailbreak_data_v2 \
+  --salad source.json --salad-candidates-output candidates.jsonl
+```
+
+Both source builders require `--salad-review reviewed.json`. This sidecar has
+`version: 1`, `task: "prompt-attack"`, the pinned `source_revision`, the full
+source file's `source_sha256`, and a `records` array. Each judgment retains the
+candidate's `id` and `text_sha256`, with `label` (`benign`, `jailbreak` or
+`UNKNOWN`), `complete_input_reviewed: true`, and a text-specific `reason`.
+Review the complete request and its authority boundary; topic risk, a source
+attack flag, and wording changes alone do not determine the judgment.
+
+Missing, unknown or conflicting judgments exclude the whole question family,
+including transitive normalized-text aliases. They never become negative labels.
+Retain the source and review sidecars with the dataset; the builder records the
+review hash. Freeze source coordinates and family partitions before reviewing
+new evaluation data, and keep prior published datasets unchanged.
+
 ## Train from Vela Base
 
 Use the [shared sequence trainer](../sequence_repair/README.md) with a fresh
