@@ -518,6 +518,7 @@ routing:
       - case_sensitive: false
         keywords:
           - compare
+          - comparison
           - contrast
           - pros and cons
           - advantages and disadvantages

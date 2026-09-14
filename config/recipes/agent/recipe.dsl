@@ -96,7 +96,7 @@ SIGNAL keyword code_artifact {
 
 SIGNAL keyword comparison_request {
   operator: "OR"
-  keywords: ["compare", "contrast", "pros and cons", "advantages and disadvantages", "比较", "对比", "优缺点"]
+  keywords: ["compare", "comparison", "contrast", "pros and cons", "advantages and disadvantages", "比较", "对比", "优缺点"]
 }
 
 SIGNAL keyword scientific_inquiry {
