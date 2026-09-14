@@ -36,9 +36,25 @@ var projectionMatchAccessors = map[string]projectionMatchAccessor{
 func projectionScoreValue(score config.ProjectionScore, results *SignalResults) float64 {
 	total := 0.0
 	for _, input := range score.Inputs {
+		if input.Weight == 0 {
+			continue
+		}
 		total += input.Weight * projectionInputValue(input, results)
 	}
 	return total
+}
+
+func projectionScoreHasFailedInput(score config.ProjectionScore, results *SignalResults) bool {
+	for _, input := range score.Inputs {
+		if input.Weight == 0 {
+			continue
+		}
+		key := signalConfidenceKey(strings.ToLower(strings.TrimSpace(input.Type)), input.Name)
+		if _, failed := results.SignalErrors[key]; failed {
+			return true
+		}
+	}
+	return false
 }
 
 func projectionInputValue(input config.ProjectionScoreInput, results *SignalResults) float64 {
