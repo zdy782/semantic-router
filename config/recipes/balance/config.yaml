@@ -5,6 +5,12 @@ listeners:
     port: 8899
     timeout: 1200s
 global:
+  model_catalog:
+    embeddings:
+      semantic:
+        embedding_config:
+          enable_soft_matching: true
+          top_k: 1
   stores:
     response_cache:
       enabled: false
