@@ -267,6 +267,13 @@ func emitRAGCorePluginConfig(sb *strings.Builder, cfg *config.RAGPluginConfig) {
 }
 
 func emitRAGBackendAndFailureConfig(sb *strings.Builder, cfg *config.RAGPluginConfig) {
+	if cfg.Rerank != nil {
+		if cfg.Rerank.TopK == nil {
+			fmt.Fprint(sb, "    rerank: {}\n")
+		} else {
+			fmt.Fprintf(sb, "    rerank: { top_k: %d }\n", *cfg.Rerank.TopK)
+		}
+	}
 	if backendConfig, ok := normalizePluginConfigMap(cfg.BackendConfig); ok && len(backendConfig) > 0 {
 		fmt.Fprintf(sb, "    backend_config: %s\n", formatPluginConfigValue(backendConfig))
 	}

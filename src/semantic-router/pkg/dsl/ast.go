@@ -173,7 +173,7 @@ type rawModelDecl struct {
 type RouteOpt struct {
 	Pos   lexer.Position
 	Key   string `parser:"@Ident '='"`
-	Value *Val   `parser:"@@"`
+	Value *Val   `parser:"@@ ','?"`
 }
 
 // rawRouteItem: a single element inside a route body
@@ -304,13 +304,18 @@ type FieldEntry struct {
 // Val: value union (string, int, float, bool, array, object, bare ident)
 type Val struct {
 	Pos      lexer.Position
-	Str      *string       `parser:"  @String"`
-	Float    *float64      `parser:"| @Float"`
-	Int      *int          `parser:"| @Int"`
-	Bool     *string       `parser:"| @('true' | 'false')"`
-	ArrayVal *ArrayVal     `parser:"| @@"`
-	Object   []*FieldEntry `parser:"| '{' @@* '}'"`
-	BareStr  *string       `parser:"| @Ident"`
+	Str      *string    `parser:"  @String"`
+	Float    *float64   `parser:"| @Float"`
+	Int      *int       `parser:"| @Int"`
+	Bool     *string    `parser:"| @('true' | 'false')"`
+	ArrayVal *ArrayVal  `parser:"| @@"`
+	Object   *ObjectVal `parser:"| @@"`
+	BareStr  *string    `parser:"| @Ident"`
+}
+
+// ObjectVal preserves the presence of an empty object independently of its fields.
+type ObjectVal struct {
+	Fields []*FieldEntry `parser:"'{' @@* '}'"`
 }
 
 // ArrayVal wraps array parsing to handle empty arrays.

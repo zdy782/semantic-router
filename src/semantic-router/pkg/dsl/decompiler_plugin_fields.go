@@ -274,6 +274,13 @@ func addRAGCoreFields(fields map[string]Value, cfg *config.RAGPluginConfig) {
 }
 
 func addRAGBackendAndFailureFields(fields map[string]Value, cfg *config.RAGPluginConfig) {
+	if cfg.Rerank != nil {
+		rerank := make(map[string]Value)
+		if cfg.Rerank.TopK != nil {
+			rerank["top_k"] = IntValue{V: *cfg.Rerank.TopK}
+		}
+		fields["rerank"] = ObjectValue{Fields: rerank}
+	}
 	if backendConfig, ok := structuredPayloadObjectValue(cfg.BackendConfig); ok {
 		fields["backend_config"] = backendConfig
 	}

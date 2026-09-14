@@ -609,7 +609,7 @@ func valToValue(v *Val) Value {
 		}
 		return ArrayValue{Items: items}
 	case v.Object != nil:
-		return ObjectValue{Fields: entriesToMap(v.Object)}
+		return ObjectValue{Fields: entriesToMap(v.Object.Fields)}
 	case v.BareStr != nil:
 		return StringValue{V: *v.BareStr}
 	}
