@@ -51,13 +51,21 @@ reference. Configure the detector through
 
 ## Dependencies and Limitations
 
-Set `classifier.max_sequence_length` inside the detector configuration to select
-an explicit token budget; zero keeps the historical 512-token default. The
-native loader checks that the model supports the budget. Input beyond that
-budget produces an error instead of a truncated prediction. With
-`method: classifier`, an inference error leaves modality unknown, and a decision's
-`on_unknown` policy controls the outcome. It does not create an `AR` match.
-`method: hybrid` explicitly permits the existing keyword fallback.
+Without a recipe model binding, `classifier.max_sequence_length: 0` keeps the
+512-token default. Long prompts receive representative head, middle, and tail
+samples for routing; the native classifier may also truncate to its token budget.
+This policy limits inference cost and does not classify every token.
+
+For unsampled modality input, bind `modality_detector` to a named deployment with
+`input.max_tokens` above 512. Set `input.overflow: reject` to reject input beyond
+that budget. Choose a budget qualified for the selected artifact and provider;
+a model's advertised 32K capacity does not establish 32K execution on every
+provider. A positive module `classifier.max_sequence_length` above 512 also
+bypasses routing sampling, but retains the module's truncation policy.
+
+With `method: classifier`, an actual inference error leaves modality unknown,
+and the decision's `on_unknown` policy controls the outcome. It does not create
+an `AR` match. `method: hybrid` explicitly permits keyword fallback.
 
 The modality detector classifies intended output mode; it does not prove that a
 backend supports the request's input attachments. Keep model-card capabilities

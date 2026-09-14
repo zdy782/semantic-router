@@ -40,6 +40,18 @@ Do not assume an early keyword condition avoids learned inference. Used signal
 families can execute concurrently before decision composition; measure the
 whole request and the actual forwards.
 
+Build semantic examples around operations, not application topics: reconciling
+conflicting evidence, coordinating independent workers, or revising an incorrect
+result. Include ordinary explanations and quoted instructions as counterexamples,
+and cover distinct operations across the supported languages. An explicit request
+for independent review should not depend on matching one particular example.
+
+For comparisons between embedding intents, `value_source: raw` preserves scores
+below the match threshold. A signed difference can express which intent has more
+evidence; it still needs a mapping and evaluation on both positive and negative
+cases. Cosine similarity is not a calibrated probability. Use per-rule matches and
+values, not a family's aggregate confidence, to explain an individual predicate.
+
 Check the effective matching settings before tuning candidates. Embedding soft
 matching is opt-in: enabling it permits matches below individual rule thresholds
 when no strong match exists. `top_k` can suppress otherwise valid matches; use
