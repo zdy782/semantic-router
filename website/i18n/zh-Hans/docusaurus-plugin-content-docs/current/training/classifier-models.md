@@ -2,7 +2,7 @@
 title: 训练 Vela 分类器
 sidebar_label: 分类器
 translation:
-  source_commit: "82a5f6d5af007d5b00c00cc36153a81cf92f71d2"
+  source_commit: "d6d106f9ef5c3e09570a944d48d3bc7e1bc87dd3"
   source_file: "docs/training/classifier-models.md"
   outdated: false
 ---
