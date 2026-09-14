@@ -31,6 +31,24 @@ def _bundle(name: str, version: str):
     return asset, document, _model_assets_root().joinpath(version, asset["bundle"])
 
 
+def _requires_backend(decision: dict[str, Any]) -> bool:
+    return not any(
+        plugin.get("type") == "fast_response" for plugin in decision.get("plugins", [])
+    )
+
+
+def _decision_requirements(decision: dict[str, Any]) -> dict[str, Any]:
+    requires_backend = _requires_backend(decision)
+    algorithm = decision.get("algorithm", {})
+    return {
+        "name": decision["name"],
+        "algorithm": algorithm.get("type", "static") if requires_backend else None,
+        "minimum_candidates": (
+            algorithm.get("minimum_candidates", 1) if requires_backend else 0
+        ),
+    }
+
+
 def list_builtin_recipes(version: str = DEFAULT_CHANNEL) -> dict[str, Any]:
     catalog = load_model_catalog(version)
     bundles = []
@@ -46,15 +64,7 @@ def list_builtin_recipes(version: str = DEFAULT_CHANNEL) -> dict[str, Any]:
                         "name": recipe["name"],
                         "description": recipe.get("description", ""),
                         "decisions": [
-                            {
-                                "name": decision["name"],
-                                "algorithm": decision.get("algorithm", {}).get(
-                                    "type", "static"
-                                ),
-                                "minimum_candidates": decision.get("algorithm", {}).get(
-                                    "minimum_candidates", 1
-                                ),
-                            }
+                            _decision_requirements(decision)
                             for decision in recipe.get("routing", {}).get(
                                 "decisions", []
                             )
@@ -136,12 +146,21 @@ def initialize_builtin_recipe(
     if not decisions:
         raise ValueError("At least one recipe decision must remain")
     selected["routing"]["decisions"] = decisions
-    expected = {decision["name"] for decision in decisions}
-    if set(bindings) != expected:
+    declared = {decision["name"] for decision in decisions}
+    expected = {
+        decision["name"] for decision in decisions if _requires_backend(decision)
+    }
+    if expected - set(bindings) or set(bindings) - declared:
         raise ValueError(
-            f"Bindings must cover every decision; missing={sorted(expected - set(bindings))}, unknown={sorted(set(bindings) - expected, key=str)}"
+            f"Bindings must cover every decision that calls a backend; missing={sorted(expected - set(bindings))}, unknown={sorted(set(bindings) - declared, key=str)}"
         )
     for decision in decisions:
+        if not _requires_backend(decision):
+            if bindings.get(decision["name"], []) != []:
+                raise ValueError(
+                    f"Decision '{decision['name']}' responds immediately and needs no modelRefs"
+                )
+            continue
         refs = bindings[decision["name"]]
         if (
             not isinstance(refs, list)

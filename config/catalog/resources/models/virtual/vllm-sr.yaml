@@ -13,7 +13,7 @@
     source: https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1
   family: mom
   generation: 1
-  policy_version: 2.0.0
+  policy_version: 3.0.0
   lifecycle: active
   capabilities:
   - chat
@@ -82,7 +82,7 @@
     source: https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1
   family: mom
   generation: 1
-  policy_version: 2.0.0
+  policy_version: 3.0.0
   lifecycle: active
   capabilities:
   - chat
@@ -149,7 +149,7 @@
     source: https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1
   family: mom
   generation: 1
-  policy_version: 2.0.0
+  policy_version: 3.0.0
   lifecycle: active
   capabilities:
   - chat
@@ -218,7 +218,7 @@
     source: https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1
   family: mom
   generation: 1
-  policy_version: 2.0.0
+  policy_version: 3.0.0
   lifecycle: active
   capabilities:
   - chat
@@ -290,8 +290,8 @@
     status: claimed
 - id: vllm-sr/mom-v1-vault
   display_name: MoM V1 Vault
-  description: Contains detected unsafe requests and routes accepted requests within
-    the operator-assigned private deployment boundary.
+  description: Contains prompt attacks and routes private or sensitive work to
+    the operator-assigned model pools.
   kind: virtual
   publisher: vllm-sr.ai
   presentation:
@@ -303,7 +303,7 @@
     source: https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1
   family: mom
   generation: 1
-  policy_version: 2.0.0
+  policy_version: 3.0.0
   lifecycle: active
   capabilities:
   - chat

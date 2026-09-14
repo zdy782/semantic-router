@@ -447,7 +447,10 @@ def compare_eval_selection(
 ) -> dict[str, Any]:
     """Require an honest final-selection contract when the probe names an algorithm."""
     if expected_status is not None and expected_status not in SELECTION_STATUSES:
-        return {"matched": False, "errors": [f"unsupported expected selection status {expected_status!r}"]}
+        return {
+            "matched": False,
+            "errors": [f"unsupported expected selection status {expected_status!r}"],
+        }
 
     normalized_algorithm = str(algorithm or "").strip()
     if not normalized_algorithm and expected_status is None:
@@ -484,8 +487,10 @@ def compare_eval_selection(
             errors.append("not_required requires selection_method=fast_response")
         if not reason.strip():
             errors.append("selection_reason is required for not_required")
-    if status != "not_required" and normalized_algorithm and (
-        not negative or expected_status not in {"unavailable", "failed"} or method
+    if (
+        status != "not_required"
+        and normalized_algorithm
+        and (not negative or expected_status not in {"unavailable", "failed"} or method)
     ):
         if not method:
             errors.append("selection_method is missing")
@@ -501,7 +506,10 @@ def compare_eval_selection(
         and selected_model not in recommended_models
     ):
         errors.append("selected_model is not a recommended decision candidate")
-    if status in {"execution_required", "unavailable", "failed", "not_required"} and selected_model:
+    if (
+        status in {"execution_required", "unavailable", "failed", "not_required"}
+        and selected_model
+    ):
         errors.append(f"{status} must not fabricate selected_model")
     if negative and not reason.strip():
         errors.append(f"selection_reason is required for {status}")

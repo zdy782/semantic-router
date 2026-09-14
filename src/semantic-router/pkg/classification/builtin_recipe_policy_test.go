@@ -120,11 +120,13 @@ func TestBuiltinVaultUnknownTriageFailsClosed(t *testing.T) {
 		{"personal data", SignalResults{MatchedPIIRules: []string{"personal_data"}}, "sensitive"},
 		{"explicit confidential request", SignalResults{MatchedKeywordRules: []string{"confidential"}}, "sensitive"},
 		{"security outranks sensitivity", SignalResults{MatchedPIIRules: []string{"personal_data"}, MatchedJailbreakRules: []string{"prompt_attack"}}, "guard"},
-		{"unsafe content", SignalResults{MatchedSafetyRules: []string{"unsafe"}}, "guard"},
+		{"unsafe content receives responsible handling", SignalResults{MatchedSafetyRules: []string{"unsafe"}}, "sensitive"},
 		{"unavailable Guard", SignalResults{SignalErrors: map[string]string{"jailbreak:prompt_attack": "unavailable"}}, ""},
 		{"unavailable Safety", SignalResults{SignalErrors: map[string]string{"safety:unsafe": "unavailable"}}, ""},
 		{"unavailable PII", SignalResults{SignalErrors: map[string]string{"pii:personal_data": "unavailable"}}, ""},
-		{"known unsafe resolves unknown Guard", SignalResults{MatchedSafetyRules: []string{"unsafe"}, SignalErrors: map[string]string{"jailbreak:prompt_attack": "unavailable"}}, "guard"},
+		{"content risk cannot resolve an unknown prompt attack", SignalResults{MatchedSafetyRules: []string{"unsafe"}, SignalErrors: map[string]string{"jailbreak:prompt_attack": "unavailable"}}, ""},
+		{"hazard can identify care when binary safety is negative", SignalResults{MatchedClassifierRules: []string{"content-risk:self_harm"}}, "sensitive"},
+		{"hazard failure is not evidence for ordinary handling", SignalResults{SignalErrors: map[string]string{"classifier:content-risk": "unavailable"}}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) { assertBuiltinPolicy(t, c, &tt.in, tt.want) })
 	}

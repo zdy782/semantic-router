@@ -15,7 +15,7 @@ publish one API entrypoint.
 
 ## Model details
 
-MoM V1 is a family of routing policies. Policy version **2.0** uses the compact
+MoM V1 is a family of routing policies. Policy version **3.0** uses the compact
 decision names above and keeps the existing public model IDs. Its recipes ship
 with vLLM Semantic Router; you supply the generation backends.
 
@@ -47,12 +47,17 @@ workers in parallel. Long context or a subject label does not trigger fan-out.
 A client-owned tool loop stays on the single-model reasoning path.
 
 **Vault** uses separate pools for ordinary and sensitive requests. `guard`
-declines detected unsafe or adversarial requests before calling a backend.
+contains detected prompt attacks before calling a backend. Safety and Hazard
+route content risks to `sensitive`, where the assigned model can provide help,
+explain risky material, or refuse harmful assistance. Hazard uses its published
+per-category operating point independently of the binary Safety verdict.
 
 Router Learning can adapt single-model choices from real outcomes within the
 matched decision's eligible pool. Preview reports `execution_required` when
-adaptation determines the final choice during execution. Vault and multi-model
-execution bypass automatic adaptation.
+adaptation determines the final choice during execution. Conversation protection
+can keep an eligible model across turns when clients send stable session and
+conversation identities. Vault and multi-model execution bypass automatic
+adaptation.
 
 ## Requirements
 
@@ -74,12 +79,18 @@ Absent client output limits default to 4,096 tokens, or 8,192 for reasoning and
 Accuracy's single-model answers. Explicit limits are preserved. Multi-model
 calls use declared stage budgets and are checked again before dispatch.
 
+Vault uses the default logical `hazard` deployment for its category classifier.
+It loads only when used. Override that deployment for qualified accelerator
+execution while retaining the model's `operating_point.json`. Verify the sensitive
+pool on help-seeking, benign analysis, and harmful requests; a general quality
+score does not certify responsible answers.
+
 ## Data handling and safety
 
 Every Vault path disables client tools, strips tool history, and disables Router
 memory, response caching, replay capture, and learning adaptation. It also
 suppresses new Responses object writes. These restrictions apply regardless of
-the Guard, Safety, and PII verdicts; unavailable triage fails closed.
+the Guard, Safety, Hazard, and PII verdicts; unavailable triage fails closed.
 
 Assign every Vault backend to infrastructure that meets your privacy
 requirements. The recipe does not establish physical placement, change provider
@@ -97,8 +108,10 @@ and publish an entrypoint. Use **Preview** to inspect signals, decisions, and
 candidate selection. Then send a real request through the entrypoint to verify
 backend execution and latency.
 
-When upgrading to policy 2.0, validate the new decision assignments before
-publishing. Existing published versions and their assignments remain unchanged.
+When upgrading to policy 3.0, verify sensitive-content delivery: content risk
+now selects a responsible private model instead of a fixed denial. Prompt
+attacks still receive an immediate response. Existing published versions and
+their assignments remain unchanged.
 
 ## Evaluation
 
@@ -117,7 +130,8 @@ misclassify requests, so validate representative traffic before rollout.
 
 Knowledge-base retrieval, reranking, caching, and memory can be added for
 applications that need them. These reusable recipes require no knowledge base
-and inject no system prompt.
+and inject no system prompt. Use [recipe tuning](https://vllm-sr.ai/docs/benchmarking/agent-evaluation-loop)
+to measure these additions and session continuity against real requests.
 
 ## References
 

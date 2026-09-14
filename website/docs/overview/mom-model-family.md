@@ -119,7 +119,10 @@ one strong model; independent review and workflows require explicit intent.
 Long input or a subject label alone does not cause multi-model execution.
 
 Vault disables client tools and Router content storage on every path. Its
-`guard` decision declines detected unsafe or adversarial requests immediately.
+`guard` decision contains prompt attacks immediately. Safety and Hazard select
+`sensitive` for content risks, where an approved model can provide responsible
+help, explain risky material, or refuse harmful assistance. Hazard uses the
+model's published category thresholds.
 Assign Vault's other decisions to backends that meet your privacy requirements;
 the recipe cannot establish their physical location or provider retention.
 
@@ -140,7 +143,7 @@ index at the assigned reasoning effort. **Preview** shows the signals, decision,
 and candidate-selection result. Send a real request to verify execution and
 latency before rollout.
 
-Policy version 2.0 uses the decision names above. Validate new assignments before
+Policy version 3.0 keeps the decision names above and sends content risks to the sensitive pool. Validate new assignments before
 publishing an upgrade; existing published versions remain unchanged. See the
 [MoM V1 Model Card](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/built-in/latest/mom-v1/README.md)
 for the complete requirements and data-handling policy.

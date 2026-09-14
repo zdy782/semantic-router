@@ -611,7 +611,7 @@ fixtures:
 
         _, probes = router_calibration_manifest.load_probe_manifest(manifest_path)
         receipt = _mom_materialization_receipt(probes)
-        self.assertEqual(len(probes), 253)
+        self.assertEqual(len(probes), 269)
         self.assertEqual(receipt["message_probes"], 90)
         self.assertEqual(receipt["generated_probes"], 45)
         self.assertEqual(receipt["image_parts"], 53)
@@ -671,7 +671,7 @@ fixtures:
                     (probe.expected_recipe, probe.expected_decision), route
                 )
         containment = [probe for probe in probes if probe.expected_decision == "guard"]
-        self.assertEqual(len(containment), 5)
+        self.assertEqual(len(containment), 6)
         for probe in containment:
             self.assertEqual(probe.expected_selection_status, "not_required")
             self.assertIsNone(probe.expected_algorithm)

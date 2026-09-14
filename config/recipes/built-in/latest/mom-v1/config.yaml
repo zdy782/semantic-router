@@ -1628,17 +1628,32 @@ recipes:
         method: regex
         name: confidential
         operator: OR
+      classifiers:
+      - name: content-risk
+        description: Recognize high-consequence content using the published Hazard operating point.
+        type: local
+        labels:
+        - violence
+        - criminal_activity
+        - sexual_content
+        - child_exploitation
+        - hate
+        - harassment_abuse
+        - regulated_substances
+        - weapons
+        - self_harm
+        - privacy
+        - specialized_advice
+        - misinformation
     decisions:
     - name: guard
-      description: Decline detected prompt attacks or unsafe requests before calling a backend.
+      description: Contain detected prompt attacks before calling a backend.
       priority: 300
       rules:
-        operator: OR
+        operator: AND
         conditions:
         - type: jailbreak
           name: prompt_attack
-        - type: safety
-          name: unsafe
         on_unknown: fail_request
       adaptations:
         mode: bypass
@@ -1662,7 +1677,8 @@ recipes:
         retention:
           drop: true
     - name: sensitive
-      description: Use the assigned sensitive-data pool for personal or confidential information.
+      description: Use the stronger approved private pool for personal data, content risks, and responsible
+        assistance.
       priority: 200
       rules:
         operator: OR
@@ -1671,6 +1687,26 @@ recipes:
           name: personal_data
         - type: keyword
           name: confidential
+        - type: safety
+          name: unsafe
+        - type: classifier
+          name: content-risk
+          label: violence
+        - type: classifier
+          name: content-risk
+          label: child_exploitation
+        - type: classifier
+          name: content-risk
+          label: weapons
+        - type: classifier
+          name: content-risk
+          label: self_harm
+        - type: classifier
+          name: content-risk
+          label: privacy
+        - type: classifier
+          name: content-risk
+          label: specialized_advice
         on_unknown: fail_request
       algorithm:
         type: multi_factor
@@ -1757,3 +1793,11 @@ recipes:
           drop: true
     data_policy:
       replay: false
+    model_bindings:
+      classifier.content-risk:
+        deployment: hazard
+        adapter: modernbert
+        contract: label_scores.v1
+        operating_point:
+          path: operating_point.json
+          sha256: e79a78f48bf45eb38e3f5402de3b3b18eeaa822e00b42b3640bf471276290de5

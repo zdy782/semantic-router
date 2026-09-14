@@ -701,6 +701,7 @@ RECIPE vault (description = "Keep private traffic inside the assigned deployment
     candidate_requirements: { capabilities: "declared", context: "known_limits" }
     data_policy: { replay: false }
     strategy: priority
+    model_bindings: { classifier.content-risk: { adapter: "modernbert", contract: "label_scores.v1", deployment: "hazard", operating_point: { path: "operating_point.json", sha256: "e79a78f48bf45eb38e3f5402de3b3b18eeaa822e00b42b3640bf471276290de5" } } }
   }
 
   # =============================================================================
@@ -728,6 +729,12 @@ RECIPE vault (description = "Keep private traffic inside the assigned deployment
     include_history: true
   }
 
+  SIGNAL classifier content-risk {
+    description: "Recognize high-consequence content using the published Hazard operating point."
+    type: "local"
+    labels: ["violence", "criminal_activity", "sexual_content", "child_exploitation", "hate", "harassment_abuse", "regulated_substances", "weapons", "self_harm", "privacy", "specialized_advice", "misinformation"]
+  }
+
   # =============================================================================
   # PLUGINS
   # =============================================================================
@@ -744,9 +751,9 @@ RECIPE vault (description = "Keep private traffic inside the assigned deployment
   # ROUTES
   # =============================================================================
 
-  ROUTE guard (description = "Decline detected prompt attacks or unsafe requests before calling a backend.", on_unknown = "fail_request") {
+  ROUTE guard (description = "Contain detected prompt attacks before calling a backend.", on_unknown = "fail_request") {
     PRIORITY 300
-    WHEN (jailbreak("prompt_attack") OR safety("unsafe"))
+    WHEN jailbreak("prompt_attack")
     PLUGIN fast_response {
       message: "This request cannot be processed under the private routing policy."
     }
@@ -766,9 +773,9 @@ RECIPE vault (description = "Keep private traffic inside the assigned deployment
     }
   }
 
-  ROUTE sensitive (description = "Use the assigned sensitive-data pool for personal or confidential information.", on_unknown = "fail_request") {
+  ROUTE sensitive (description = "Use the stronger approved private pool for personal data, content risks, and responsible assistance.", on_unknown = "fail_request") {
     PRIORITY 200
-    WHEN (pii("personal_data") OR keyword("confidential"))
+    WHEN (pii("personal_data") OR keyword("confidential") OR safety("unsafe") OR classifier("content-risk", label: "violence") OR classifier("content-risk", label: "child_exploitation") OR classifier("content-risk", label: "weapons") OR classifier("content-risk", label: "self_harm") OR classifier("content-risk", label: "privacy") OR classifier("content-risk", label: "specialized_advice"))
     ALGORITHM multi_factor {
       latency_metric: "ttft"
       latency_percentile: 95

@@ -2,7 +2,7 @@
 
 package catalog
 
-const builtInCatalogDigest = "sha256:5aa0986959fc6d3def4ac1276d606f885bc78324d1e40adc73fe5edf63974e86"
+const builtInCatalogDigest = "sha256:35e90ec1662b27e643c1ea97ab9d10cff4df50b556431ea3c5872a4e458f88c2"
 
 const builtInCatalogJSON = `{
   "benchmarks": [
@@ -91302,7 +91302,7 @@ const builtInCatalogJSON = `{
           "text"
         ]
       },
-      "policy_version": "2.0.0",
+      "policy_version": "3.0.0",
       "presentation": {
         "logo": "package:vllm",
         "monochrome": false,
@@ -91360,7 +91360,7 @@ const builtInCatalogJSON = `{
         "multimodal"
       ],
       "verification": {
-        "asset_sha256": "sha256:3115bff9339c55afff74afaefad888208a54bbad5cef9d80b091e47554f8ba01",
+        "asset_sha256": "sha256:56e6464215ba854306dbf4f839875b21817f7d2dbfd3104f77b9d32d5fa130a4",
         "authority": "vllm-sr-maintainers",
         "status": "claimed"
       }
@@ -91392,7 +91392,7 @@ const builtInCatalogJSON = `{
           "text"
         ]
       },
-      "policy_version": "2.0.0",
+      "policy_version": "3.0.0",
       "presentation": {
         "logo": "package:vllm",
         "monochrome": false,
@@ -91450,7 +91450,7 @@ const builtInCatalogJSON = `{
         "tools"
       ],
       "verification": {
-        "asset_sha256": "sha256:3115bff9339c55afff74afaefad888208a54bbad5cef9d80b091e47554f8ba01",
+        "asset_sha256": "sha256:56e6464215ba854306dbf4f839875b21817f7d2dbfd3104f77b9d32d5fa130a4",
         "authority": "vllm-sr-maintainers",
         "status": "claimed"
       }
@@ -91484,7 +91484,7 @@ const builtInCatalogJSON = `{
           "text"
         ]
       },
-      "policy_version": "2.0.0",
+      "policy_version": "3.0.0",
       "presentation": {
         "logo": "package:vllm",
         "monochrome": false,
@@ -91543,7 +91543,7 @@ const builtInCatalogJSON = `{
         "multimodal"
       ],
       "verification": {
-        "asset_sha256": "sha256:3115bff9339c55afff74afaefad888208a54bbad5cef9d80b091e47554f8ba01",
+        "asset_sha256": "sha256:56e6464215ba854306dbf4f839875b21817f7d2dbfd3104f77b9d32d5fa130a4",
         "authority": "vllm-sr-maintainers",
         "status": "claimed"
       }
@@ -91578,7 +91578,7 @@ const builtInCatalogJSON = `{
           "text"
         ]
       },
-      "policy_version": "2.0.0",
+      "policy_version": "3.0.0",
       "presentation": {
         "logo": "package:vllm",
         "monochrome": false,
@@ -91655,7 +91655,7 @@ const builtInCatalogJSON = `{
         "orchestration"
       ],
       "verification": {
-        "asset_sha256": "sha256:3115bff9339c55afff74afaefad888208a54bbad5cef9d80b091e47554f8ba01",
+        "asset_sha256": "sha256:56e6464215ba854306dbf4f839875b21817f7d2dbfd3104f77b9d32d5fa130a4",
         "authority": "vllm-sr-maintainers",
         "status": "claimed"
       }
@@ -91667,7 +91667,7 @@ const builtInCatalogJSON = `{
         "reasoning",
         "tool_isolation"
       ],
-      "description": "Contains detected unsafe requests and routes accepted requests within the operator-assigned private deployment boundary.",
+      "description": "Contains prompt attacks and routes private or sensitive work to the operator-assigned model pools.",
       "display_name": "MoM V1 Vault",
       "distribution": {
         "source": "https://github.com/vllm-project/semantic-router/tree/main/config/recipes/built-in/latest/mom-v1",
@@ -91687,7 +91687,7 @@ const builtInCatalogJSON = `{
           "text"
         ]
       },
-      "policy_version": "2.0.0",
+      "policy_version": "3.0.0",
       "presentation": {
         "logo": "package:vllm",
         "monochrome": false,
@@ -91725,7 +91725,7 @@ const builtInCatalogJSON = `{
         "private_deployment"
       ],
       "verification": {
-        "asset_sha256": "sha256:3115bff9339c55afff74afaefad888208a54bbad5cef9d80b091e47554f8ba01",
+        "asset_sha256": "sha256:56e6464215ba854306dbf4f839875b21817f7d2dbfd3104f77b9d32d5fa130a4",
         "authority": "vllm-sr-maintainers",
         "status": "claimed"
       }

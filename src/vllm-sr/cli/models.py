@@ -1663,7 +1663,7 @@ class Decision(BaseModel):
     action: Optional[DecisionAction] = None
     output_contract: Optional[str] = None
     output_contract_spec: Optional[OutputContractSpec] = None
-    modelRefs: List[ModelRef] = Field(alias="modelRefs")
+    modelRefs: List[ModelRef] = Field(default_factory=list, alias="modelRefs")
     algorithm: Optional[AlgorithmConfig] = None  # Multi-model orchestration algorithm
     adaptations: Optional[DecisionAdaptationsConfig] = None
     plugins: Optional[List[PluginConfig]] = []
