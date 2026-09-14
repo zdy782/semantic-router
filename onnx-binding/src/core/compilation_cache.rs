@@ -1,5 +1,6 @@
 //! Per-content, per-shape immutable MIGraphX program storage.
-//! The lock covers session creation and the first actual inference.
+//! Cold compilation holds the lock through its first actual inference.
+//! Ready entries are copied under the lock, then used independently.
 use super::artifact_identity::{json_digest, ArtifactDigest, ArtifactSnapshot};
 use super::execution_contract::{validate_contract, ExecutionInput};
 use super::migraphx_identity::GpuIdentity;
@@ -338,12 +339,20 @@ impl CompilationCacheLease {
                 files: ready_files.clone().unwrap_or_default(),
                 compiled_file_reads: Vec::new(),
             })));
+            // A warm session owns a verified private copy and never publishes.
+            // Releasing here lets other sessions prepare before this one runs.
+            let lock = if ready_files.is_some() {
+                drop(lock);
+                None
+            } else {
+                Some(lock)
+            };
             Ok(Self {
                 evidence,
                 directory: work,
                 identity,
                 parent,
-                lock: Some(lock),
+                lock,
                 watch: Some(watch),
                 ready_files,
                 snapshots,
@@ -556,6 +565,36 @@ mod tests {
             .is_err()
         );
         assert!(!parent.join("ready").exists());
+    }
+    #[test]
+    fn ready_sessions_can_prepare_before_either_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        drop(cold(directory.path()));
+        let first = CompilationCacheLease::prepare(directory.path(), identity(), vec![]).unwrap();
+        let first_work = first.directory.clone();
+        let root = directory.path().to_path_buf();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let other = std::thread::spawn(move || {
+            let lease = CompilationCacheLease::prepare(&root, identity(), vec![]).unwrap();
+            ready_tx.send(()).unwrap();
+            lease
+        });
+        let prepared_without_first_inference = ready_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .is_ok();
+        // Release the first lease before joining even on regression, so the
+        // test reports the blocked preparation rather than hanging forever.
+        drop(first);
+        let second = other.join().unwrap();
+        assert!(prepared_without_first_inference);
+        assert_ne!(first_work, second.directory);
+        let program = second.directory.join("program.mxr");
+        let mut second = Some(second);
+        with_inference(&mut second, &identity().inputs, || {
+            assert_eq!(std::fs::read(&program).unwrap(), b"compiled-data");
+            Ok(())
+        })
+        .unwrap();
     }
     #[test]
     fn corrupted_ready_entry_and_provider_rewrites_are_rejected() {
