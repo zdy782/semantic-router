@@ -18,6 +18,7 @@ import (
 type fakeJailbreakWindowModel struct {
 	windows []tasks.LabelDistributionWindow
 	usage   *tasks.InputUsage
+	limits  binding.Limits
 	inputs  []string
 	options []tasks.TextWindowsRequest
 	err     error
@@ -52,7 +53,7 @@ func windowedGuardFixture(t *testing.T) (*windowedJailbreakBackend, *fakeJailbre
 	}
 	model := &fakeJailbreakWindowModel{windows: []tasks.LabelDistributionWindow{
 		{Probabilities: []float32{.2, .7, .1}}, {Probabilities: []float32{.1, .3, .6}},
-	}}
+	}, limits: binding.Limits{ModelTokens: 32768, TaskTokens: 32768, DeploymentTokens: 32768}}
 	backend.prepare = func(ctx context.Context) (*binding.Resolved[tasks.TextWindowsRequest, tasks.WindowedLabelDistribution], error) {
 		if backend.spec.Deployment.Input.MaxTokens != 32768 || backend.spec.Deployment.Device != "cpu" {
 			t.Fatalf("incorrect typed native contract: %+v", backend.spec)
@@ -65,7 +66,7 @@ func windowedGuardFixture(t *testing.T) (*windowedJailbreakBackend, *fakeJailbre
 		if err != nil {
 			return nil, err
 		}
-		return task.Resolve(binding.Identity{Recipe: string(backend.spec.Recipe), Name: "prompt_guard", Deployment: "fixture", Contract: config.RemoteClassifierContractLabelDistribution, Adapter: "modernbert"}, binding.Capability{Contract: config.RemoteClassifierContractLabelDistribution, Provider: "candle", Device: "cpu", Precision: "fp32", Labels: append([]string(nil), backend.labels...)}, resource, func(_ context.Context, _ io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
+		return task.Resolve(binding.Identity{Recipe: string(backend.spec.Recipe), Name: "prompt_guard", Deployment: "fixture", Contract: config.RemoteClassifierContractLabelDistribution, Adapter: "modernbert"}, binding.Capability{Contract: config.RemoteClassifierContractLabelDistribution, Provider: "candle", Device: "cpu", Precision: "fp32", Labels: append([]string(nil), backend.labels...), Limits: model.limits}, resource, func(_ context.Context, _ io.Closer, input tasks.TextWindowsRequest) (tasks.WindowedLabelDistribution, error) {
 			return model.ClassifyWindows(input.Text, input)
 		})
 	}

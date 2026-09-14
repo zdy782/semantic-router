@@ -78,6 +78,20 @@ contract; callers supplying flat text remain responsible for its scope.
 
 ### Token windows for a local classifier
 
+The implicit local `mmbert32k` default scans each text piece in 512-token
+windows with 255 content tokens of overlap. Its document budget comes from the
+registered default Guard model: 32,768 tokens including special tokens. This
+applies only when no recipe model binding or `window` is specified and
+`max_sequence_length` remains zero. Each forward remains bounded to 512 tokens;
+a long piece requires multiple forwards. Preparation records the resolved window and document budget
+and checks the loaded model's actual capacity. An incompatible custom artifact
+fails preparation, and a piece exceeding the document budget produces an
+input-limit error.
+
+Explicit model bindings, document budgets, window policies, and remote backends
+keep their configured behavior. For example, a qualified 8K deployment with
+`input.overflow: reject` continues to process one whole piece within that budget.
+
 For a checkpoint evaluated with overlapping token windows, configure the same
 window policy in the prompt-guard module:
 
@@ -95,8 +109,9 @@ global:
 
 `size` includes the tokenizer's special tokens; `overlap` counts content
 tokens. For a tokenizer with two special tokens, this example scans 126 content
-tokens at a time with a stride of 63. The runtime tokenizes the complete input
-once, preserves the original token IDs, and resets positions in each window.
+tokens at a time with a stride of 63. The runtime plans windows from the
+complete input's token IDs without decoding and re-tokenizing window text,
+and resets positions in each window.
 The total input must fit `max_sequence_length`; overflow is an inference
 error, never an uninspected suffix.
 
@@ -106,12 +121,19 @@ sums their probabilities within each window before choosing the riskiest
 window. It retains that window's complete distribution for labels and
 confidence. Contrastive rules keep their existing text-window policy.
 
-Omitting `window` preserves whole-input native inference or the existing
-legacy text scan. Window sizes and thresholds must match the checkpoint's
-evaluation; scanning all tokens does not establish understanding of distant
-context. Quoted attacks and instructions whose meaning depends on another
-window require separate evaluation. Token windows are available only for the
-local `mmbert32k` variant.
+Outside the implicit default, omitting `window` retains whole-input inference
+or the configured legacy scan. Window sizes and thresholds need separate
+checkpoint evaluation; scanning all tokens does not establish understanding of
+distant context. Quoted attacks and instructions whose meaning depends on
+another window require separate evaluation. Local Candle and ORT model bindings
+can also select token windows; their loaded adapter and graph must support the
+requested execution geometry.
+
+A provider result declaring truncated or incompletely processed input is an
+unresolved scan. Request rules, the text detection APIs, and response scans
+cannot use its probabilities to report a clean complete input. A detection on
+another completely scored piece still counts; errors remain subject to the
+configured `on_error` and response-rule policies.
 
 ### Direction
 

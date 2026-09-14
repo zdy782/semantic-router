@@ -18,6 +18,8 @@ type classifierModelRuntime struct {
 	plan    *config.ModelBindingPlan
 	cfg     *config.RouterConfig
 	recipe  config.RecipeName
+	// Contrastive input policy is captured before native-only defaults.
+	jailbreakContrastiveFullContext *bool
 }
 
 func newClassifierModelRuntime(cfg *config.RouterConfig, runtime *native.Runtime) (*classifierModelRuntime, error) {
@@ -34,6 +36,11 @@ func newClassifierModelRuntime(cfg *config.RouterConfig, runtime *native.Runtime
 	}
 	models := &classifierModelRuntime{runtime: runtime, plan: plan, cfg: cfg, recipe: recipe}
 	if err := models.projectBindings(); err != nil {
+		return nil, err
+	}
+	fullContext := (&Classifier{Config: models.cfg}).hasLongContextClassifier(config.SignalTypeJailbreak)
+	models.jailbreakContrastiveFullContext = &fullContext
+	if err := models.resolveDefaultJailbreakWindow(); err != nil {
 		return nil, err
 	}
 	return models, nil

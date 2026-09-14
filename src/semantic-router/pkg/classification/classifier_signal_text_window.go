@@ -276,7 +276,11 @@ func (c *Classifier) piiInputs(text string) []string {
 }
 
 func (c *Classifier) jailbreakInputs(text string) []string {
-	if c.hasLongContextClassifier(config.SignalTypeJailbreak) {
+	fullContext := c.hasLongContextClassifier(config.SignalTypeJailbreak)
+	if c != nil && c.models != nil && c.models.jailbreakContrastiveFullContext != nil {
+		fullContext = *c.models.jailbreakContrastiveFullContext
+	}
+	if fullContext {
 		return []string{text}
 	}
 	return jailbreakSignalChunks(text)

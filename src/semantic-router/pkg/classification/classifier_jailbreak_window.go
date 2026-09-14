@@ -79,6 +79,11 @@ func (c *windowedJailbreakBackend) Init(_ string, _ bool, classes ...int) error 
 	if err != nil {
 		return err
 	}
+	limits := handle.Capability().Limits
+	if limits.ModelTokens < c.spec.Deployment.Input.MaxTokens || limits.TaskTokens < c.spec.Deployment.Input.MaxTokens {
+		_ = handle.Close()
+		return fmt.Errorf("%w: Guard document budget %d exceeds prepared model/task capacity (%d/%d)", binding.ErrCapability, c.spec.Deployment.Input.MaxTokens, limits.ModelTokens, limits.TaskTokens)
+	}
 	if err := validateNativeLabelOrder(handle.Capability().Labels, c.labels, nil); err != nil {
 		_ = handle.Close()
 		return err
