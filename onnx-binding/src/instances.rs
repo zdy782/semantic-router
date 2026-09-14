@@ -5,6 +5,7 @@ use crate::{
         instance_options::{InstanceOptions, Overflow, SessionEvidence},
         unified_error::{errors, UnifiedResult},
     },
+    model_architectures::classification::classifier_context_length,
     MmBertEmbeddingModel, MmBertSequenceClassifier, MmBertTokenClassifier,
     MultiModalEmbeddingModel,
 };
@@ -201,9 +202,8 @@ fn prepare(model: Model, options: InstanceOptions) -> UnifiedResult<u64> {
     let effective_limit = if matches!(
         &model,
         Model::Sequence(_) | Model::LabelScores(_) | Model::Token(_)
-    ) && options.max_input_tokens.is_none()
-    {
-        task_limit.min(512)
+    ) {
+        classifier_context_length(task_limit, options.max_input_tokens)?
     } else {
         options.effective_limit(task_limit)?
     };

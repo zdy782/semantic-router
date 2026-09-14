@@ -29,7 +29,10 @@ use tokenizers::{
 /// use depends on the selected ONNX graph and execution provider.
 const MAX_CLASSIFICATION_SEQ_LEN: usize = 512;
 
-fn classifier_context_length(capacity: usize, requested: Option<usize>) -> UnifiedResult<usize> {
+pub(crate) fn classifier_context_length(
+    capacity: usize,
+    requested: Option<usize>,
+) -> UnifiedResult<usize> {
     let limit = requested.unwrap_or(MAX_CLASSIFICATION_SEQ_LEN.min(capacity));
     if capacity == 0 || limit == 0 || limit > capacity {
         return Err(errors::config_error(
@@ -38,6 +41,21 @@ fn classifier_context_length(capacity: usize, requested: Option<usize>) -> Unifi
         ));
     }
     Ok(limit)
+}
+
+fn classifier_instance_options(
+    options: &InstanceOptions,
+    capacity: usize,
+) -> UnifiedResult<InstanceOptions> {
+    // Resolve the task's default before the provider chooses its physical
+    // shape. Request-side truncation after loading cannot reduce compilation.
+    Ok(InstanceOptions {
+        max_input_tokens: Some(classifier_context_length(
+            capacity,
+            options.max_input_tokens,
+        )?),
+        ..options.clone()
+    })
 }
 
 fn configure_classifier_tokenizer(tokenizer: &mut Tokenizer, limit: usize) -> UnifiedResult<()> {
@@ -312,6 +330,7 @@ impl MmBertSequenceClassifier {
     pub fn load_with_options(options: &InstanceOptions) -> UnifiedResult<Self> {
         options.validate()?;
         let config = MmBertClassifierConfig::from_pretrained(&options.model_path)?;
+        let options = classifier_instance_options(options, config.max_position_embeddings)?;
         let mut tokenizer =
             Tokenizer::from_file(Path::new(&options.model_path).join("tokenizer.json"))
                 .map_err(|e| errors::tokenization_error(&e.to_string()))?;
@@ -326,7 +345,7 @@ impl MmBertSequenceClassifier {
             Self::find_onnx_models(&options.model_path, provider)?
         };
         let graph = options.select_graph(candidates)?;
-        let prepared = modernbert_inputs::prepare_session(options, &graph, max_sequence_length)?;
+        let prepared = modernbert_inputs::prepare_session(&options, &graph, max_sequence_length)?;
         modernbert_inputs::validate(&prepared.session.inputs)?;
         Ok(Self {
             session: prepared.session,
@@ -1760,6 +1779,105 @@ mod tests {
         }
         for (capacity, limit) in [(32768, 0), (8192, 32768), (0, 512)] {
             assert!(classifier_context_length(capacity, Some(limit)).is_err());
+        }
+    }
+
+    #[test]
+    fn owned_classifier_resolves_budget_before_migraphx_input_shapes() {
+        let graph =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("instance/testdata/sequence/model.onnx");
+        for (capacity, document, window, expected_document, expected_execution) in [
+            (32768, None, None, 512, 512),
+            (32768, Some(32768), None, 32768, 32768),
+            (128, None, None, 128, 128),
+            (32768, Some(32768), Some(512), 32768, 512),
+            (32768, Some(32768), Some(2048), 32768, 2048),
+        ] {
+            let options = InstanceOptions {
+                provider: Provider::Migraphx,
+                max_input_tokens: document,
+                execution_max_input_tokens: window,
+                ..Default::default()
+            };
+            let resolved = classifier_instance_options(&options, capacity).unwrap();
+            assert_eq!(resolved.max_input_tokens, Some(expected_document));
+            let execution = resolved.execution_limit(capacity).unwrap();
+            assert_eq!(execution, expected_execution);
+            // This is the actual graph-schema adapter used before constructing
+            // the MIGraphX backend, so no GPU or large compile is needed here.
+            let inputs = modernbert_inputs::resolved_inputs(&graph, 1, execution).unwrap();
+            assert!(inputs
+                .iter()
+                .all(|input| input.shape == vec![1, expected_execution as i64]));
+            assert_eq!(options.max_input_tokens, document);
+        }
+        for (capacity, document, window) in [
+            (32768, Some(32769), None),
+            (128, Some(512), None),
+            (32768, Some(0), None),
+            (0, None, None),
+            (32768, None, Some(513)),
+            (32768, Some(32768), Some(0)),
+            (32768, Some(32768), Some(32769)),
+        ] {
+            let options = InstanceOptions {
+                max_input_tokens: document,
+                execution_max_input_tokens: window,
+                ..Default::default()
+            };
+            assert!(classifier_instance_options(&options, capacity)
+                .and_then(|resolved| resolved.execution_limit(capacity))
+                .is_err());
+        }
+    }
+
+    #[test]
+    fn owned_sequence_and_token_loaders_apply_resolved_execution_budget() {
+        for kind in ["sequence", "token"] {
+            let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("instance/testdata")
+                .join(kind);
+            for (capacity, document, window, expected) in [
+                (32768, None, None, 512),
+                (32768, Some(32768), None, 32768),
+                (128, None, None, 128),
+                (32768, Some(32768), Some(512), 512),
+                (32768, Some(32768), Some(2048), 2048),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                for name in ["model.onnx", "tokenizer.json", "config.json"] {
+                    std::fs::copy(source.join(name), directory.path().join(name)).unwrap();
+                }
+                let config_path = directory.path().join("config.json");
+                let mut config: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+                config["max_position_embeddings"] = capacity.into();
+                std::fs::write(config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+                let options = InstanceOptions {
+                    model_path: directory.path().display().to_string(),
+                    max_input_tokens: document,
+                    execution_max_input_tokens: window,
+                    intra_threads: Some(1),
+                    ..Default::default()
+                };
+                if kind == "sequence" {
+                    let model = MmBertSequenceClassifier::load_with_options(&options).unwrap();
+                    assert_eq!(model.max_sequence_length(), expected);
+                    assert_eq!(
+                        model.tokenizer().get_truncation().unwrap().max_length,
+                        expected
+                    );
+                    assert_eq!(model.execution_sequence_length, None);
+                } else {
+                    let model = MmBertTokenClassifier::load_with_options(&options).unwrap();
+                    assert_eq!(model.max_sequence_length(), expected);
+                    assert_eq!(
+                        model.tokenizer().get_truncation().unwrap().max_length,
+                        expected
+                    );
+                    assert_eq!(model.execution_sequence_length, None);
+                }
+            }
         }
     }
 
