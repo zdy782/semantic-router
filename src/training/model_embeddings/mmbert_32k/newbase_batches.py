@@ -331,8 +331,11 @@ def reranker_step(
     teacher_cache=None,
     teacher_weight: float = 0.0,
     teacher_temperature: float = 2.0,
+    teacher_exit_supervision: str = "full",
 ):
     objective.validate("reranker")
+    if teacher_exit_supervision not in ("full", "all"):
+        raise ValueError("Teacher exit_supervision must be full or all for rerankers")
     candidates = [
         _candidate_ids(row, components, objective.maximum_candidates) for row in records
     ]
@@ -376,6 +379,7 @@ def reranker_step(
                 preferences[row_index, column] = key in allowed
     total, auxiliary = next(iter(values.values())).sum() * 0.0, 0.0
     full_scores = None
+    exit_scores = {}
     for key, weight in model.exits.weighted():
         scores = torch.zeros_like(labels)
         offset = 0
@@ -395,6 +399,8 @@ def reranker_step(
         auxiliary += weight * extra.detach().item()
         if key == (model.exits.layers[-1], model.exits.dimensions[0]):
             full_scores = scores
+        if teacher_weight and teacher_exit_supervision == "all":
+            exit_scores[key] = scores
     metrics = {
         "intervention": auxiliary,
         "input_count": len(batch.rows),
@@ -414,7 +420,17 @@ def reranker_step(
         for row, ids in enumerate(candidates):
             reference[row, : len(ids)] = cached[offset : offset + len(ids)]
             offset += len(ids)
-        extra = order_distillation(full_scores, reference, valid, teacher_temperature)
+        extra = (
+            sum(
+                weight
+                * order_distillation(
+                    exit_scores[key], reference, valid, teacher_temperature
+                )
+                for key, weight in model.exits.weighted()
+            )
+            if teacher_exit_supervision == "all"
+            else order_distillation(full_scores, reference, valid, teacher_temperature)
+        )
         total = total + teacher_weight * extra
         metrics["external_teacher_loss"] = extra.detach().item()
     return total, metrics

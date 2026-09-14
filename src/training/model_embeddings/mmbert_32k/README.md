@@ -132,7 +132,11 @@ An optional `teacher` configuration adds frozen external soft supervision:
 ```
 
 Use `query_order` for rerankers or `relational_cosine` for embeddings. Rerankers
-match the teacher's per-query score distribution at the full exit. Embeddings
+match the teacher's per-query score distribution at the full exit by default
+(`exit_supervision: "full"`). Set `teacher.exit_supervision: "all"` to supervise
+every configured exit with its existing exit weight. Every exit uses the same
+complete candidate pool and cached teacher scores; padding does not contribute
+to the distribution. This option applies only to rerankers. Embeddings
 match cosine relations at the full exit, with equal weight per eligible anchor
 and relation family. Duplicate or related components do not create unrelated
 negative pairs; semantic batches also retain their explicitly paired relation.

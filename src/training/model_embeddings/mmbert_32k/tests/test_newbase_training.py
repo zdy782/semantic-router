@@ -305,6 +305,7 @@ class NewBaseTrainingTest(unittest.TestCase):
             )
             config["teacher"] = {
                 "objective": "query_order",
+                "exit_supervision": "all",
                 "weight": 0.25,
                 "directory": str(cache),
                 "manifest_sha256": file_digest(cache / "manifest.json"),

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 try:
     import torch
@@ -306,13 +307,130 @@ class NewBaseTeacherTest(unittest.TestCase):
 
     def test_explicit_task_cache_configuration(self):
         validate_teacher_config({"objective": "query_order", "weight": 0}, "reranker")
+        for mode in ("full", "all"):
+            validate_teacher_config(
+                {"objective": "query_order", "weight": 0, "exit_supervision": mode},
+                "reranker",
+            )
         for config in (
             {"objective": "query_order", "weight": 0.1},
             {"objective": "query_order", "weight": -1},
             {"objective": "relational_cosine", "weight": 0},
+            {"objective": "query_order", "weight": 0, "exit_supervision": "last"},
+            {"objective": "query_order", "weight": 0, "exit_supervision": None},
         ):
             with self.assertRaises(ValueError):
                 validate_teacher_config(config, "reranker")
+        with self.assertRaisesRegex(ValueError, "exit_supervision"):
+            validate_teacher_config(
+                {
+                    "objective": "relational_cosine",
+                    "weight": 0,
+                    "exit_supervision": "all",
+                },
+                "embedding",
+            )
+
+    def test_all_exit_teacher_matches_weighted_ragged_query_gradients(self):
+        fixture = batch_fixtures.NewBaseBatchesTest()
+        records, components = fixture.examples()
+        records[0]["candidate_component_ids"].append("p2")
+        records[0]["unjudged_component_ids"].append("p2")
+        original = copy.deepcopy(records)
+        model = fixture.model("reranker")
+        teacher = torch.tensor([1.2, -0.9, 0.4, -0.5, 0.8], requires_grad=True)
+        calls = []
+
+        class Cache:
+            def lookup(self, inputs, components, batch, device):
+                calls.append(inputs)
+                return teacher[:, None]
+
+        values = {
+            key: (torch.arange(5).float().sin() * (index + 1) / 20).requires_grad_()
+            for index, (key, _) in enumerate(model.exits.weighted())
+        }
+        options = {
+            "device": torch.device("cpu"),
+            "token_budget": 128,
+            "maximum": 128,
+            "objective": ObjectiveConfig(
+                "ranking", pairwise_weight=0, bce_weight=0, preference_weight=0
+            ),
+            "amp": False,
+            "teacher_cache": Cache(),
+            "teacher_weight": 0.25,
+        }
+        with patch(
+            "src.training.model_embeddings.mmbert_32k.newbase_batches.forward_complete",
+            return_value=values,
+        ):
+            default, _ = reranker_step(
+                model,
+                batch_fixtures.CompleteTokenizer(),
+                records,
+                components,
+                **options,
+            )
+            explicit, _ = reranker_step(
+                model,
+                batch_fixtures.CompleteTokenizer(),
+                records,
+                components,
+                teacher_exit_supervision="full",
+                **options,
+            )
+            actual, _ = reranker_step(
+                model,
+                batch_fixtures.CompleteTokenizer(),
+                records,
+                components,
+                teacher_exit_supervision="all",
+                **options,
+            )
+        self.assertTrue(torch.equal(default, explicit))
+        default_grad = torch.autograd.grad(
+            default, tuple(values.values()), retain_graph=True
+        )
+        explicit_grad = torch.autograd.grad(
+            explicit, tuple(values.values()), retain_graph=True
+        )
+        self.assertTrue(
+            all(
+                torch.equal(a, b)
+                for a, b in zip(default_grad, explicit_grad, strict=True)
+            )
+        )
+        # Independent unpadded per-query calculation: no fabricated third
+        # candidate in the shorter pool, and no normalization by exit count.
+        expected = 0.0
+        for key, weight in model.exits.weighted():
+            terms = []
+            for start, end in ((0, 3), (3, 5)):
+                terms.append(
+                    torch.nn.functional.kl_div(
+                        (values[key][start:end] / 2).log_softmax(0),
+                        (teacher[start:end].detach() / 2).softmax(0),
+                        reduction="sum",
+                    )
+                    * 4
+                )
+            expected = expected + 0.25 * weight * torch.stack(terms).mean()
+        torch.testing.assert_close(actual, expected, atol=1e-7, rtol=1e-6)
+        actual_grad = torch.autograd.grad(
+            actual, tuple(values.values()), retain_graph=True
+        )
+        expected_grad = torch.autograd.grad(expected, tuple(values.values()))
+        for observed, reference in zip(actual_grad, expected_grad, strict=True):
+            torch.testing.assert_close(observed, reference, atol=1e-7, rtol=1e-6)
+            self.assertGreater(float(observed.norm()), 0)
+        actual.backward()
+        self.assertIsNone(teacher.grad)
+        self.assertEqual(records, original)
+        self.assertEqual(
+            calls,
+            [[("q1", "p1"), ("q1", "n"), ("q1", "p2"), ("q2", "p2"), ("q2", "n")]] * 3,
+        )
 
 
 if __name__ == "__main__":

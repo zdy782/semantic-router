@@ -470,13 +470,17 @@ def run(
                 optimizer.zero_grad(set_to_none=True)
                 selected = [by_id[key] for key in draw["record_ids"]]
                 function = embedding_step if task == "embedding" else reranker_step
-                anchor_options = (
+                task_options = (
                     {
                         "anchor_cache": anchor_cache,
                         "anchor_weight": anchor.get("weight", 0.0),
                     }
                     if task == "embedding"
-                    else {}
+                    else {
+                        "teacher_exit_supervision": teacher.get(
+                            "exit_supervision", "full"
+                        )
+                    }
                 )
                 loss, metrics = function(
                     model,
@@ -491,7 +495,7 @@ def run(
                     teacher_cache=teacher_cache,
                     teacher_weight=teacher.get("weight", 0.0),
                     teacher_temperature=teacher.get("temperature", 2.0),
-                    **anchor_options,
+                    **task_options,
                 )
                 if not torch.isfinite(loss):
                     raise ValueError("Nonfinite logical objective")

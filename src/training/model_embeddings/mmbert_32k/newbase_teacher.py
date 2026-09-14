@@ -68,6 +68,10 @@ def validate_teacher_config(config: dict, task: str, *, anchor: bool = False) ->
         expected = "pointwise_cosine"
     if config.get("objective") != expected:
         raise ValueError("External teacher objective differs from the student task")
+    if "exit_supervision" in config and (
+        task != "reranker" or config["exit_supervision"] not in ("full", "all")
+    ):
+        raise ValueError("Teacher exit_supervision must be full or all for rerankers")
     weight, temperature = config.get("weight"), config.get("temperature", 2.0)
     if (
         isinstance(weight, bool)
