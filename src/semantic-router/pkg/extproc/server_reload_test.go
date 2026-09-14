@@ -118,7 +118,7 @@ func TestReloadRouterFromFileEnsuresAMDModelsBeforeSwap(t *testing.T) {
 }
 
 func TestReloadRouterFromFileDoesNotSwapWhenModelEnsureFails(t *testing.T) {
-	const configPath = "/tmp/router-config.yaml"
+	configPath := filepath.Join(t.TempDir(), "router-config.yaml")
 
 	restoreReloadSeams := stubReloadSeams(t)
 	defer restoreReloadSeams()
@@ -126,6 +126,7 @@ func TestReloadRouterFromFileDoesNotSwapWhenModelEnsureFails(t *testing.T) {
 	candidateCfg := &config.RouterConfig{
 		BackendModels: config.BackendModels{DefaultModel: "candidate"},
 	}
+	writeReloadTestDocument(t, configPath, "candidate", candidateCfg)
 	oldRouter := &OpenAIRouter{Config: &config.RouterConfig{
 		BackendModels: config.BackendModels{DefaultModel: "old"},
 	}}
