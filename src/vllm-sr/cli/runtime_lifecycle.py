@@ -30,6 +30,8 @@ from cli.container_cli import (
     container_stop_container,
     load_openclaw_registry,
 )
+from cli.container_runtime import get_container_runtime
+from cli.runtime_lifecycle_lock import acquire_runtime_lifecycle_lock
 from cli.runtime_stack import RuntimeStackLayout
 from cli.terminal import echo, fields, heading, progress, success
 from cli.utils import get_logger
@@ -62,9 +64,36 @@ def ensure_clean_runtime_container(container_name: str) -> None:
     if status == "not found":
         return
     log.info(f"Existing container found (status: {status}), cleaning up...")
-    if status in {"running", "paused"}:
-        container_stop_container(container_name)
+    if status in {"running", "paused"} and not container_stop_container(container_name):
+        raise RuntimeError(f"Failed to stop runtime container: {container_name}")
     container_remove_container(container_name)
+
+
+def stop_runtime_before_config_replacement(stack_layout: RuntimeStackLayout) -> None:
+    """Stop old config consumers before a restart publishes their replacement.
+
+    Keep the stopped containers for normal deployment cleanup. A failed stop or
+    uncertain state must leave the old active document and provenance intact.
+    """
+    with acquire_runtime_lifecycle_lock(
+        runtime=get_container_runtime(), stack_name=stack_layout.stack_name
+    ):
+        names = stack_layout.runtime_container_names
+        states = {name: container_status_strict(name) for name in names}
+        for name, state in states.items():
+            if state in {"running", "paused", "restarting"}:
+                if not container_stop_container(name):
+                    raise RuntimeError(f"Failed to stop runtime container: {name}")
+            elif state not in {"not found", "exited", "created", "dead"}:
+                raise RuntimeError(f"Runtime container is not stopped: {name}")
+        for name in names:
+            if container_status_strict(name) not in {
+                "not found",
+                "exited",
+                "created",
+                "dead",
+            }:
+                raise RuntimeError(f"Runtime container is not stopped: {name}")
 
 
 def ensure_shared_network(shared_network_name: str) -> None:

@@ -218,6 +218,8 @@ def _execute_serve(
                 platform=platform,
                 recipe_env_bindings=recipe_env_bindings,
                 replace_active_config=replace_active_config,
+                minimal=minimal,
+                readonly=readonly,
             )
         )
         validate_setup_mode_flags(setup_mode, minimal, readonly)
