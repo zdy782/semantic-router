@@ -2,7 +2,7 @@
 title: 调优与验证 Recipe
 description: 用真实请求改善路由质量、时延、成本和 Agent 连续性。
 translation:
-  source_commit: "4a05a3b9b911ffbaaa90b58c2eda57930024ec78"
+  source_commit: "1415528e80774e34c0f6642ff6012d3a1f6bd1ad"
   source_file: "docs/benchmarking/agent-evaluation-loop.md"
   outdated: false
 ---
@@ -38,7 +38,7 @@ Decision 名称保持简短，例如 `simple`、`medium` 和 `reasoning`。处�
 
 检查未知信号如何影响每个 decision，尤其是使用 `NOT` 的条件。分类器失败不应成为选择更便宜路径的依据。加入关键词条件也不保证减少推理：被使用的信号族可能在计算 decision 前并行执行，需要测量真实请求的成本。
 
-测试回答恢复时，应包含之前的 assistant 回复：缺少这段历史时，Feedback 路由会跳过推理。将真正的纠错与调整语气、格式等普通修改请求对照测试。协作路由需要区分委派工作的指令与关于 Agent 的讨论。工作流负责内部阶段，用户不必说出每个阶段才能请求协作。
+测试回答恢复时，应包含之前的 assistant 回复：缺少这段历史时，Feedback 路由会跳过推理。直接修正指令、自包含的错误报告与 Feedback 命中应分开测试，并用调整语气、格式等普通修改请求作对照。协作路由需要区分多执行者授权、关于 Agent 的讨论以及仅使用一位独立执行者的请求。工作流负责内部阶段，用户不必说出每个阶段才能请求协作。
 
 检查多语言示例是否在原型压缩后仍被保留。规则级 `prototype_scoring` 配置随 Recipe 一起发布；省略时继承全局设置。使用 `enabled: false` 保留全部去重候选，并通过 `best_weight` 和 `top_m` 指定组合评分方式。替换基线前先测量实际效果。
 
@@ -65,6 +65,8 @@ vllm-sr route preview \
   --prompt 'Give a brief definition of a readiness probe.' \
   --trace --json --timeout 300
 ```
+
+重组已保存的信号值有助于隔离规则变更，但不属于新的 Preview 结果。应先精确重现基线的 decision 和 heuristic 命中，再用真实请求测试候选版本。
 
 Preview 会执行已配置的分类器和 embedding，不调用后端生成。检查命中的信号、projection 结果、decision、algorithm、选择状态和错误。多轮用例需要保留完整 messages 和工具字段；CLI 无法表达请求形状时，使用已发现的 Preview HTTP schema。
 
