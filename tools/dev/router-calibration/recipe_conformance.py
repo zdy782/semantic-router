@@ -88,6 +88,7 @@ class RecipeInventory:
     plugins: tuple[str, ...]
     fallback_decisions: tuple[str, ...]
     coverage: dict[str, Any]
+    required_devices: tuple[str, ...] = ()
 
 
 @dataclass
@@ -426,6 +427,33 @@ def _assert_probe_coverage(context: ProbeReferenceContext) -> None:
         )
 
 
+def configured_accelerators(config: dict[str, Any]) -> tuple[str, ...]:
+    """Keep explicit hardware requirements; never project a GPU recipe onto CPU."""
+    catalog = _mapping(_mapping(config.get("global")).get("model_catalog"))
+    deployments = _mapping(catalog.get("deployments"))
+    devices = {
+        str(_mapping(deployment).get("device") or "cpu").strip().lower()
+        for deployment in deployments.values()
+    }
+    return tuple(sorted(devices - {"cpu"}))
+
+
+def cpu_inventory(inventory: list[RecipeInventory]) -> list[RecipeInventory]:
+    return [recipe for recipe in inventory if not recipe.required_devices]
+
+
+def cpu_eligibility(inventory: list[RecipeInventory]) -> dict[str, Any]:
+    return {
+        "platform": "cpu",
+        "eligible": [recipe.name for recipe in cpu_inventory(inventory)],
+        "excluded": [
+            {"recipe": recipe.name, "required_devices": recipe.required_devices}
+            for recipe in inventory
+            if recipe.required_devices
+        ],
+    }
+
+
 def build_recipe_inventory(path: Path) -> RecipeInventory:
     validate_recipe_directory(path)
     validate_recipe_model_card(path)
@@ -517,6 +545,7 @@ def build_recipe_inventory(path: Path) -> RecipeInventory:
         plugins=tuple(sorted(plugins)),
         fallback_decisions=tuple(sorted(fallback_decisions)),
         coverage=coverage,
+        required_devices=configured_accelerators(config),
     )
 
 
@@ -621,6 +650,8 @@ def command_static(args: argparse.Namespace) -> int:
 
 def command_list(args: argparse.Namespace) -> int:
     inventory = discover_inventory(args.recipes_root)
+    if args.platform == "cpu":
+        inventory = cpu_inventory(inventory)
     names = [recipe.name for recipe in inventory]
     print(",".join(names) if args.format == "csv" else json.dumps(names))
     return 0
@@ -628,12 +659,33 @@ def command_list(args: argparse.Namespace) -> int:
 
 def command_plan(args: argparse.Namespace) -> int:
     inventory = discover_inventory(args.recipes_root)
-    matrix = matrix_payload(inventory, args.shards)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_json(args.output_dir / "cpu-eligibility.json", cpu_eligibility(inventory))
+    matrix = matrix_payload(cpu_inventory(inventory), args.shards)
     encoded = json.dumps(matrix, separators=(",", ":"))
     if args.github_output:
         write_github_output(args.github_output, "matrix", encoded)
     else:
         print(json.dumps(matrix, indent=2))
+    return 0
+
+
+def command_check_cpu(args: argparse.Namespace) -> int:
+    names = [name.strip() for name in args.recipes.split(",") if name.strip()]
+    inventory = {
+        recipe.name: recipe for recipe in discover_inventory(args.recipes_root)
+    }
+    if not names:
+        raise ValueError("at least one recipe is required")
+    for name in names:
+        if name not in inventory:
+            raise ValueError(f"unknown recipe: {name}")
+        devices = inventory[name].required_devices
+        if devices:
+            raise ValueError(
+                f"{name} requires explicit devices {', '.join(devices)}; "
+                "the CPU runner does not override deployment hardware"
+            )
     return 0
 
 
@@ -708,15 +760,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list")
     list_parser.add_argument("--format", choices=("csv", "json"), default="json")
+    list_parser.add_argument("--platform", choices=("all", "cpu"), default="all")
     list_parser.set_defaults(func=command_list)
 
     static = subparsers.add_parser("static")
     static.set_defaults(func=command_static)
 
-    plan = subparsers.add_parser("plan")
+    plan = subparsers.add_parser("plan", help="plan compatible live CPU shards")
     plan.add_argument("--shards", type=int, default=3)
     plan.add_argument("--github-output", type=Path)
     plan.set_defaults(func=command_plan)
+
+    check_cpu = subparsers.add_parser("check-cpu")
+    check_cpu.add_argument("--recipes", required=True)
+    check_cpu.set_defaults(func=command_check_cpu)
 
     evaluate = subparsers.add_parser("eval")
     evaluate.add_argument("--recipe", required=True)

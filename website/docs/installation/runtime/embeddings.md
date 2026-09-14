@@ -9,7 +9,7 @@ the relevant fragment below into your existing `config.yaml`.
 
 ## Local embeddings
 
-This example selects the maintained mmBERT model, layer 22, and 768 dimensions:
+This example selects Vela Embedding, layer 22, and 768 dimensions:
 
 ```yaml
 global:
@@ -30,8 +30,9 @@ Your embedding signals keep their existing candidates and thresholds.
 
 ### AMD GPU
 
-The AMD serve default keeps semantic embeddings on CPU. To run mmBERT embeddings
-on an AMD GPU, add this deployment and binding to the local configuration above:
+The AMD serve default keeps semantic embeddings on CPU. To select the qualified
+Vela CK graph explicitly, add this deployment and binding to the local
+configuration above:
 
 ```yaml
 global:
@@ -39,11 +40,13 @@ global:
     deployments:
       local-embedding:
         artifact: models/Vela-1.0-Encoder-307M-Embedding
+        revision: a72bbb73f1316553ddb915cff06e1fbc58f9af1c
         provider: ort
         device: rocm:0
         precision: native
+        custom_ops_profile: ck_flash_attention
         input:
-          max_tokens: 1024
+          max_tokens: 32768
           overflow: reject
 routing:
   model_bindings:
@@ -51,16 +54,22 @@ routing:
       deployment: local-embedding
       contract: embedding.v1
       adapter: mmbert
+      head: onnx/model_fa.onnx
 ```
 
-Use a ROCm image with the selected ONNX execution provider and a compatible
-export. A graph using CK attention also needs the explicit
-`custom_ops_profile: ck_flash_attention` deployment option. Keep `native`
-precision to preserve the selected graph's math. A positive
-`max_tokens` is required for GPU embeddings; choose a budget that fits your
-workload and the model. This example rejects inputs beyond 1024 tokens.
-Larger budgets increase preparation and inference cost. Classifiers have
-their own deployment budgets; the default is 512 tokens.
+Use an AMD image containing ORT ROCm and the CK custom operator library. The
+selected graph runs with native precision and rejects CPU fallback. The primary
+graph and matching flat `model_fa_layer_N.onnx` companions share external weights
+inside `onnx/`; retain them for every layer used by enabled consumers.
+
+A positive GPU budget is required. This deployment rejects inputs beyond 32,768
+tokens, including special tokens; standalone Embedding execution is qualified
+through that length. Set `full_context: true` as described below when routing
+needs the complete text. Input acceptance does not establish retrieval quality.
+
+The [Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)
+provides all ten task bindings. Its complete signal pipeline uses an 8K
+classifier budget; it does not claim all-classifier 32K AMD execution.
 
 ## Input policy
 

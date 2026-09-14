@@ -1,8 +1,13 @@
 import importlib
+import io
 import json
+import os
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import yaml
@@ -279,6 +284,142 @@ class RecipeConformanceTest(unittest.TestCase):
             name for shard in first["include"] for name in shard["recipes"].split(",")
         }
         self.assertEqual(planned, {recipe.name for recipe in inventory})
+
+    def test_cpu_plan_keeps_complete_static_inventory_and_reports_hardware(
+        self,
+    ) -> None:
+        inventory = recipe_conformance.discover_inventory(
+            recipe_conformance.DEFAULT_RECIPE_ROOT
+        )
+        by_name = {recipe.name: recipe for recipe in inventory}
+        self.assertEqual(by_name["vela-amd"].required_devices, ("migraphx:0", "rocm:0"))
+        with tempfile.TemporaryDirectory() as directory:
+            args = recipe_conformance.build_parser().parse_args(
+                ["--output-dir", directory, "plan", "--shards", "3"]
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(recipe_conformance.command_plan(args), 0)
+            matrix = json.loads(output.getvalue())
+            planned = {
+                name
+                for shard in matrix["include"]
+                for name in shard["recipes"].split(",")
+            }
+            self.assertEqual(planned, set(by_name) - {"vela-amd"})
+            receipt = json.loads((Path(directory) / "cpu-eligibility.json").read_text())
+            self.assertEqual(
+                receipt["excluded"],
+                [{"recipe": "vela-amd", "required_devices": ["migraphx:0", "rocm:0"]}],
+            )
+
+    def test_accelerator_requirements_follow_devices_not_recipe_names(self) -> None:
+        deployments = {
+            "local": {"provider": "candle", "device": "cpu"},
+            "remote": {"provider": "http"},
+            "gpu": {"provider": "candle", "device": "cuda:0"},
+            "other": {"provider": "ort", "device": "migraphx:2"},
+        }
+        config = {"global": {"model_catalog": {"deployments": deployments}}}
+        self.assertEqual(
+            recipe_conformance.configured_accelerators(config), ("cuda:0", "migraphx:2")
+        )
+        del deployments["gpu"]
+        del deployments["other"]
+        self.assertEqual(recipe_conformance.configured_accelerators(config), ())
+
+    def test_cpu_runner_rejects_hardware_before_any_stack_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "mutated"
+            for name in ("vllm-sr", "docker"):
+                command = root / name
+                command.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 0\n")
+                command.chmod(0o755)
+            # Use this test process's Python, including its conformance dependencies.
+            python = root / "python3"
+            python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
+            python.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{root}:{os.environ['PATH']}",
+                "RECIPES": "accuracy,vela-amd",
+                "ROUTER_IMAGE": "cpu-test",
+            }
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(
+                        recipe_conformance.REPO_ROOT
+                        / "e2e/testing/run_recipe_conformance.sh"
+                    ),
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires explicit devices", result.stderr)
+            self.assertFalse(marker.exists(), result.stdout + result.stderr)
+        args = recipe_conformance.build_parser().parse_args(
+            ["check-cpu", "--recipes", "accuracy,knowledge"]
+        )
+        self.assertEqual(recipe_conformance.command_check_cpu(args), 0)
+
+    def test_hardware_requirement_is_not_a_runtime_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "inventory.json").write_text(
+                json.dumps(
+                    {
+                        "recipes": [
+                            {"name": "gpu", "required_devices": ["rocm:0"]},
+                            {"name": "cpu", "required_devices": []},
+                        ]
+                    }
+                )
+            )
+            report = recipe_conformance.build_consolidated_report(root)
+            self.assertEqual(report["summary"]["requires_hardware_recipes"], 1)
+            self.assertEqual(report["summary"]["passed_recipes"], 0)
+            self.assertEqual(report["summary"]["missing_recipes"], 1)
+            self.assertFalse(report["summary"]["passed"])
+            gpu = report["results"][0]
+            self.assertEqual(gpu["status"], "requires_hardware")
+            self.assertFalse(gpu["passed"])
+            self.assertEqual(gpu["total"], 0)
+
+    def test_cpu_success_does_not_complete_catalog_with_unrun_hardware(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "inventory.json").write_text(
+                json.dumps(
+                    {
+                        "recipes": [
+                            {"name": "gpu", "required_devices": ["rocm:0"]},
+                            {"name": "cpu", "required_devices": []},
+                        ]
+                    }
+                )
+            )
+            (root / "cpu").mkdir()
+            (root / "cpu/eval-report.json").write_text(
+                json.dumps(
+                    {
+                        "inventory": {"name": "cpu"},
+                        "evaluation": {"passed": True, "matched": 2, "total": 2},
+                    }
+                )
+            )
+            summary = recipe_conformance.build_consolidated_report(root)["summary"]
+            self.assertEqual(summary["passed_recipes"], 1)
+            self.assertEqual(summary["requires_hardware_recipes"], 1)
+            self.assertFalse(summary["complete"])
+            self.assertFalse(summary["passed"])
+            self.assertTrue(summary["cpu_compatible_complete"])
+            self.assertTrue(summary["cpu_compatible_passed"])
 
     def test_incomplete_recipe_directory_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:

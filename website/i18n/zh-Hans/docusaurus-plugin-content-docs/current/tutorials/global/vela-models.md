@@ -73,20 +73,36 @@ PII 的重叠扫描、Hazard 的窗口策略与整段文本分类不同。应按
 
 原生 Vela 产物通过 Candle 运行。CPU 路径已验证，包括 32K 输入。Candle 仍提供 CUDA 后端，NVIDIA 性能需要在目标硬件上测量。
 
-ONNX 是 ORT provider 使用的可移植推理格式。AMD GPU 加速使用 ROCm MIGraphX execution provider，因此 CPU ONNX 会话不能作为 AMD GPU 验证。选择与部署匹配的计算图和表示，并核对实际 provider、精度及 fallback 证据。首次 GPU 编译时间与预热后的请求时延应分别记录。
+ONNX 是 ORT provider 使用的可移植推理格式。[Vela AMD 配方](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)显式将十个任务模型绑定到 AMD GPU：Embedding 和 Reranker 使用 ROCm 下的 CK FlashAttention，分类器使用 MIGraphX。配方固定每个产物的 revision，并保留发布的运行策略。`--platform amd` 选择 AMD 镜像及设备访问，不会让所有模型自动使用 GPU，也不会覆盖显式 CPU 部署。
 
-Embedding 和 Reranker 仓库包含共享外部权重的 FP32 ONNX 计算图。完整表示使用 `onnx/model.onnx`；缩减表示需要匹配已训练层数或层数与维度的计算图。下载器根据模型的编码器配置识别完整表示，因此显式选择完整层数和维度也可以使用主计算图。更新原生权重时，必须重新生成对应的 ONNX 产物再发布。
+完整信号流水线以 **8K** 输入预算完成测量。独立 Embedding 和 Reranker 执行已验证至 **32K**；Hazard 在 32K 逻辑预算内使用已验证的 2,048-token 窗口。这些结果不代表所有分类器都完成了 AMD 32K 验证。首次 GPU 编译时间与预热后的请求时延应分别记录。
+
+Embedding 和 Reranker 仓库包含共享外部权重的 FP32 ONNX 计算图。完整表示使用 `onnx/model.onnx`；缩减表示需要匹配已训练层数或层数与维度的计算图。下载器根据模型的编码器配置识别完整表示，因此显式选择完整层数和维度也可以使用主计算图。
+
+CK 版本使用 `onnx/model_fa.onnx` 表示完整的 22 层、768 维表示。选择这个精确的 `head`，并设置 `device: rocm:0`、`custom_ops_profile: ck_flash_attention` 和 `precision: native`。Reranker 的 `pair_scorer` 必须与图匹配：缩减出口使用 `onnx/model_fa_layer_N_dim_D.onnx`，层数和维度也设为对应值。Embedding 使用匹配的 `onnx/model_fa_layer_N.onnx` 配套图。这些图共享已发布的外部权重，同时保留可移植导出。
+
+更新原生权重时，必须重新生成对应的 ONNX 产物再发布。
 
 各模型卡片列出支持的输入长度、用法及可比评测结果。公开对比以此前的 mmBERT 家族为基线，使用匹配数据；质量分数、最大可接受输入长度和推理性能衡量的是不同属性。
 
 ## 验证真实路由与重排 {#verify-live-routing-and-reranking}
 
-Route Preview 返回实际信号值、决策和逐信号时延：
+使用 Vela AMD 配方时，下载并验证完整配置，再选择 AMD 镜像启动。按配方模型卡片说明连接已有的 vLLM 后端：服务名为 `vela-default`，地址为 `vllm:8000`。
 
 ```bash
-curl http://localhost:8080/api/v1/routing/preview?trace=true \
+curl --fail --location --output vela-amd.yaml \
+  https://raw.githubusercontent.com/vllm-project/semantic-router/main/config/recipes/vela-amd/config.yaml
+vllm-sr config validate --config vela-amd.yaml
+vllm-sr serve --platform amd --config vela-amd.yaml
+```
+
+Route Preview 返回实际信号值、决策和逐信号时延。输入应保持在配方的 8K 分类器预算内：
+
+```bash
+curl --fail 'http://localhost:8080/api/v1/routing/preview?trace=true' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"auto","text":"Help me debug this Python program."}'
+  -d '{"model":"vela-auto","text":"Help me debug this Python program."}' \
+  | jq '{decision_result, signal_confidences, signal_values, signal_errors, metrics, eval_trace}'
 ```
 
 使用 entrypoint 声明的公共模型名。请求前检查 `/ready`，并查看响应中的信号值与求值轨迹。

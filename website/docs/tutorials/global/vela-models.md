@@ -104,10 +104,18 @@ Native Vela artifacts run through Candle. CPU execution is validated, including
 32K inputs. CUDA remains an available Candle backend; NVIDIA performance must be
 measured on the target hardware.
 
-ONNX is the portable inference format for the ORT provider. AMD GPU acceleration
-uses the ROCm MIGraphX execution provider, so a CPU-only ONNX session is not AMD
-GPU validation. Choose the graph and representation that match the deployment,
-and check the actual provider, precision and fallback evidence. Initial GPU
+ONNX is the portable inference format for the ORT provider. The
+[Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)
+explicitly binds all ten task models to AMD GPU execution: CK FlashAttention
+through ROCm for Embedding and Reranker, and MIGraphX for classifiers. It pins
+each artifact and preserves the published operating policies. `--platform amd`
+selects the AMD image and device access; it does not make every authored model
+use a GPU or override an explicit CPU deployment.
+
+The complete signal pipeline is measured with an **8K** input budget.
+Standalone Embedding and Reranker execution is qualified through **32K**;
+Hazard uses its qualified 2,048-token windows within a 32K logical budget.
+These limits do not establish 32K AMD execution for all classifiers. Initial GPU
 compilation and warm request latency are separate measurements.
 
 The Embedding and Reranker repositories include FP32 ONNX graphs with shared
@@ -115,6 +123,14 @@ external weights. The full representation uses `onnx/model.onnx`; reduced
 representations require their matching trained layer or layer/dimension graph.
 The downloader resolves a full-size selection from the model's encoder
 configuration, so an explicit full selection can use the primary graph.
+The CK variants use `onnx/model_fa.onnx` for the full 22-layer, 768-dimensional
+representation. Select that exact `head`, `device: rocm:0`,
+`custom_ops_profile: ck_flash_attention` and `precision: native`. Reranker's
+`pair_scorer` must match the graph: reduced exits use
+`onnx/model_fa_layer_N_dim_D.onnx` with the same layer and dimension. Embedding
+uses matching `onnx/model_fa_layer_N.onnx` companions. These graphs share the
+published external weights and retain the portable exports.
+
 Replacing native weights also requires regenerating the corresponding ONNX
 artifacts before publishing the update.
 
@@ -125,12 +141,25 @@ and inference performance measure different properties.
 
 ## Verify live routing and reranking
 
-Route Preview returns actual signal values, decisions and per-signal latency:
+For the Vela AMD recipe, download and validate the complete configuration, then
+start it with the AMD image. Connect an existing vLLM backend served as
+`vela-default` at `vllm:8000`, as explained in the recipe's Model Card.
 
 ```bash
-curl http://localhost:8080/api/v1/routing/preview?trace=true \
+curl --fail --location --output vela-amd.yaml \
+  https://raw.githubusercontent.com/vllm-project/semantic-router/main/config/recipes/vela-amd/config.yaml
+vllm-sr config validate --config vela-amd.yaml
+vllm-sr serve --platform amd --config vela-amd.yaml
+```
+
+Route Preview returns actual signal values, decisions and per-signal latency.
+Keep its input within the recipe's 8K classifier budget:
+
+```bash
+curl --fail 'http://localhost:8080/api/v1/routing/preview?trace=true' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"auto","text":"Help me debug this Python program."}'
+  -d '{"model":"vela-auto","text":"Help me debug this Python program."}' \
+  | jq '{decision_result, signal_confidences, signal_values, signal_errors, metrics, eval_trace}'
 ```
 
 Use the public model name declared by your entrypoint. Check `/ready` before

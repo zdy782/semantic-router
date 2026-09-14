@@ -11,7 +11,7 @@ translation:
 
 ## 本地嵌入 {#local-embeddings}
 
-本例选择维护的 mmBERT 模型，使用第 22 层和 768 维向量：
+本例选择 Vela Embedding，使用第 22 层和 768 维向量：
 
 ```yaml
 global:
@@ -23,26 +23,28 @@ global:
           preload_embeddings: true
           target_dimension: 768
           target_layer: 22
-        mmbert_model_path: models/mmbert-embed-32k-2d-matryoshka
+        mmbert_model_path: models/Vela-1.0-Encoder-307M-Embedding
 ```
 
 使用匹配的 Candle 或 ORT 镜像，并准备模型所需文件。其他模型家族和设备见[进程内模型](in-process.md)。嵌入信号沿用现有候选文本和阈值。
 
 ### AMD GPU {#amd-gpu}
 
-AMD serve 默认让语义嵌入在 CPU 上运行。如需在 AMD GPU 上运行 mmBERT 嵌入，在上述本地配置中添加以下部署和 binding：
+AMD serve 默认让语义嵌入在 CPU 上运行。显式选择已验证的 Vela CK 图时，在上述本地配置中添加以下 deployment 和 binding：
 
 ```yaml
 global:
   model_catalog:
     deployments:
       local-embedding:
-        artifact: models/mmbert-embed-32k-2d-matryoshka
+        artifact: models/Vela-1.0-Encoder-307M-Embedding
+        revision: a72bbb73f1316553ddb915cff06e1fbc58f9af1c
         provider: ort
-        device: migraphx:0
+        device: rocm:0
         precision: native
+        custom_ops_profile: ck_flash_attention
         input:
-          max_tokens: 1024
+          max_tokens: 32768
           overflow: reject
 routing:
   model_bindings:
@@ -50,9 +52,22 @@ routing:
       deployment: local-embedding
       contract: embedding.v1
       adapter: mmbert
+      head: onnx/model_fa.onnx
 ```
 
-使用维护的 ROCm 镜像和模型的 ONNX 导出文件。GPU 嵌入必须设置正数 `max_tokens`；根据工作负载和模型选择预算。本例拒绝超过 1024 个 token 的输入。更大的预算会增加准备和推理成本。分类任务另有 512 个 token 的上限。
+使用包含 ORT ROCm 和 CK 自定义算子库的 AMD 镜像。所选计算图使用 native 精度，拒绝 CPU fallback。主图及配套的 `model_fa_layer_N.onnx` 平铺文件共享 `onnx/` 内的外部权重；保留所有已启用使用方需要的层。
+
+GPU 必须设置正数预算。此部署拒绝超过 32,768 tokens（含特殊 token）的输入；独立 Embedding 执行已验证至该长度。路由需要完整文本时，按下文设置 `full_context: true`。输入可被接受并不代表检索质量已验证。
+
+[Vela AMD 配方](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)提供全部十个任务绑定。完整信号流水线使用 8K 分类器预算，并不声称所有分类器都完成了 AMD 32K 验证。
+
+## 输入策略 {#input-policy}
+
+路由信号默认使用代表性片段。设置 `global.model_catalog.embeddings.semantic.embedding_config.full_context: true`，可将完整路由文本传给已加载的模型。显式部署的 `input.max_tokens` 设置容量，不会覆盖 `full_context: false`。
+
+部署预算仍须符合产物容量。32,768-token 预算是针对合适导出的显式选择，并不代表长文档检索准确率。Memory、响应缓存和 vector store 各有层数、维度及输入要求。
+
+Vela 文本嵌入使用未做最终归一化的中间层，以及完成最终归一化的完整层；随后使用 FP32 masked-mean pooling，截取维度，再做 L2 归一化。导出或更换引擎时应保留表示元数据。在使用更浅或更窄的出口降低时延前，先进行评估。
 
 ## 远程嵌入 {#remote-embeddings}
 
@@ -91,11 +106,13 @@ global:
 | 使用方 | 更换模型前需要检查 |
 | --- | --- |
 | 语义信号和模型选择器 | 匹配阈值和训练时的嵌入空间 |
-| 向量存储和持久化缓存 | 已存索引的维度和模型 revision |
+| 向量存储和持久化缓存 | 已存表示身份、维度及重新入库要求 |
 | 内存 mmBERT 缓存 | 必须提供第 6 层、256 维向量 |
 | 记忆 | 配置的维度；mmBERT 默认为 256，多模态模型默认为 384 |
 | 响应缓存和 RAG 分窗 | 本地分词器分窗支持 |
 | 图像或音频功能 | 本地模型包含所需编码器 |
+
+Router 将支持的本地 mmBERT 存储和缓存绑定到已加载的表示，包括实际产物、有效层数/维度及输入策略。表示空间变化时，持久缓存和 memory 按身份隔离；不兼容的 vector store 数据需要重新入库。旧向量会保留，不会仅因维度相同就被接管。可变的远程模型身份不提供同样的本地产物保证。
 
 嵌入空间改变后，应重建已存向量，即使新模型的输出维度相同。ORT 导出文件必须包含已启用功能使用的每一层。Router 在启动时对这些层预热；层缺失或无效会阻止配置激活。
 

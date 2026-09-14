@@ -159,7 +159,17 @@ For a source build, use `make vllm-sr-dev`, then add
 
 ## Choose a long-input or AMD deployment
 
-For a checkpoint and exported graph evaluated at 32K, an explicit deployment
+For a complete maintained configuration, use the
+[Vela AMD recipe](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md).
+It pins all ten task models, uses CK ROCm for Embedding/Reranker and MIGraphX for
+classifiers, and exposes `vela-auto` over a backend served as `vela-default`.
+All-signals Preview is bounded to 8K. Standalone Embedding/Reranker execution is
+qualified through 32K; Hazard retains its artifact-bound 2,048-token windows and
+32K logical policy. This is not an all-classifier 32K AMD qualification.
+`--platform amd` selects the image and devices while explicit bindings own model
+placement, including any CPU deployments you authored.
+
+For another checkpoint and exported graph evaluated at 32K, an explicit deployment
 can use the following settings. Merge this fragment into a configuration with
 a compatible binding; it does not enable a task by itself.
 
@@ -179,7 +189,11 @@ global:
 
 For a native checkpoint on CPU, select `provider: candle` and `device: cpu`.
 For a graph exported with CK attention, select its exact graph in the binding
-and add `custom_ops_profile: ck_flash_attention` to the ROCm deployment. Plain
+and add `custom_ops_profile: ck_flash_attention` to the ROCm deployment.
+Vela Embedding and Reranker use `head: onnx/model_fa.onnx` for the full 22/768
+representation. A reduced Reranker uses `onnx/model_fa_layer_N_dim_D.onnx` and
+matching `pair_scorer.layer` / `pair_scorer.dimension`; graph metadata is checked
+at load. Portable and CK graph selections must not be mixed. Plain
 FP32 graphs do not require that profile. `native` means the graph's existing
 math, including any mixed precision; it does not mean every operation is FP32.
 GPU preparation rejects an unavailable provider or CPU fallback.

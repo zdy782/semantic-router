@@ -154,7 +154,7 @@ make recipe-conformance-eval \
   RECIPE_CONFORMANCE_RECIPE=<name> \
   RECIPE_CONFORMANCE_ROUTER_URL=http://127.0.0.1:8080
 
-# Build the CPU router and run every maintained recipe.
+# Build the CPU router and run every CPU-compatible maintained recipe.
 make recipe-conformance-live-cpu-all
 ```
 
@@ -162,3 +162,18 @@ CI publishes coverage in the job summary and uploads the consolidated
 `recipe-conformance-report` artifact for 30 days. `inventory.json` contains the
 configured, asserted, and uncovered surfaces; per-recipe `eval-report.json`
 contains exact live results and T3 receipts.
+
+### Explicit hardware requirements
+
+Static checks always include every maintained recipe. Live CPU planning derives
+hardware requirements from explicit `global.model_catalog.deployments.*.device`
+values. Recipes with non-CPU devices stay in the inventory and are listed with
+their required devices in `cpu-eligibility.json` and the consolidated report;
+they do not count as CPU runtime passes. The CPU runner rejects an incompatible
+explicit selection before stopping or starting any containers. It never rewrites
+GPU bindings to CPU.
+
+Use `list --platform cpu` to list compatible CPU recipes. For an AMD recipe,
+start its unchanged configuration with the matching image and run
+`make recipe-conformance-eval` against that active Router. Hardware-specific
+execution remains an explicit runtime qualification.

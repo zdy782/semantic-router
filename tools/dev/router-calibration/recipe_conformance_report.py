@@ -24,9 +24,9 @@ def render_coverage_markdown(payload: dict[str, Any]) -> str:
         "",
         (
             "| Recipe identity | Version | Entrypoints | Decisions | Variants | "
-            "Signals | Projections | Algorithms | Plugins | Request shapes |"
+            "Signals | Projections | Algorithms | Plugins | Request shapes | Devices |"
         ),
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for recipe in payload["recipes"]:
         coverage = recipe["coverage"]
@@ -41,7 +41,8 @@ def render_coverage_markdown(payload: dict[str, Any]) -> str:
             f"{coverage['projections']['percent']:.1f}% | "
             f"{coverage['algorithms']['percent']:.1f}% | "
             f"{coverage['plugins']['percent']:.1f}% | "
-            f"{', '.join(recipe['request_shapes'])} |"
+            f"{', '.join(recipe['request_shapes'])} | "
+            f"{', '.join(recipe.get('required_devices', [])) or 'CPU compatible'} |"
         )
     lines.extend(
         [
@@ -131,10 +132,14 @@ def build_consolidated_report(report_root: Path) -> dict[str, Any]:
         for recipe in _sequence(inventory.get("recipes"))
     ]
     expected = len(results)
-    reported = sum(result["status"] != "missing" for result in results)
+    reported = sum(result["status"] in {"passed", "failed"} for result in results)
     passed = sum(result["status"] == "passed" for result in results)
     failed = sum(result["status"] == "failed" for result in results)
-    missing = expected - reported
+    missing = sum(result["status"] == "missing" for result in results)
+    requires_hardware = sum(
+        result["status"] == "requires_hardware" for result in results
+    )
+    cpu_results = [result for result in results if not result["required_devices"]]
     return {
         "schema_version": "v1",
         "inventory": inventory,
@@ -145,10 +150,17 @@ def build_consolidated_report(report_root: Path) -> dict[str, Any]:
             "passed_recipes": passed,
             "failed_recipes": failed,
             "missing_recipes": missing,
+            "requires_hardware_recipes": requires_hardware,
             "matched": sum(result["matched"] for result in results),
             "total": sum(result["total"] for result in results),
-            "complete": missing == 0,
-            "passed": missing == 0 and failed == 0,
+            "complete": reported == expected,
+            "passed": reported == expected and failed == 0,
+            "cpu_compatible_complete": all(
+                result["status"] != "missing" for result in cpu_results
+            ),
+            "cpu_compatible_passed": all(
+                result["status"] == "passed" for result in cpu_results
+            ),
         },
     }
 
@@ -161,12 +173,17 @@ def _recipe_result(
     evaluation = _mapping(report.get("evaluation")) if report else {}
     is_reported = report is not None
     is_passed = is_reported and bool(evaluation.get("passed"))
+    devices = recipe.get("required_devices", [])
+    absent_status = "requires_hardware" if devices else "missing"
     return {
         "recipe": name,
-        "status": ("passed" if is_passed else "failed" if is_reported else "missing"),
+        "status": (
+            "passed" if is_passed else "failed" if is_reported else absent_status
+        ),
         "matched": int(evaluation.get("matched") or 0),
         "total": int(evaluation.get("total") or 0),
         "passed": is_passed,
+        "required_devices": devices,
         "report": f"{name}/eval-report.json" if is_reported else None,
         "coverage_acceptance": evaluation.get("coverage_acceptance"),
     }
@@ -177,22 +194,24 @@ def render_consolidated_markdown(payload: dict[str, Any]) -> str:
     lines = [
         render_coverage_markdown(_mapping(payload.get("inventory"))).rstrip(),
         "",
-        "## Live CPU results",
+        "## Live results",
         "",
         (
             f"{summary['passed_recipes']} passed, "
             f"{summary['failed_recipes']} failed, "
-            f"{summary['missing_recipes']} missing; "
+            f"{summary['missing_recipes']} missing, "
+            f"{summary.get('requires_hardware_recipes', 0)} require hardware; "
             f"{summary['matched']}/{summary['total']} probes matched."
         ),
         "",
-        "| Recipe | Status | Matched | Total |",
-        "| --- | --- | ---: | ---: |",
+        "| Recipe | Status | Matched | Total | Required devices |",
+        "| --- | --- | ---: | ---: | --- |",
     ]
     for result in _sequence(payload.get("results")):
         lines.append(
             f"| {result['recipe']} | {result['status']} | "
-            f"{result['matched']} | {result['total']} |"
+            f"{result['matched']} | {result['total']} | "
+            f"{', '.join(result.get('required_devices', []))} |"
         )
     lines.append("")
     return "\n".join(lines)

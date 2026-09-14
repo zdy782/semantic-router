@@ -1,13 +1,15 @@
 ---
 title: AMD ROCm
-description: Run an OpenAI-compatible vLLM backend on AMD Instinct GPUs and connect it to vLLM Semantic Router.
+description: Connect an AMD vLLM backend and run Vela routing models on AMD GPUs.
 ---
 
 # Deploy with AMD ROCm
 
 Semantic Router can run on CPU while vLLM serves the selected model on AMD
 Instinct GPUs. This guide starts one ROCm backend, verifies it directly, and
-then connects it to the local Router stack.
+then connects it to the local Router stack. To also run all ten Vela routing
+task models on AMD, use the [Vela AMD recipe](#run-vela-routing-models-on-amd)
+below.
 
 The example uses one checkpoint behind several served-model aliases so the
 maintained `balance` recipe can exercise its routing lanes. That is useful for
@@ -167,6 +169,55 @@ Check that the response is successful and inspect the routing headers for the
 selected decision and provider model. Use the recipe's maintained probes for
 broader routing evaluation; use representative application requests to measure
 answer quality and operating behavior on the actual deployment.
+
+## Run Vela routing models on AMD
+
+The [Vela AMD Model Card](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/vela-amd/README.md)
+and complete config select GPU execution explicitly for all ten task models.
+Embedding and Reranker use their pinned CK FlashAttention graphs through ROCm,
+with native precision and no CPU fallback. The classifiers use MIGraphX.
+The complete signal pipeline is measured at 8K; standalone Embedding/Reranker
+execution is qualified through 32K. Hazard retains its qualified 2,048-token
+windows and 32K logical budget. These results do not establish 32K AMD execution
+for every classifier.
+
+Connect an existing OpenAI-compatible backend served with
+`--served-model-name vela-default`. The config expects `http://vllm:8000`; attach
+that backend to `vllm-sr-network` with network alias `vllm`, or edit the endpoint.
+The earlier multi-alias example does not expose `vela-default` unless you add
+that served name. Verify a direct request using that name before routing.
+Reserve enough memory and compute for the Router alongside the generation
+backend; use `VLLM_SR_AMD_ROUTER_VISIBLE_DEVICES` when selecting a Router GPU.
+The deployment's device index `0` refers to its visible GPU.
+
+```bash
+curl --fail --location --output vela-amd.yaml \
+  https://raw.githubusercontent.com/vllm-project/semantic-router/main/config/recipes/vela-amd/config.yaml
+vllm-sr config validate --config vela-amd.yaml
+vllm-sr serve --platform amd --config vela-amd.yaml
+```
+
+The platform flag selects the image and device access. Named deployments select
+the actual providers and graphs; explicit CPU choices remain CPU choices.
+Cold MIGraphX compilation can exceed a cached startup. The CLI waits up to 1,800
+seconds by default; use `--startup-timeout SECONDS` if measurements justify a
+longer bounded wait. A timeout leaves the owned containers available for logs
+and readiness inspection.
+
+Once `/ready` succeeds, inspect the real signals and their timings:
+
+```bash
+curl --fail http://localhost:8080/ready
+curl --fail 'http://localhost:8080/api/v1/routing/preview?trace=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"vela-auto","text":"Debug this Python program and fix its error."}' \
+  | jq '{decision_result, signal_confidences, signal_values, signal_errors, metrics, eval_trace}'
+```
+
+Keep all-signals Preview within the 8K classifier budget. It does not execute
+retrieval or generation. Follow the recipe and
+[neural reranking](../tutorials/plugin/rag.md#neural-reranking) guide to index
+documents and test RAG through a real chat request using `vela-auto`.
 
 ## Production checklist
 
