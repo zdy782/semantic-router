@@ -80,11 +80,7 @@ func (r *OpenAIRouter) runRequestPreRoutingStages(
 		}
 		return requestDecisionState{}, r.createErrorResponse(403, decisionErr.Error())
 	}
-	metrics.RecordModelRequest(selectedModel)
-	ctx.InflightToken = inflight.Begin(selectedModel)
 	if resp := r.handleFastResponse(ctx, decisionName); resp != nil {
-		inflight.End(selectedModel, ctx.InflightToken)
-		ctx.InflightToken = 0
 		r.startRouterReplay(ctx, originalModel, selectedModel, decisionName)
 		r.updateRouterReplayStatus(ctx, 200, false)
 		r.attachRouterReplayResponse(
@@ -95,6 +91,8 @@ func (r *OpenAIRouter) runRequestPreRoutingStages(
 		addRouterReplayHeaderToImmediateResponse(resp, ctx.RouterReplayID)
 		return requestDecisionState{}, resp
 	}
+	metrics.RecordModelRequest(selectedModel)
+	ctx.InflightToken = inflight.Begin(selectedModel)
 	if resp := r.applyRateLimit(ctx, selectedModel); resp != nil {
 		inflight.End(selectedModel, ctx.InflightToken)
 		ctx.InflightToken = 0

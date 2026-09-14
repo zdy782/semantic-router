@@ -14,6 +14,7 @@ const (
 	EvalSelectionPlannedFinal      = "planned_final"
 	EvalSelectionFallback          = "fallback"
 	EvalSelectionExecutionRequired = "execution_required"
+	EvalSelectionNotRequired       = "not_required"
 	EvalSelectionUnavailable       = "unavailable"
 	EvalSelectionFailed            = "failed"
 )
@@ -96,8 +97,8 @@ type EvalResponse struct {
 	DecisionResult         *EvalDecisionResult                     `json:"decision_result,omitempty"`
 	EvalTrace              []decision.DecisionTrace                `json:"eval_trace,omitempty"`         // Per-decision evaluation trace (when ?trace=true)
 	RecommendedModels      []string                                `json:"recommended_models,omitempty"` // All models from matched decision's modelRefs
-	SelectedModel          string                                  `json:"selected_model,omitempty"`     // Concrete selector result or configured final-output model
-	SelectionStatus        string                                  `json:"selection_status,omitempty"`   // selected, planned_final, fallback, execution_required, unavailable, or failed
+	SelectedModel          string                                  `json:"selected_model,omitempty"`     // Concrete selector result or configured final-output model; absent for immediate responses
+	SelectionStatus        string                                  `json:"selection_status,omitempty"`   // selected, planned_final, fallback, execution_required, not_required, unavailable, or failed
 	SelectionMethod        string                                  `json:"selection_method,omitempty"`
 	SelectionReason        string                                  `json:"selection_reason,omitempty"`
 	RoutingDecision        string                                  `json:"routing_decision,omitempty"`

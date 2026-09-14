@@ -363,7 +363,9 @@ func (r *OpenAIRouter) selectDecisionRuntimeModel(
 	ctx *RequestContext,
 ) (string, entropy.ReasoningDecision, error) {
 	if result.Decision.GetFastResponseConfig() != nil {
-		return r.selectFastResponseRuntimeModel(result.Decision, ctx), entropy.ReasoningDecision{}, nil
+		ctx.VSRSelectedModel = ""
+		ctx.VSRSelectionMethod = "fast_response"
+		return "", entropy.ReasoningDecision{}, nil
 	}
 	if ineligible := r.contextIneligibleAlgorithmModelCount(result.Decision, ctx.VSRContextTokenCount); !selection.CandidateRequirementsEnabled(r.candidateRequirements(ctx)) && ineligible > 0 {
 		return "", entropy.ReasoningDecision{}, fmt.Errorf(
@@ -446,19 +448,6 @@ func (r *OpenAIRouter) selectDecisionRuntimeModel(
 		evaluationConfidence,
 		ctx,
 	), nil
-}
-
-func (r *OpenAIRouter) selectFastResponseRuntimeModel(
-	decisionConfig *config.Decision,
-	ctx *RequestContext,
-) string {
-	selectedModel := firstDecisionModelName(decisionConfig.ModelRefs)
-	if selectedModel == "" {
-		selectedModel = r.Config.DefaultModel
-	}
-	ctx.VSRSelectedModel = selectedModel
-	ctx.VSRSelectionMethod = "fast_response"
-	return selectedModel
 }
 
 func firstDecisionModelName(modelRefs []config.ModelRef) string {

@@ -21,6 +21,13 @@ func (r *OpenAIRouter) SelectModelForEval(
 	if r == nil || r.Config == nil || decision == nil {
 		return evalSelectionUnavailable("router selection runtime is unavailable")
 	}
+	if decision.GetFastResponseConfig() != nil {
+		return services.EvalModelSelection{
+			Status: services.EvalSelectionNotRequired,
+			Method: "fast_response",
+			Reason: "the router returns an immediate response without selecting or invoking a generation backend",
+		}
+	}
 	requestContext := &RequestContext{}
 	if recipe, ok := r.Config.RecipeByName(input.Recipe); ok {
 		requestContext.Routing.SelectRecipe(recipe)
