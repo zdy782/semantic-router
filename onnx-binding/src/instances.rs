@@ -31,7 +31,7 @@ enum Model {
     Sequence(MmBertSequenceClassifier),
     LabelScores(MmBertSequenceClassifier),
     Token(MmBertTokenClassifier),
-    Embedding(MmBertEmbeddingModel),
+    Embedding(Box<MmBertEmbeddingModel>),
     MultiModal(MultiModalEmbeddingModel),
 }
 
@@ -111,7 +111,7 @@ pub fn load_token(options: InstanceOptions) -> UnifiedResult<u64> {
 pub fn load_embedding(options: InstanceOptions) -> UnifiedResult<u64> {
     let options = fresh_options(options);
     let model = MmBertEmbeddingModel::load_with_options(&options)?;
-    prepare(Model::Embedding(model), options)
+    prepare(Model::Embedding(Box::new(model)), options)
 }
 pub fn load_multimodal(options: InstanceOptions) -> UnifiedResult<u64> {
     let options = fresh_options(options);
