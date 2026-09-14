@@ -77,6 +77,8 @@ ONNX 是 ORT provider 使用的可移植推理格式。[Vela AMD 配方](https:/
 
 完整信号流水线以 **8K** 输入预算完成测量。独立 Embedding 和 Reranker 执行已验证至 **32K**；Hazard 在 32K 逻辑预算内使用已验证的 2,048-token 窗口。这些结果不代表所有分类器都完成了 AMD 32K 验证。首次 GPU 编译时间与预热后的请求时延应分别记录。
 
+Domain 和 FactCheck 的更长请求可选择[32K ROCm 部署](../../installation/amd-rocm.md#optional-32k-domain-and-factcheck-on-rocm)。此选项需要更多显存，也会增加短输入的时延。
+
 Embedding 和 Reranker 仓库包含共享外部权重的 FP32 ONNX 计算图。完整表示使用 `onnx/model.onnx`；缩减表示需要匹配已训练层数或层数与维度的计算图。下载器根据模型的编码器配置识别完整表示，因此显式选择完整层数和维度也可以使用主计算图。
 
 CK 版本使用 `onnx/model_fa.onnx` 表示完整的 22 层、768 维表示。选择这个精确的 `head`，并设置 `device: rocm:0`、`custom_ops_profile: ck_flash_attention` 和 `precision: native`。Reranker 的 `pair_scorer` 必须与图匹配：缩减出口使用 `onnx/model_fa_layer_N_dim_D.onnx`，层数和维度也设为对应值。Embedding 使用匹配的 `onnx/model_fa_layer_N.onnx` 配套图。这些图共享已发布的外部权重，同时保留可移植导出。

@@ -214,10 +214,73 @@ curl --fail 'http://localhost:8080/api/v1/routing/preview?trace=true' \
   | jq '{decision_result, signal_confidences, signal_values, signal_errors, metrics, eval_trace}'
 ```
 
-Keep all-signals Preview within the 8K classifier budget. It does not execute
-retrieval or generation. Follow the recipe and
+With the default recipe, keep all-signals Preview within the 8K classifier
+budget. Preview does not execute retrieval or generation. Follow the recipe and
 [neural reranking](../tutorials/plugin/rag.md#neural-reranking) guide to index
 documents and test RAG through a real chat request using `vela-auto`.
+
+### Optional 32K Domain and FactCheck on ROCm
+
+[Vela Domain](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Domain)
+and [Vela FactCheck](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck)
+provide a fixed 32K FP32 graph, `onnx/model_rocm_32k.onnx`. The configuration
+below pins model releases containing this graph.
+
+To opt in, replace the two binding entries and the two complete deployment
+entries in `vela-amd.yaml` with this fragment. The ROCm entries below replace
+the MIGraphX entries, including their `compilation_cache_dir` setting; keep the
+rest of your recipe.
+
+```yaml
+routing:
+  model_bindings:
+    domain_classifier:
+      deployment: domain-amd
+      contract: label_distribution.v1
+      adapter: modernbert
+      head: onnx/model_rocm_32k.onnx
+      mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json
+    fact_check_classifier:
+      deployment: factcheck-amd
+      contract: label_distribution.v1
+      adapter: modernbert
+      head: onnx/model_rocm_32k.onnx
+global:
+  model_catalog:
+    deployments:
+      domain-amd:
+        artifact: models/Vela-1.0-Encoder-307M-Domain
+        revision: f6354f54adcf38770f635ad903be2b00577f6c11
+        provider: ort
+        device: rocm:0
+        precision: native
+        input:
+          max_tokens: 32768
+          overflow: reject
+      factcheck-amd:
+        artifact: models/Vela-1.0-Encoder-307M-FactCheck
+        revision: 99ede1aba1563e59e416f744d25b3f6b7e9d8274
+        provider: ort
+        device: rocm:0
+        precision: native
+        input:
+          max_tokens: 32768
+          overflow: reject
+```
+
+Validate and serve the edited file with the same commands above. Each binding
+always uses its selected graph; it does not switch graphs by request length.
+The fixed graph pads even short inputs to 32,768 tokens, increasing their
+latency and memory cost. Keep the default 8K MIGraphX deployments when that
+budget fits your workload.
+
+For capacity planning, one measured 27,001-token Preview request using these
+two classifiers completed in 15.84 seconds. Separate single-classifier
+validation reached 38.70 GiB of GPU memory; budget additionally for other
+resident models and concurrent requests. These measurements cover this
+Domain/FactCheck option. Other enabled classifiers retain their input limits,
+so changing these two deployments does not establish a 32K all-ten-model
+pipeline.
 
 ## Production checklist
 

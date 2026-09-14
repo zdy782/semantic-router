@@ -96,7 +96,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-FactCheck",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck",
-		Revision:                "32484ae69fd200487389c9d253e1c6783de7a401",
+		Revision:                "99ede1aba1563e59e416f744d25b3f6b7e9d8274",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-FactCheck"},
 		Purpose:                 PurposeHallucinationSentinel,
@@ -109,7 +109,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Domain",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Domain",
-		Revision:                "e18f9d3a91457249416e64bbc58236ebe350c7a5",
+		Revision:                "f6354f54adcf38770f635ad903be2b00577f6c11",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Domain"},
 		Purpose:                 PurposeDomainClassification,

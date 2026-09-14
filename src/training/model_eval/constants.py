@@ -132,8 +132,8 @@ LEGACY_MODEL_REGISTRY = {
 # compare every entry, including releases outside this classifier evaluator.
 VELA_RELEASE_REVISIONS = {
     "llm-semantic-router/Vela-1.0-Encoder-307M": "fe9ccc074b781bc0e2e13c2c8d26f2640410636a",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck": "32484ae69fd200487389c9d253e1c6783de7a401",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Domain": "e18f9d3a91457249416e64bbc58236ebe350c7a5",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck": "99ede1aba1563e59e416f744d25b3f6b7e9d8274",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Domain": "f6354f54adcf38770f635ad903be2b00577f6c11",
     "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "6d3300c4bd7975f30a664503f6c725cf1fbbad48",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "5384b8997e3cbb79ca3a670e869577f4e4f4997e",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "47434a7fd7c245c0c7c17564a000b3c56ccfec41",

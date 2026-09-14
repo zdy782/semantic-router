@@ -173,7 +173,54 @@ curl --fail 'http://localhost:8080/api/v1/routing/preview?trace=true' \
   | jq '{decision_result, signal_confidences, signal_values, signal_errors, metrics, eval_trace}'
 ```
 
-全部信号的 Preview 输入应保持在 8K 分类器预算内。它不执行检索或生成。按配方和[神经重排](../tutorials/plugin/rag.md#neural-reranking)指南将文档入库，再使用 `vela-auto` 发送真实聊天请求验证 RAG。
+使用默认配方时，全部信号的 Preview 输入应保持在 8K 分类器预算内。Preview 不执行检索或生成。按配方和[神经重排](../tutorials/plugin/rag.md#neural-reranking)指南将文档入库，再使用 `vela-auto` 发送真实聊天请求验证 RAG。
+
+### 可选的 Domain 和 FactCheck 32K ROCm 部署 {#optional-32k-domain-and-factcheck-on-rocm}
+
+[Vela Domain](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-Domain) 和 [Vela FactCheck](https://huggingface.co/llm-semantic-router/Vela-1.0-Encoder-307M-FactCheck) 提供固定 32K FP32 图 `onnx/model_rocm_32k.onnx`。以下配置已锁定包含该图的模型发布版本。
+
+若需启用，在 `vela-amd.yaml` 中用以下片段替换这两个 binding 条目及两个完整的 deployment 条目。下面的 ROCm 条目会替换原 MIGraphX 条目，包括移除其 `compilation_cache_dir` 设置；保留配方的其余配置。
+
+```yaml
+routing:
+  model_bindings:
+    domain_classifier:
+      deployment: domain-amd
+      contract: label_distribution.v1
+      adapter: modernbert
+      head: onnx/model_rocm_32k.onnx
+      mapping_path: models/Vela-1.0-Encoder-307M-Domain/category_mapping.json
+    fact_check_classifier:
+      deployment: factcheck-amd
+      contract: label_distribution.v1
+      adapter: modernbert
+      head: onnx/model_rocm_32k.onnx
+global:
+  model_catalog:
+    deployments:
+      domain-amd:
+        artifact: models/Vela-1.0-Encoder-307M-Domain
+        revision: f6354f54adcf38770f635ad903be2b00577f6c11
+        provider: ort
+        device: rocm:0
+        precision: native
+        input:
+          max_tokens: 32768
+          overflow: reject
+      factcheck-amd:
+        artifact: models/Vela-1.0-Encoder-307M-FactCheck
+        revision: 99ede1aba1563e59e416f744d25b3f6b7e9d8274
+        provider: ort
+        device: rocm:0
+        precision: native
+        input:
+          max_tokens: 32768
+          overflow: reject
+```
+
+用上面的相同命令校验并启动修改后的配置。每个 binding 始终使用选定的图，不会按请求长度自动切换。固定图会将短输入也填充到 32,768 tokens，增加时延和显存开销；若工作负载能容纳在 8K 预算内，可继续使用默认的 8K MIGraphX 部署。
+
+容量规划可参考：一条使用这两个分类器的 27,001-token Preview 请求实测耗时 15.84 秒。独立的单分类器验证达到 38.70 GiB GPU 显存占用，还需为其他常驻模型及并发请求预留容量。这些测量仅覆盖 Domain/FactCheck 选项；其他启用的分类器仍保留各自输入上限，修改这两个 deployment 不代表全部十个模型的流水线支持 32K。
 
 ## 生产检查清单
 

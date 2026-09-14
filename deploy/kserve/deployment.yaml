@@ -59,7 +59,7 @@ spec:
           from huggingface_hub import snapshot_download
 
           models = [
-              ("llm-semantic-router/Vela-1.0-Encoder-307M-Domain", "Vela-1.0-Encoder-307M-Domain", "e18f9d3a91457249416e64bbc58236ebe350c7a5"),
+              ("llm-semantic-router/Vela-1.0-Encoder-307M-Domain", "Vela-1.0-Encoder-307M-Domain", "f6354f54adcf38770f635ad903be2b00577f6c11"),
               ("llm-semantic-router/Vela-1.0-Encoder-307M-PII", "Vela-1.0-Encoder-307M-PII", "6d3300c4bd7975f30a664503f6c725cf1fbbad48"),
               ("llm-semantic-router/Vela-1.0-Encoder-307M-Guard", "Vela-1.0-Encoder-307M-Guard", "d9e9969c15eaa5df808a8679f45af8a2ede8ba53"),
               ("{{EMBEDDING_MODEL_REPO}}", "{{EMBEDDING_MODEL}}", "{{EMBEDDING_MODEL_REVISION}}")

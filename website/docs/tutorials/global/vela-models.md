@@ -118,6 +118,10 @@ Hazard uses its qualified 2,048-token windows within a 32K logical budget.
 These limits do not establish 32K AMD execution for all classifiers. Initial GPU
 compilation and warm request latency are separate measurements.
 
+For longer Domain and FactCheck requests, use the optional
+[32K ROCm deployments](../../installation/amd-rocm.md#optional-32k-domain-and-factcheck-on-rocm).
+They require more GPU memory and add latency for short inputs.
+
 The Embedding and Reranker repositories include FP32 ONNX graphs with shared
 external weights. The full representation uses `onnx/model.onnx`; reduced
 representations require their matching trained layer or layer/dimension graph.
