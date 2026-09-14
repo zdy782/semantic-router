@@ -461,7 +461,9 @@ pub fn with_inference<T>(
 impl Drop for CompilationCacheLease {
     fn drop(&mut self) {
         // Failed stages are useful diagnostics and never eligible for reuse.
-        if self.completed && !self.failed {
+        // An unused warm session only owns a copy of an already verified entry;
+        // closing it before its first inference must release that copy too.
+        if !self.failed && (self.completed || self.ready_files.is_some()) {
             let _ = std::fs::remove_dir_all(&self.directory);
         }
     }
@@ -587,6 +589,10 @@ mod tests {
         drop(first);
         let second = other.join().unwrap();
         assert!(prepared_without_first_inference);
+        assert!(
+            !first_work.exists(),
+            "closing an unused warm session must remove its private program copy"
+        );
         assert_ne!(first_work, second.directory);
         let program = second.directory.join("program.mxr");
         let mut second = Some(second);
