@@ -14,7 +14,14 @@ use tokenizers::Encoding;
 
 struct Slot {
     prepared: PreparedSession,
+    batch: Option<usize>,
     sequence: Option<usize>,
+}
+
+impl Slot {
+    fn covers_batch(&self, batch: usize) -> bool {
+        batch > 0 && self.batch.is_none_or(|fixed| fixed == batch)
+    }
 }
 
 pub(crate) struct ClassifierSessions {
@@ -59,6 +66,7 @@ impl ClassifierSessions {
                     cache_lease: None,
                     artifacts: vec![],
                 },
+                batch: None,
                 sequence: None,
             }],
         }
@@ -74,11 +82,19 @@ impl ClassifierSessions {
     ) -> UnifiedResult<Self> {
         let Some(short) = options.short_sequence_tokens else {
             let prepared = modernbert_inputs::prepare_session(options, graph, maximum)?;
-            modernbert_inputs::validate(&prepared.session.inputs)?;
+            let [batch, sequence] = modernbert_inputs::fixed_dimensions(&prepared.session.inputs)?;
+            if sequence.is_some_and(|length| length < maximum) {
+                return Err(errors::config_error(
+                    "execution_max_input_tokens",
+                    "fixed graph capacity is below the configured execution limit",
+                ));
+            }
+            let migraphx = options.provider == Provider::Migraphx;
             return Ok(Self {
                 slots: vec![Slot {
                     prepared,
-                    sequence: (options.provider == Provider::Migraphx).then_some(maximum),
+                    batch: if migraphx { Some(1) } else { batch },
+                    sequence: if migraphx { Some(maximum) } else { sequence },
                 }],
             });
         };
@@ -127,6 +143,7 @@ impl ClassifierSessions {
                 }
                 Ok(Slot {
                     prepared,
+                    batch: Some(1),
                     sequence: Some(length),
                 })
             },
@@ -174,9 +191,12 @@ impl ClassifierSessions {
             return Err(invalid("execution requires nonempty inputs"));
         }
         for slot in &self.slots {
+            if !slot.covers_batch(batch) {
+                continue;
+            }
             match slot.sequence {
                 None => return Ok(actual),
-                Some(length) if batch == 1 && actual <= length => return Ok(length),
+                Some(length) if actual <= length => return Ok(length),
                 _ => (),
             }
         }
@@ -195,7 +215,10 @@ impl ClassifierSessions {
         let slot = self
             .slots
             .iter_mut()
-            .find(|slot| slot.sequence.is_none() || (batch == 1 && slot.sequence == Some(sequence)))
+            .find(|slot| {
+                slot.covers_batch(batch)
+                    && (slot.sequence.is_none() || slot.sequence == Some(sequence))
+            })
             .ok_or_else(|| invalid("input shape does not match a prepared session"))?;
         modernbert_inputs::run_cached(
             &mut slot.prepared.session,

@@ -46,21 +46,41 @@ pub(crate) fn validate(inputs: &[Input]) -> UnifiedResult<bool> {
     if !names.contains("input_ids") || !names.contains("attention_mask") {
         return Err(invalid("input_ids and attention_mask are required"));
     }
-    let ids = dimensions(inputs.iter().find(|x| x.name == "input_ids").unwrap())?;
+    let mut fixed = [None; 2];
     for input in inputs {
         let shape = dimensions(input)?;
         for axis in 0..2 {
             if axis == 0 && input.name == "position_ids" {
                 continue;
             }
-            if shape[axis] > 0 && ids[axis] > 0 && shape[axis] != ids[axis] {
-                return Err(invalid(
-                    "contradictory declared token/mask/position dimensions",
-                ));
+            if shape[axis] > 0 {
+                if fixed[axis].is_some_and(|size| size != shape[axis]) {
+                    return Err(invalid(
+                        "contradictory declared token/mask/position dimensions",
+                    ));
+                }
+                fixed[axis] = Some(shape[axis]);
             }
         }
     }
     Ok(names.contains("position_ids"))
+}
+
+/// Fixed dimensions constrain the complete feed, even when another input uses
+/// a symbolic dimension. Position IDs share sequence but broadcast across batch.
+pub(crate) fn fixed_dimensions(inputs: &[Input]) -> UnifiedResult<[Option<usize>; 2]> {
+    validate(inputs)?;
+    let mut fixed = [None; 2];
+    for input in inputs {
+        for (axis, &size) in dimensions(input)?.iter().enumerate() {
+            if size > 0 && !(axis == 0 && input.name == "position_ids") {
+                fixed[axis] = Some(
+                    usize::try_from(size).map_err(|_| invalid("graph dimension exceeds usize"))?,
+                );
+            }
+        }
+    }
+    Ok(fixed)
 }
 
 /// Resolve the actual graph's two/three token inputs before cached preparation.

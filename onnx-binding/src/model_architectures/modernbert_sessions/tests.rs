@@ -22,6 +22,7 @@ pub(crate) fn cpu_bank(graph: &Path, lengths: &[usize]) -> ClassifierSessions {
                     cache_lease: None,
                     artifacts: vec![],
                 },
+                batch: Some(1),
                 sequence: Some(length),
             })
         },

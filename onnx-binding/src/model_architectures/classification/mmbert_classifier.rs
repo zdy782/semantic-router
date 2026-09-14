@@ -1928,6 +1928,69 @@ mod tests {
     }
 
     #[test]
+    fn owned_fixed_graph_padding_preserves_logical_limit_and_token_offsets() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("instance/testdata");
+        for kind in ["sequence", "token"] {
+            let directory = tempfile::tempdir().unwrap();
+            for name in ["tokenizer.json", "config.json"] {
+                std::fs::copy(fixtures.join(kind).join(name), directory.path().join(name)).unwrap();
+            }
+            let fixed = directory.path().join("model.onnx");
+            let session = Session::builder()
+                .unwrap()
+                .with_intra_threads(1)
+                .unwrap()
+                .with_dimension_override("batch", 1)
+                .unwrap()
+                .with_dimension_override("tokens", 16)
+                .unwrap()
+                .with_optimized_model_path(&fixed)
+                .unwrap()
+                .commit_from_file(fixtures.join(kind).join("model.onnx"))
+                .unwrap();
+            drop(session);
+            let mut options = InstanceOptions {
+                model_path: directory.path().display().to_string(),
+                max_input_tokens: Some(8),
+                intra_threads: Some(1),
+                ..Default::default()
+            };
+            if kind == "sequence" {
+                let mut model = MmBertSequenceClassifier::load_with_options(&options).unwrap();
+                assert_eq!(model.max_sequence_length(), 8);
+                assert_eq!(model.sessions.execution_length(1, 8).unwrap(), 16);
+                assert!(model.sessions.execution_length(2, 8).is_err());
+                for length in [1, 8] {
+                    let mut ids = vec![0; length];
+                    ids[length - 1] = 4;
+                    let result = model.classify_tokens_with_activation(&ids, false).unwrap();
+                    let expected = 1.0 / (1.0 + (-8.0_f32 / 16.0).exp());
+                    assert!((result.probabilities[1] - expected).abs() < 1e-6);
+                }
+                assert!(model
+                    .classify_tokens_with_activation(&[1; 9], false)
+                    .is_err());
+                options.max_input_tokens = Some(17);
+                assert!(MmBertSequenceClassifier::load_with_options(&options).is_err());
+            } else {
+                let mut model = MmBertTokenClassifier::load_with_options(&options).unwrap();
+                assert_eq!(model.max_sequence_length(), 8);
+                assert_eq!(model.sessions.execution_length(1, 8).unwrap(), 16);
+                let text = format!("{}秘密", "hello ".repeat(7));
+                let result = model.detect_entities(&text).unwrap();
+                assert_eq!(result.entities.len(), 8);
+                let tail = result.entities.last().unwrap();
+                assert_eq!(tail.text, "秘密");
+                assert_eq!(tail.start, text.len() - "秘密".len());
+                assert_eq!(tail.end, text.len());
+                assert!(model.detect_entities(&"hello ".repeat(9)).is_err());
+                options.max_input_tokens = Some(17);
+                assert!(MmBertTokenClassifier::load_with_options(&options).is_err());
+            }
+        }
+    }
+
+    #[test]
     fn context_budget_reserves_actual_postprocessor_special_tokens() {
         let mut tokenizer = test_tokenizer();
         let error = configure_classifier_tokenizer(&mut tokenizer, 1).unwrap_err();

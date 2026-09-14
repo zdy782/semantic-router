@@ -136,9 +136,20 @@ CK custom-op library. It does require runtime support for `Loop` and its body
 operators.
 
 Add `--batch-size 1` when qualifying only the Router's single-request token-ID
-path. This fixes both input batch dimensions so ONNX Runtime rejects larger
-batches. It does not split inputs or change attention math. Native HF batching
-and a separate dynamic ONNX variant require their own evidence.
+path. This fixes token and mask batch dimensions; optional explicit position IDs
+retain their single broadcast row. ONNX Runtime rejects incompatible batches.
+It does not split inputs or change attention math. Native HF batching and a
+separate dynamic ONNX variant require their own evidence.
+
+For a fixed-capacity export, also pass `--sequence-length` with the intended
+physical token width. The exporter replaces only bounded values derived from
+constants and known tensor shapes, and writes the proof in its JSON receipt.
+Original weights, loop bodies, binary-mask checks and value-dependent crop
+guards remain unchanged. The owned classifier uses the declared fixed width to
+pad shorter inputs with masked tokens, preserving its configured logical limit
+and token offsets. A fixed width below that limit is rejected. Dynamic exports
+retain dynamic input lengths. Fixed-width padding can increase short-request
+latency, so select the artifact using measurements on the target hardware.
 
 `make ck-rewrite-test` executes dynamic-shape, padding, local-window, and tail
 comparisons on the CPU runtime. For every checkpoint, separately compare full

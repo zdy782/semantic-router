@@ -21,6 +21,7 @@ from rewrite_graph import (
     build_maps,
     find_attention_blocks,
 )
+from specialize_token_shapes import specialize_token_shapes
 
 INT32_ELEMENTS = 2**31 - 1
 DEFAULT_SCORE_BYTES = 512 * 1024 * 1024
@@ -483,28 +484,7 @@ def rewrite_model(model, block_size=256, max_score_bytes=DEFAULT_SCORE_BYTES):
 
 def specialize_batch(model, batch_size):
     """Restrict a token-ID export to an explicitly qualified batch size."""
-    if (
-        isinstance(batch_size, bool)
-        or not isinstance(batch_size, int)
-        or batch_size < 1
-    ):
-        raise ValueError("Static batch size must be a positive integer")
-    if {value.name for value in model.graph.input} != {"input_ids", "attention_mask"}:
-        raise ValueError(
-            "Static batch specialization requires token IDs and padding only"
-        )
-    for value in model.graph.input:
-        tensor = value.type.tensor_type
-        if len(tensor.shape.dim) != MASK_RANK:
-            raise ValueError("Token IDs and padding must have rank two")
-        batch = tensor.shape.dim[0]
-        if batch.HasField("dim_value") and batch.dim_value != batch_size:
-            raise ValueError("Cannot change a pre-existing fixed batch contract")
-    result = copy.deepcopy(model)
-    for value in result.graph.input:
-        value.type.tensor_type.shape.dim[0].dim_value = batch_size
-    # Keep inferred intermediates symbolic; the runtime propagates the fixed
-    # input shape. No operator, weight, or attention computation is changed.
+    result, _ = specialize_token_shapes(model, batch_size)
     onnx.checker.check_model(result)
     return result
 
@@ -520,15 +500,25 @@ def main():
         type=int,
         help="Restrict token-ID inputs to this separately qualified static batch size",
     )
+    parser.add_argument(
+        "--sequence-length",
+        type=int,
+        help="With --batch-size, fix token width and fold bounded shape-only computations",
+    )
     args = parser.parse_args()
+    if args.sequence_length is not None and args.batch_size is None:
+        parser.error("--sequence-length requires --batch-size")
     if args.output.exists() or Path(str(args.output) + ".data").exists():
         raise ValueError("Refusing to overwrite an existing graph or external weights")
     model, receipt = rewrite_model(
         onnx.load(args.input), args.block_size, args.max_score_bytes
     )
     if args.batch_size is not None:
-        model = specialize_batch(model, args.batch_size)
+        model, shape_receipt = specialize_token_shapes(
+            model, args.batch_size, args.sequence_length
+        )
         receipt["static_batch_size"] = args.batch_size
+        receipt["shape_specialization"] = shape_receipt
     args.output.parent.mkdir(parents=True, exist_ok=True)
     onnx.save_model(
         model,

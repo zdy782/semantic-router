@@ -45,6 +45,22 @@ fn rejects_unsupported_graph_contracts_before_execution() {
     values[1] = input("attention_mask", &[2, 8], TensorElementType::Int64);
     values.push(input("position_ids", &[1, 7], TensorElementType::Int64));
     assert!(validate(&values).is_err());
+    // A symbolic input_ids dimension cannot hide a conflict between the
+    // remaining inputs.
+    values[0] = input("input_ids", &[-1, -1], TensorElementType::Int64);
+    assert!(validate(&values).is_err());
+}
+
+#[test]
+fn fixed_dimensions_merge_constraints_without_fixing_dynamic_axes() {
+    let mut values = schema();
+    assert_eq!(fixed_dimensions(&values).unwrap(), [None, None]);
+    values.push(input("position_ids", &[1, 31], TensorElementType::Int64));
+    assert_eq!(fixed_dimensions(&values).unwrap(), [None, Some(31)]);
+    values[1] = input("attention_mask", &[2, -1], TensorElementType::Int64);
+    assert_eq!(fixed_dimensions(&values).unwrap(), [Some(2), Some(31)]);
+    values[0] = input("input_ids", &[1, -1], TensorElementType::Int64);
+    assert!(fixed_dimensions(&values).is_err());
 }
 
 // Small real ONNX fixtures, assembled here to avoid a Python runtime dependency

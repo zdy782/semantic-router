@@ -9,6 +9,7 @@ import numpy as np
 import onnx
 from onnx import TensorProto, helper, numpy_helper
 from rewrite_blocked_attention import rewrite_model, specialize_batch
+from specialize_token_shapes import specialize_token_shapes
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from onnx_portable_ops import lower_nan_predicates
@@ -707,3 +708,219 @@ class LocalCropNumerics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FixedTokenShapes(unittest.TestCase):
+    @staticmethod
+    def model(explicit_positions=True):
+        names = ["input_ids", "attention_mask"]
+        if explicit_positions:
+            names.append("position_ids")
+        inputs = [
+            helper.make_tensor_value_info(
+                name,
+                TensorProto.INT64,
+                [1 if name == "position_ids" else "batch", "sequence"],
+            )
+            for name in names
+        ]
+        constants = [
+            numpy_helper.from_array(np.asarray(value, dtype=np.int64), name)
+            for name, value in [
+                ("axis", 1),
+                ("axes", [0]),
+                ("zero", 0),
+                ("one", 1),
+                ("one_shape", [1]),
+                ("bad_shape", [2]),
+                ("guard_data", [0]),
+            ]
+        ]
+
+        def node(op, args, output, **attrs):
+            return helper.make_node(op, args, [output], name=output, **attrs)
+
+        nodes = [
+            node("Shape", ["input_ids"], "token_shape"),
+            node("Gather", ["token_shape", "axis"], "length", axis=0),
+            node("Unsqueeze", ["length", "axes"], "length_vector"),
+            node("Cast", ["length"], "length_float", to=TensorProto.FLOAT),
+            node("Equal", ["attention_mask", "zero"], "is_zero"),
+            node("Equal", ["attention_mask", "one"], "is_one"),
+            node("Or", ["is_zero", "is_one"], "binary"),
+            node("Cast", ["binary"], "binary_int", to=TensorProto.INT64),
+            node("ReduceMin", ["binary_int"], "valid_int", keepdims=0),
+            node("Cast", ["valid_int"], "valid", to=TensorProto.BOOL),
+            node("Where", ["valid", "one_shape", "bad_shape"], "guard_shape"),
+            node("Reshape", ["guard_data", "guard_shape"], "guard"),
+            node("Mul", ["input_ids", "attention_mask"], "masked"),
+            node("Add", ["masked", "guard"], "guarded"),
+        ]
+        data = "guarded"
+        if explicit_positions:
+            nodes.append(node("Add", [data, "position_ids"], "positioned"))
+            data = "positioned"
+        nodes.append(node("Reshape", [data, "token_shape"], "output"))
+        graph = helper.make_graph(
+            nodes,
+            "shape-proof",
+            inputs,
+            [
+                helper.make_tensor_value_info(
+                    "output", TensorProto.INT64, ["batch", "sequence"]
+                )
+            ],
+            constants,
+        )
+        return helper.make_model(
+            graph, opset_imports=[helper.make_opsetid("", 16)], ir_version=9
+        )
+
+    def test_fixed_shape_proof_preserves_masks_weights_and_shared_positions(self):
+        for positions in [False, True]:
+            original = self.model(positions)
+            before = original.SerializeToString()
+            candidate, receipt = specialize_token_shapes(original, 2, 13)
+            self.assertEqual(original.SerializeToString(), before)
+            self.assertEqual(receipt["folded_nodes"], 4)
+            self.assertEqual(
+                [x.SerializeToString() for x in original.graph.initializer],
+                [x.SerializeToString() for x in candidate.graph.initializer],
+            )
+            folded = {row["node"] for row in receipt["proofs"]}
+            for old, new in zip(original.graph.node, candidate.graph.node, strict=True):
+                if old.name not in folded:
+                    self.assertEqual(old.SerializeToString(), new.SerializeToString())
+            if positions:
+                self.assertEqual(
+                    [
+                        d.dim_value
+                        for d in candidate.graph.input[2].type.tensor_type.shape.dim
+                    ],
+                    [1, 13],
+                )
+            onnx.checker.check_model(candidate, full_check=True)
+            if ort is not None:
+                old, new = session(original), session(candidate)
+                feeds = {
+                    "input_ids": np.arange(26, dtype=np.int64).reshape(2, 13),
+                    "attention_mask": np.ones((2, 13), np.int64),
+                }
+                feeds["attention_mask"][1, 5:] = 0
+                if positions:
+                    feeds["position_ids"] = np.arange(13, dtype=np.int64)[None, :]
+                np.testing.assert_array_equal(
+                    old.run(None, feeds)[0], new.run(None, feeds)[0]
+                )
+                feeds["attention_mask"][0, 7] = 2
+                for runtime in [old, new]:
+                    with self.assertRaises(
+                        ort.capi.onnxruntime_pybind11_state.RuntimeException
+                    ):
+                        runtime.run(None, feeds)
+
+    def test_contracts_unknown_provenance_and_materialization_limits(self):
+        model = self.model()
+        for batch, sequence in [(True, 13), (0, 13), (1, 0), (1, -1)]:
+            with self.assertRaises(ValueError):
+                specialize_token_shapes(model, batch, sequence)
+        fixed, _ = specialize_token_shapes(model, 1, 13)
+        with self.assertRaises(ValueError):
+            specialize_token_shapes(fixed, 1, 14)
+        with self.assertRaises(ValueError):
+            specialize_token_shapes(model, 1, 13, max_constant_bytes=1)
+        contradictory = copy.deepcopy(model)
+        contradictory.graph.input[0].type.tensor_type.shape.dim[1].dim_param = "batch"
+        with self.assertRaises(ValueError):
+            specialize_token_shapes(contradictory, 2, 13)
+        unknown = copy.deepcopy(model)
+        shape_node = unknown.graph.node[0]
+        shape_node.input[0] = "guard"  # Its width depends on actual mask values.
+        candidate, receipt = specialize_token_shapes(unknown, 1, 13)
+        self.assertEqual(receipt["folded_nodes"], 0)
+        self.assertEqual(
+            [n.SerializeToString() for n in unknown.graph.node],
+            [n.SerializeToString() for n in candidate.graph.node],
+        )
+
+    def test_reshape_dimension_copy_and_literal_zero_are_distinct(self):
+        for allowzero in [0, 1]:
+            model = self.model(False)
+            model.graph.initializer.append(
+                numpy_helper.from_array(np.asarray([0, -1], np.int64), "copy_shape")
+            )
+            reshape = helper.make_node(
+                "Reshape",
+                ["input_ids", "copy_shape"],
+                ["reshaped"],
+                name="reshaped",
+                allowzero=allowzero,
+            )
+            model.graph.node.insert(0, reshape)
+            model.graph.node[1].input[0] = "reshaped"
+            _, receipt = specialize_token_shapes(model, 2, 13)
+            self.assertEqual(receipt["folded_nodes"], 4 if allowzero == 0 else 0)
+
+    def test_external_payload_and_control_flow_are_not_evaluated(self):
+        model = self.model(False)
+        external = TensorProto(
+            name="external", data_type=TensorProto.FLOAT, dims=[7, 11]
+        )
+        external.data_location = TensorProto.EXTERNAL
+        external.external_data.add(key="location", value="unopened.data")
+        model.graph.initializer.append(external)
+        model.graph.node.append(
+            helper.make_node(
+                "Shape", ["external"], ["external_shape"], name="external_shape"
+            )
+        )
+        body = helper.make_graph(
+            [
+                helper.make_node("Identity", ["condition_in"], ["condition_out"]),
+                helper.make_node("Identity", ["carry_in"], ["carry_out"]),
+            ],
+            "loop_body",
+            [
+                helper.make_tensor_value_info("iteration", TensorProto.INT64, []),
+                helper.make_tensor_value_info("condition_in", TensorProto.BOOL, []),
+                helper.make_tensor_value_info("carry_in", TensorProto.INT64, [1]),
+            ],
+            [
+                helper.make_tensor_value_info("condition_out", TensorProto.BOOL, []),
+                helper.make_tensor_value_info("carry_out", TensorProto.INT64, [1]),
+            ],
+        )
+        loop = helper.make_node(
+            "Loop",
+            ["length", "valid", "guard"],
+            ["loop_result"],
+            name="loop",
+            body=body,
+        )
+        model.graph.node.append(loop)
+        candidate, receipt = specialize_token_shapes(model, 1, 13)
+        self.assertEqual(
+            model.graph.initializer[-1].SerializeToString(),
+            candidate.graph.initializer[-1].SerializeToString(),
+        )
+        self.assertEqual(
+            loop.SerializeToString(), candidate.graph.node[-1].SerializeToString()
+        )
+        row = next(row for row in receipt["proofs"] if row["node"] == "external_shape")
+        self.assertEqual(row["value"], [7, 11])
+
+    def test_mismatched_slice_vectors_are_not_partially_folded(self):
+        model = self.model(False)
+        for name, values in [("starts", [0, 1]), ("ends", [2])]:
+            model.graph.initializer.append(
+                numpy_helper.from_array(np.asarray(values, np.int64), name)
+            )
+        malformed = helper.make_node(
+            "Slice", ["token_shape", "starts", "ends"], ["sliced"], name="sliced"
+        )
+        model.graph.node.append(malformed)
+        candidate, receipt = specialize_token_shapes(model, 1, 13)
+        self.assertNotIn("sliced", {row["output"] for row in receipt["proofs"]})
+        self.assertEqual(
+            malformed.SerializeToString(), candidate.graph.node[-1].SerializeToString()
+        )
