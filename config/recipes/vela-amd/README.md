@@ -45,6 +45,8 @@ not establish 32K AMD support for the complete classifier pipeline.
 
 - `knowledge` matches the phrase `Search my documents`. It retrieves up to three
   chunks, reranks them and injects the best two before calling `vela-default`.
+  Candidate retrieval uses `similarity_threshold: 0.0` and selects up to
+  `top_k` candidates before neural reranking.
 - `observe` combines the configured learned signals and calls the same backend.
   Requests without a matching decision also use the configured default backend.
 

@@ -166,6 +166,7 @@ ROUTE knowledge (description = "Retrieve indexed documents and rerank the candid
   PLUGIN rag {
     enabled: true
     backend: "vectorstore"
+    similarity_threshold: 0
     top_k: 3
     max_context_length: 4096
     injection_mode: "tool_role"
