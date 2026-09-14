@@ -208,10 +208,11 @@ RUN mkdir -p /app/lib && \
 # ============================================================================
 FROM rocm/dev-ubuntu-22.04:7.0
 
-# Install ROCm runtime libraries needed by ORT (hipBLAS, MIOpen, hipFFT)
+# MIOpen also needs rocRAND headers to compile attention kernels at runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates openssl python3-pip \
-    hipblas miopen-hip hipfft rccl migraphx=2.13.0.70000-38~22.04 && \
+    hipblas miopen-hip rocrand-dev hipfft rccl migraphx=2.13.0.70000-38~22.04 && \
+    test -r /opt/rocm/include/rocrand/rocrand_xorwow.h && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install official AMD ORT wheel for ROCm 7.0 (not the third-party PyPI package)

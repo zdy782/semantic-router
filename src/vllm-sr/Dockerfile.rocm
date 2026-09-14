@@ -327,7 +327,7 @@ RUN if [ "$TARGETARCH" != "amd64" ]; then \
 # across ordinary router binary changes.
 COPY --from=go-builder /build/.go-builder-complete /tmp/.go-builder-complete
 
-# Install system dependencies
+# MIOpen also needs rocRAND headers to compile attention kernels at runtime.
 RUN set -eux; \
     rm -f /tmp/.go-builder-complete; \
     apt-get update; \
@@ -342,8 +342,10 @@ RUN set -eux; \
         hipblas \
         migraphx=2.13.0.70000-38~22.04 \
         miopen-hip \
+        rocrand-dev \
         hipfft \
         rccl; \
+    test -r /opt/rocm/include/rocrand/rocrand_xorwow.h; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
