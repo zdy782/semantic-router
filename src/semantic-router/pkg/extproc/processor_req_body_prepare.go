@@ -25,6 +25,14 @@ func (r *OpenAIRouter) extractRequestSignalSnapshot(
 	if ctx == nil || ctx.SemanticRequest == nil {
 		return nil, status.Error(codes.InvalidArgument, "neutral inference request is unavailable")
 	}
+	// Resolve retained history before any signal, context estimate, or plugin
+	// consumes the neutral request. Provider dispatch is idempotent and must not
+	// later reintroduce history removed by the selected decision's tool policy.
+	if changed, err := r.materializeResponseObjectContext(ctx.SemanticRequest, ctx); err != nil {
+		return nil, err
+	} else if changed {
+		ctx.SemanticRequest.Generation++
+	}
 	captureOriginalContextHistory(ctx)
 	snapshot := extractSemanticRequestSignals(ctx.SemanticRequest)
 	captureOriginalRequestDemand(ctx, ctx.SemanticRequest, snapshot)

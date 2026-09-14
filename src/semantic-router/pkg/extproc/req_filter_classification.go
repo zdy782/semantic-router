@@ -471,7 +471,9 @@ func (r *OpenAIRouter) extractSessionContext(ctx *RequestContext) (sessionID, us
 		if sessionID == "" {
 			sessionID = state.ConversationID
 		}
-		conversationHistory = appendStoredConversationHistory(conversationHistory, state)
+		if !state.ProviderContextApplied {
+			conversationHistory = appendStoredConversationHistory(conversationHistory, state)
+		}
 	}
 	if ctx.SemanticRequest == nil {
 		return sessionID, userID, conversationHistory
