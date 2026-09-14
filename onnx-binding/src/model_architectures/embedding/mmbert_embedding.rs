@@ -473,6 +473,41 @@ impl MmBertEmbeddingModel {
         })
     }
 
+    const GRAPH_VARIANTS: [&'static str; 3] = ["model", "model_fa", "model_fa_fp16"];
+
+    fn parse_graph_layer(value: &str) -> UnifiedResult<usize> {
+        if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+            if let Ok(layer) = value.parse::<usize>() {
+                if layer > 0 {
+                    return Ok(layer);
+                }
+            }
+        }
+        Err(errors::config_error(
+            "primary_layer",
+            "selected graph has an invalid layer name",
+        ))
+    }
+
+    /// Recognize maintained filenames without merging graph precision variants.
+    /// Unknown custom names retain exact-name companion lookup.
+    fn graph_filename(
+        name: &std::ffi::OsStr,
+    ) -> UnifiedResult<Option<(&'static str, Option<usize>)>> {
+        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".onnx")) else {
+            return Ok(None);
+        };
+        for variant in Self::GRAPH_VARIANTS {
+            if stem == variant {
+                return Ok(Some((variant, None)));
+            }
+            if let Some(layer) = stem.strip_prefix(&format!("{variant}_layer_")) {
+                return Ok(Some((variant, Some(Self::parse_graph_layer(layer)?))));
+            }
+        }
+        Ok(None)
+    }
+
     fn owned_primary_candidates<P: AsRef<Path>>(
         model_path: P,
         full_layer: usize,
@@ -502,13 +537,15 @@ impl MmBertEmbeddingModel {
             .flat_map(|directory| names.iter().map(|name| directory.join(name)))
             .filter(|path| path.is_file())
             .collect();
-        if !ck {
-            let flat = format!("model_layer_{full_layer}.onnx");
-            paths.extend(
-                [root.join(&flat), root.join("onnx").join(flat)]
-                    .into_iter()
-                    .filter(|path| path.is_file()),
-            );
+        for name in names {
+            if let Some((variant, _)) = Self::graph_filename(std::ffi::OsStr::new(name))? {
+                let flat = format!("{variant}_layer_{full_layer}.onnx");
+                paths.extend(
+                    [root.join(&flat), root.join("onnx").join(flat)]
+                        .into_iter()
+                        .filter(|path| path.is_file()),
+                );
+            }
         }
         if paths.is_empty() {
             return Err(errors::model_load(
@@ -527,25 +564,25 @@ impl MmBertEmbeddingModel {
         let name = primary_path.file_name().ok_or_else(|| {
             errors::config_error("model_file", "the selected graph has no filename")
         })?;
-        let flat_primary = name
-            .to_str()
-            .is_some_and(|value| value.starts_with("model_layer_") && value.ends_with(".onnx"));
-        let nested_name = if flat_primary {
-            std::ffi::OsStr::new("model.onnx")
-        } else {
-            name
-        };
+        let variant = Self::graph_filename(name)?.map(|(variant, _)| variant);
+        let nested_name = variant
+            .map(|variant| std::ffi::OsString::from(format!("{variant}.onnx")))
+            .unwrap_or_else(|| name.to_owned());
         let mut paths = vec![root.join(format!("onnx/layer-{layer}")).join(nested_name)];
-        // Preserve the established flat portable layout. Custom/CK filenames
-        // must match the selected primary exactly; a different CK variant may
-        // use different encoder precision despite registering the same library.
-        if name == "model.onnx" || flat_primary {
-            let flat = format!("model_layer_{layer}.onnx");
+        // Nested graphs retain priority. Flat companions must use the exact
+        // selected variant, including whole-encoder vs attention-only precision.
+        if let Some(variant) = variant {
+            let flat = format!("{variant}_layer_{layer}.onnx");
             paths.extend([root.join(&flat), root.join("onnx").join(flat)]);
         }
+        let flat_alternatives = Self::GRAPH_VARIANTS.into_iter().flat_map(|variant| {
+            let flat = format!("{variant}_layer_{layer}.onnx");
+            [root.join(&flat), root.join("onnx").join(flat)]
+        });
         if !paths.iter().any(|path| path.is_file())
             && Self::layer_candidates(root, layer, false, true)
-                .iter()
+                .into_iter()
+                .chain(flat_alternatives)
                 .any(|path| path.is_file())
         {
             return Err(errors::config_error(
@@ -897,23 +934,18 @@ impl MmBertEmbeddingModel {
             } else {
                 None
             };
-            let flat_layer = if parent == Path::new("") || parent == Path::new("onnx") {
-                relative
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .and_then(|name| name.strip_prefix("model_layer_"))
-                    .and_then(|name| name.strip_suffix(".onnx"))
+            let filename_layer = if parent == Path::new("")
+                || parent == Path::new("onnx")
+                || directory_layer.is_some()
+            {
+                Self::graph_filename(relative.file_name().unwrap_or_default())?
+                    .and_then(|(_, layer)| layer)
             } else {
                 None
             };
-            for name in [directory_layer, flat_layer].into_iter().flatten() {
-                let layer = name.parse::<usize>().map_err(|_| {
-                    errors::config_error(
-                        "primary_layer",
-                        "selected graph has an invalid layer name",
-                    )
-                })?;
-                if layer == 0 || !layers.contains(&layer) {
+            let directory_layer = directory_layer.map(Self::parse_graph_layer).transpose()?;
+            for layer in [directory_layer, filename_layer].into_iter().flatten() {
+                if !layers.contains(&layer) {
                     return Err(errors::config_error(
                         "primary_layer",
                         "selected graph's layer is absent from the artifact's available_layers",
@@ -981,6 +1013,15 @@ impl MmBertEmbeddingModel {
                     return Err(errors::config_error(
                         "primary_layer",
                         "another declared layer aliases the selected primary graph",
+                    ));
+                }
+                if options.is_some()
+                    && Self::primary_graph_layer(model_dir, &path, &canonical_path, layers, layer)?
+                        != layer
+                {
+                    return Err(errors::config_error(
+                        "layer_graph",
+                        "companion graph has a conflicting layer declaration",
                     ));
                 }
                 let loaded = Self::load_session(&path, use_cpu, options, task_limit);
@@ -1453,7 +1494,11 @@ mod tests {
         std::fs::write(early.join("model_fa_fp16.onnx"), []).unwrap();
         assert_eq!(
             MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary).unwrap(),
-            vec![early.join("model_fa_fp16.onnx")]
+            vec![
+                early.join("model_fa_fp16.onnx"),
+                root.path().join("model_fa_fp16_layer_6.onnx"),
+                root.path().join("onnx/model_fa_fp16_layer_6.onnx"),
+            ]
         );
         let portable = root.path().join("onnx/layer-22/model.onnx");
         let paths =
@@ -1495,6 +1540,193 @@ mod tests {
                 .iter()
                 .all(|path| !path.ends_with("model_layer_22.onnx"))
         );
+    }
+
+    #[test]
+    fn owned_flat_ck_primaries_preserve_profile_and_canonical_priority() {
+        let root = tempfile::tempdir().unwrap();
+        let onnx = root.path().join("onnx");
+        std::fs::create_dir(&onnx).unwrap();
+        for name in [
+            "model_layer_22.onnx",
+            "model_fa_layer_22.onnx",
+            "model_fa_fp16_layer_22.onnx",
+            "model_fa_layer_6.onnx",
+        ] {
+            std::fs::write(onnx.join(name), []).unwrap();
+        }
+        for provider in [Provider::Cpu, Provider::Migraphx, Provider::Rocm] {
+            let options = InstanceOptions {
+                provider,
+                ..Default::default()
+            };
+            assert_eq!(
+                MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap(),
+                vec![onnx.join("model_layer_22.onnx")]
+            );
+        }
+        let options = InstanceOptions {
+            provider: Provider::Rocm,
+            custom_ops_profile: CustomOpsProfile::CkFlashAttention,
+            ..Default::default()
+        };
+        let expected = vec![
+            onnx.join("model_fa_fp16_layer_22.onnx"),
+            onnx.join("model_fa_layer_22.onnx"),
+        ];
+        assert_eq!(
+            MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap(),
+            expected
+        );
+        let canonical = onnx.join("model_fa.onnx");
+        std::fs::write(&canonical, []).unwrap();
+        assert_eq!(
+            MmBertEmbeddingModel::owned_primary_candidates(root.path(), 22, &options).unwrap(),
+            [vec![canonical], expected].concat()
+        );
+    }
+
+    #[test]
+    fn owned_flat_companions_keep_exact_variant_and_nested_priority() {
+        let root = tempfile::tempdir().unwrap();
+        let early = root.path().join("onnx/layer-6");
+        std::fs::create_dir_all(&early).unwrap();
+        for variant in ["model", "model_fa", "model_fa_fp16"] {
+            let nested = early.join(format!("{variant}.onnx"));
+            let flat = root.path().join(format!("onnx/{variant}_layer_6.onnx"));
+            std::fs::write(&nested, []).unwrap();
+            std::fs::write(&flat, []).unwrap();
+            for primary_name in [
+                format!("{variant}.onnx"),
+                format!("{variant}_layer_22.onnx"),
+            ] {
+                let primary = root.path().join("onnx").join(primary_name);
+                let paths =
+                    MmBertEmbeddingModel::owned_layer_candidates(root.path(), 6, &primary).unwrap();
+                assert_eq!(
+                    paths,
+                    vec![
+                        nested.clone(),
+                        root.path().join(format!("{variant}_layer_6.onnx")),
+                        flat.clone(),
+                    ]
+                );
+            }
+        }
+        // Known alternatives must produce an explicit mismatch, including both
+        // CK precision directions and portable graphs beside CK-only exits.
+        for (selected, available) in [
+            ("model_fa", "model_fa_fp16"),
+            ("model_fa_fp16", "model_fa"),
+            ("model", "model_fa"),
+            ("model_fa", "model"),
+        ] {
+            let flat = root.path().join(format!("onnx/{available}_layer_11.onnx"));
+            std::fs::write(&flat, []).unwrap();
+            let primary = root.path().join(format!("{selected}.onnx"));
+            assert!(
+                MmBertEmbeddingModel::owned_layer_candidates(root.path(), 11, &primary).is_err()
+            );
+            std::fs::remove_file(flat).unwrap();
+        }
+        let custom = root.path().join("custom.onnx");
+        assert_eq!(
+            MmBertEmbeddingModel::owned_layer_candidates(root.path(), 11, &custom).unwrap(),
+            vec![root.path().join("onnx/layer-11/custom.onnx")]
+        );
+    }
+
+    #[test]
+    fn selected_flat_graph_layers_require_exact_names_and_manifest_membership() {
+        let root = tempfile::tempdir().unwrap();
+        let resolve = |name: &str| {
+            let selected = root.path().join(name);
+            MmBertEmbeddingModel::primary_graph_layer(
+                root.path(),
+                &selected,
+                &selected,
+                &[3, 6, 11, 22],
+                22,
+            )
+        };
+        for variant in ["model", "model_fa", "model_fa_fp16"] {
+            assert_eq!(resolve(&format!("{variant}.onnx")).unwrap(), 22);
+            assert_eq!(resolve(&format!("onnx/{variant}_layer_6.onnx")).unwrap(), 6);
+            for suffix in [
+                "",
+                "0",
+                "+6",
+                "6_fa",
+                "6_dim_768",
+                "7",
+                "999999999999999999999",
+            ] {
+                let name = format!("{variant}_layer_{suffix}.onnx");
+                assert!(resolve(&name).is_err(), "{name}");
+                if suffix != "7" {
+                    assert!(MmBertEmbeddingModel::owned_layer_candidates(
+                        root.path(),
+                        3,
+                        &root.path().join(name)
+                    )
+                    .is_err());
+                }
+            }
+        }
+        assert!(resolve("onnx/layer-11/model_fa_layer_6.onnx").is_err());
+        assert_eq!(resolve("onnx/layer-6/model_fa_layer_6.onnx").unwrap(), 6);
+        assert_eq!(resolve("onnx/layer-6/custom.onnx").unwrap(), 6);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_flat_ck_symlinks_cannot_contradict_layer_declarations() {
+        let root = tempfile::tempdir().unwrap();
+        let onnx = root.path().join("onnx");
+        std::fs::create_dir(&onnx).unwrap();
+        let target = onnx.join("model_fa_layer_6.onnx");
+        std::fs::write(&target, []).unwrap();
+        for (name, layer) in [("model_fa.onnx", Some(6)), ("model_fa_layer_11.onnx", None)] {
+            let selected = root.path().join(name);
+            std::os::unix::fs::symlink(&target, &selected).unwrap();
+            let result = MmBertEmbeddingModel::primary_graph_layer(
+                root.path(),
+                &selected,
+                &std::fs::canonicalize(&selected).unwrap(),
+                &[3, 6, 11, 22],
+                22,
+            );
+            if let Some(layer) = layer {
+                assert_eq!(result.unwrap(), layer);
+            } else {
+                assert!(result.is_err());
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owned_companion_layer_alias_is_rejected_before_session_load() {
+        let root = tempfile::tempdir().unwrap();
+        let primary = root.path().join("model_fa.onnx");
+        let target = root.path().join("model_fa_layer_6.onnx");
+        // Empty files ensure this check runs before attempting to read an ONNX
+        // graph; a session-load error would not prove layer alias rejection.
+        std::fs::write(&primary, []).unwrap();
+        std::fs::write(&target, []).unwrap();
+        std::os::unix::fs::symlink(&target, root.path().join("model_fa_layer_3.onnx")).unwrap();
+        let error = MmBertEmbeddingModel::load_layer_sessions(
+            root.path(),
+            true,
+            &[3, 6, 22],
+            Some(&InstanceOptions::default()),
+            &primary,
+            22,
+            32768,
+        )
+        .err()
+        .expect("a companion cannot declare different selected and canonical layers");
+        assert!(error.to_string().contains("conflicting layer declarations"));
     }
 
     #[test]
