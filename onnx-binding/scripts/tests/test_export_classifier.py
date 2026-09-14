@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 try:
     import onnxruntime  # noqa: F401 -- require an actual runtime for export tests
@@ -27,6 +28,22 @@ except ImportError:
 
 @unittest.skipIf(torch is None, "requires torch, transformers, onnxscript and ORT")
 class ClassifierExportTest(unittest.TestCase):
+    def test_gpu_export_requires_explicit_structural_only_mode(self):
+        exporter.validate_execution("cpu", False, False)
+        exporter.validate_execution("cpu", False, True)
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+            exporter.validate_execution("cpu", True, True)
+        for verify_only in (False, True):
+            with self.assertRaisesRegex(ValueError, "requires --export-only"):
+                exporter.validate_execution("cuda", False, verify_only)
+        with (
+            patch.object(torch.cuda, "is_available", return_value=False),
+            self.assertRaisesRegex(ValueError, "unavailable"),
+        ):
+            exporter.validate_execution("cuda", True, False)
+        with patch.object(torch.cuda, "is_available", return_value=True):
+            exporter.validate_execution("cuda", True, False)
+
     def test_half_export_keeps_native_rope_and_full_precision_task_head(self):
         torch.set_num_threads(2)
         for token_task in (False, True):

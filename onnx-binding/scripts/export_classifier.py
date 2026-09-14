@@ -30,6 +30,19 @@ from transformers import (
 MIN_VALIDATION_TOKENS = 2
 
 
+def validate_execution(device, export_only, verify_only):
+    """Keep GPU structural export distinct from the CPU parity workflow."""
+    if export_only and verify_only:
+        raise ValueError("--export-only and --verify-only are mutually exclusive")
+    if device == "cuda":
+        if not export_only:
+            raise ValueError(
+                "GPU export requires --export-only; qualify it on the target runtime"
+            )
+        if not torch.cuda.is_available():
+            raise ValueError("The requested CUDA or ROCm device is unavailable")
+
+
 class ClassifierLogits(torch.nn.Module):
     """Keep pooling and the complete task head in FP32, including FP16 exports."""
 
@@ -175,12 +188,24 @@ def main():
     )
     parser.add_argument("--dtype", choices=("float32", "float16"), default="float32")
     parser.add_argument(
+        "--device",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help="Native export device; PyTorch uses cuda for both NVIDIA and ROCm",
+    )
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Export without CPU numerical checks; target-runtime qualification is required",
+    )
+    parser.add_argument(
         "--validation-lengths",
         type=int,
         nargs="+",
         default=[2, 63, 64, 65, 127, 128, 129, 512],
     )
     args = parser.parse_args()
+    validate_execution(args.device, args.export_only, args.verify_only)
     if not args.model.is_dir() or args.model.resolve() == args.output.resolve():
         raise ValueError("Use a local checkpoint and a separate export directory")
     torch.set_num_threads(8)
@@ -203,7 +228,7 @@ def main():
         raise ValueError("id2label must exactly cover the task head")
     if len(set(config.id2label.values())) != config.num_labels:
         raise ValueError("Task labels must be unique")
-    if any(
+    if not args.export_only and any(
         length < MIN_VALIDATION_TOKENS or length > config.max_position_embeddings
         for length in args.validation_lengths
     ):
@@ -226,9 +251,10 @@ def main():
         for key in ("missing_keys", "unexpected_keys", "mismatched_keys", "error_msgs")
     ):
         raise ValueError(f"Incomplete task checkpoint: {loading}")
+    model.to(args.device)
     wrapper = prepare_classifier(model, token_task, getattr(torch, args.dtype))
     reference = wrapper
-    if args.dtype == "float16":
+    if args.dtype == "float16" and not args.export_only:
         reference = ClassifierLogits(
             kind.from_pretrained(
                 args.model,
@@ -244,6 +270,7 @@ def main():
         "Example context. 中文测试。 Contact alice@example.org."
     )
     ids, mask = make_input(seed_ids, 64, 2, tokenizer.pad_token_id)
+    ids, mask = ids.to(args.device), mask.to(args.device)
     args.output.mkdir(parents=True, exist_ok=True)
     path = args.output / (
         "model.onnx" if args.dtype == "float32" else "model_sdpa_fp16.onnx"
@@ -260,7 +287,7 @@ def main():
         with torch.inference_mode():
             torch.onnx.export(
                 wrapper,
-                (ids, mask, torch.arange(ids.shape[1]).unsqueeze(0)),
+                (ids, mask, torch.arange(ids.shape[1], device=ids.device).unsqueeze(0)),
                 str(path),
                 input_names=["input_ids", "attention_mask", "position_ids"],
                 output_names=["logits"],
@@ -286,15 +313,19 @@ def main():
     expected_rank = 3 if token_task else 2
     if len(graph.graph.output[0].type.tensor_type.shape.dim) != expected_rank:
         raise ValueError("Exported graph has the wrong task rank")
-    results = verify_graph(
-        reference,
-        path,
-        seed_ids,
-        tokenizer,
-        args.validation_lengths,
-        token_task,
-        config.problem_type == "multi_label_classification",
-        args.dtype,
+    results = (
+        None
+        if args.export_only
+        else verify_graph(
+            reference,
+            path,
+            seed_ids,
+            tokenizer,
+            args.validation_lengths,
+            token_task,
+            config.problem_type == "multi_label_classification",
+            args.dtype,
+        )
     )
     model.config._name_or_path = ""
     model.config.save_pretrained(args.output)
@@ -304,14 +335,21 @@ def main():
         "portable_operators": portable_operators,
         "task": "token-classification" if token_task else "text-classification",
         "dtype": args.dtype,
+        "export_device": args.device,
+        "structural_export_only": args.export_only,
+        "numerical_qualification_pending": args.export_only,
         "head_dtype": "float32",
         "pooling_accumulation_dtype": "float32",
         "encoder_buffers": "native dtypes and values preserved",
-        "reference_dtype": "float32",
+        "reference_dtype": None if args.export_only else "float32",
         "output_validation": (
-            "all valid-token probabilities and exact BIO argmax; raw logits reported"
-            if token_task
-            else "all class probabilities; raw logits also checked for FP32"
+            None
+            if args.export_only
+            else (
+                "all valid-token probabilities and exact BIO argmax; raw logits reported"
+                if token_task
+                else "all class probabilities; raw logits also checked for FP32"
+            )
         ),
         "id2label": config.id2label,
         "max_position_embeddings": config.max_position_embeddings,
@@ -331,14 +369,23 @@ def main():
         },
         "external_data": external_files,
         "cpu_dynamic_parity": results,
-        "scope": "Numerical parity only; task quality and long-context GPU behavior require separate evaluations.",
+        "scope": (
+            "Structural export only; numerical and task qualification are pending."
+            if args.export_only
+            else "Numerical parity only; task quality and long-context GPU behavior require separate evaluations."
+        ),
     }
     (args.output / f"export-{args.dtype}.json").write_text(
         json.dumps(receipt, indent=2) + "\n"
     )
     print(
         json.dumps(
-            {"task": receipt["task"], "dtype": args.dtype, "parity_cases": len(results)}
+            {
+                "task": receipt["task"],
+                "dtype": args.dtype,
+                "structural_export_only": args.export_only,
+                "parity_cases": None if results is None else len(results),
+            }
         )
     )
 

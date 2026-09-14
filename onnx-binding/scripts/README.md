@@ -26,6 +26,11 @@ python onnx-binding/scripts/export_classifier.py \
   --model snapshots/classifier --output exports/classifier --dtype float16
 ```
 
+For a CUDA or ROCm host, export on the GPU with `--device cuda --export-only`.
+This mode checks the graph structure and records numerical qualification as
+pending. Validate the graph on the target runtime before publication. The default
+CPU workflow includes numerical checks; `--verify-only` runs those checks again.
+
 The files are `model.onnx` and `model_sdpa_fp16.onnx`, including their external
 tensor files. The FP16 variant quantizes the encoder while keeping the original
 FP32 head parameters, head computation, and mean-pool accumulation. Avoid
