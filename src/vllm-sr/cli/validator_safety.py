@@ -2,8 +2,8 @@
 
 from cli.config_contract import iter_routing_profiles
 from cli.config_schema import schema_document
-from cli.models import UserConfig
 from cli.model_runtime_defaults import effective_model_deployments
+from cli.models import UserConfig
 from cli.validation_error import ValidationError
 from cli.validator_classifier import _external_model_endpoint_errors, _external_models
 

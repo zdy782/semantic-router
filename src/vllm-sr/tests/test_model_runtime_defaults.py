@@ -3,7 +3,6 @@
 from copy import deepcopy
 
 import pytest
-
 from cli.config_schema import schema_document
 from cli.model_runtime_defaults import effective_model_deployments
 from cli.models import UserConfig

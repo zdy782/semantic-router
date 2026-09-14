@@ -7,8 +7,8 @@ from cli.config_contract import (
     iter_condition_leaves,
     iter_routing_profiles,
 )
-from cli.models import UserConfig
 from cli.model_runtime_defaults import effective_model_deployments
+from cli.models import UserConfig
 from cli.validation_error import ValidationError
 from cli.validator_model_runtime import project_classifier_rule
 
