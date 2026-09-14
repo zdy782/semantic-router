@@ -434,7 +434,7 @@ global:
         input:
           max_tokens: 32768
           overflow: reject
-        revision: 771e57c5da0aa3b068e21f9f321f7c68b1d1cac2
+        revision: a388e41cbbd5dc5f16b6389fa76d0b8b8a38a8bf
         custom_ops_profile: ck_flash_attention
       hazard-amd:
         artifact: models/Vela-1.0-Encoder-307M-Hazard

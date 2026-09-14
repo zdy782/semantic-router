@@ -137,7 +137,7 @@ VELA_RELEASE_REVISIONS = {
     "llm-semantic-router/Vela-1.0-Encoder-307M-PII": "6d3300c4bd7975f30a664503f6c725cf1fbbad48",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Modality": "5384b8997e3cbb79ca3a670e869577f4e4f4997e",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Feedback": "47434a7fd7c245c0c7c17564a000b3c56ccfec41",
-    "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker": "771e57c5da0aa3b068e21f9f321f7c68b1d1cac2",
+    "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker": "a388e41cbbd5dc5f16b6389fa76d0b8b8a38a8bf",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Hazard": "5dd25f2cc3c98f338e6a79b667662d60f936a28d",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Safety": "6e70e725a5f4d86da10f5be5e4dfd1da0358bb85",
     "llm-semantic-router/Vela-1.0-Encoder-307M-Guard": "d9e9969c15eaa5df808a8679f45af8a2ede8ba53",

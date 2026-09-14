@@ -213,7 +213,7 @@ var DefaultModelRegistry = []ModelSpec{
 	{
 		LocalPath:               "models/Vela-1.0-Encoder-307M-Reranker",
 		RepoID:                  "llm-semantic-router/Vela-1.0-Encoder-307M-Reranker",
-		Revision:                "771e57c5da0aa3b068e21f9f321f7c68b1d1cac2",
+		Revision:                "a388e41cbbd5dc5f16b6389fa76d0b8b8a38a8bf",
 		DownloadExcludePatterns: velaTrainingArtifactPatterns,
 		Aliases:                 []string{"Vela-1.0-Encoder-307M-Reranker"},
 		Purpose:                 PurposeReranking,
