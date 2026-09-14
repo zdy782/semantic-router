@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "b2b78862b8776c1249bc80ea4df48f417aac84ab"
+  source_commit: "91dd60a58fd0806b1b4d4404449e705f484d53de"
   source_file: "docs/tutorials/signal/learned/embedding.md"
   outdated: false
 ---
@@ -89,7 +89,25 @@ global:
             margin_threshold: 0.05
 ```
 
-`prototype_scoring` 把每条嵌入规则的候选库压缩成更小的代表性原型集，再从这些原型给规则打分，而不是永远依赖一份扁平候选列表。
+族级 `prototype_scoring` 控制每条规则的候选压缩与评分。规则也可在
+`candidates` 旁声明自己的 `prototype_scoring` 对象。省略时继承族级配置；
+声明时完整替换该对象，未填写的字段使用内置默认值。因此，空对象 `{}`
+使用内置默认值，不会继承族级覆盖值。
+
+如需保留所有不同的原始候选，包括多语言示例，在规则上设置：
+
+```yaml
+prototype_scoring:
+  enabled: false
+  best_weight: 0.75
+  top_m: 2
+```
+
+`enabled: false` 关闭聚类和原型数量上限，不关闭聚合。
+`max` 仍结合最高相似度与 top-M 支持分数；`mean` 仍对保留的候选库取平均。
+启用压缩时，`max_prototypes: 0` 使用默认上限 8。保留更多候选会增加本地评分工作量；
+候选嵌入本就在压缩前计算，请求嵌入调用次数不变。
+规则配置随配方导出或初始化一同保留，并同时适用于文本和图像查询。
 
 Router 会给每条嵌入规则打分。默认的 `top_k: 0` 保留所有达到阈值的规则，让独立条件继续参与投影与决策优先级判断。只有确实需要丢弃排名靠后的匹配时，才设置正数 `top_k`，例如上方排序示例中的 `1`。这限制的是发出的证据，不会减少嵌入推理工作量。
 
