@@ -3,7 +3,7 @@ sidebar_position: 5
 title: 多模型混合
 description: 虚拟模型如何把共享的独立模型池变成稳定、面向目标的 AI 服务。
 translation:
-  source_commit: "cf0b349428c381888a627a1f79e80012fc28efb7"
+  source_commit: "6e177d91a30a4336a105ff82310f0f5d3a85b8dd"
   source_file: "docs/overview/mom-model-family.md"
   outdated: false
 ---
@@ -100,7 +100,7 @@ MoM V1 提供五个内置配方。连接自己的后端，再选择适合应用�
 
 Balance 综合任务难度、重要建议和回答纠错信号。Speed 与 Cost 使用更轻量的路由信号。Accuracy 通常选择一个强模型；独立评审和工作流需要明确的执行意图。长输入或领域标签本身不会触发多模型执行。
 
-Vault 的每条路径都禁用客户端工具和 Router 内容存储。`guard` 会直接拒绝检测到的不安全或攻击请求。其他决策需要分配满足隐私要求的后端；配方无法保证后端的物理位置或提供方的数据保留行为。
+Vault 的每条路径都禁用客户端工具和 Router 内容存储。`guard` 会直接拦截检测到的提示攻击。Safety 和 Hazard 将内容风险交给 `sensitive` 的高质量私有模型池，让后端可以提供安全的支持、分析或必要的拒绝；PII 和保密信息也使用这个池。其他请求走 `private`。这些路径需要分配满足隐私要求的后端；配方无法保证后端的物理位置或提供方的数据保留行为。
 
 启动或恢复服务：
 
@@ -112,7 +112,7 @@ vllm-sr serve
 
 声明模型能力、输入输出限制，并为实际配置的推理强度提供对应质量指标。**Preview** 展示信号、决策和候选选择结果；上线前再发送真实请求，验证执行结果与延迟。
 
-策略版本 2.0 使用上表的决策名称。升级前先验证新分配，再发布；已发布的旧版本保持不变。完整要求和数据处理策略见 [MoM V1 Model Card](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/built-in/latest/mom-v1/README.md)。
+策略版本 3.0 保留上表的决策名称，并将内容风险交给敏感请求模型池。升级前先验证新分配，再发布；已发布的旧版本保持不变。完整要求和数据处理策略见 [MoM V1 Model Card](https://github.com/vllm-project/semantic-router/blob/main/config/recipes/built-in/latest/mom-v1/README.md)。
 
 ## 何时 MoM 不是合适的抽象
 
