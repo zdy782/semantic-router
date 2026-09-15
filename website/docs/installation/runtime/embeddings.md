@@ -98,6 +98,10 @@ global:
           full_context: true
 ```
 
+This setting applies to semantic embedding signals and local embedding-backed
+Complexity. Independent remote Complexity scorers retain their own input policy.
+Prompt compression still applies unless the signal is exempted.
+
 The deployment's `input.max_tokens` still limits the accepted input.
 Increasing that limit does not turn on `full_context`. Choose a budget that
 fits the artifact and your latency target; long-input capacity alone does
