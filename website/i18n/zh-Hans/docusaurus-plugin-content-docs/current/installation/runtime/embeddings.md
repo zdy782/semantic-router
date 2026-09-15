@@ -2,7 +2,7 @@
 title: 嵌入模型
 description: 使用 Vela 进行语义路由和检索，或连接远程嵌入服务。
 translation:
-  source_commit: "915ddf56e0335e2046c38aa17c4aec6233908039"
+  source_commit: "8506d548e0217bb14ef45aeba21875c0013e16ee"
   source_file: "docs/installation/runtime/embeddings.md"
   outdated: false
 ---
@@ -85,6 +85,8 @@ global:
         embedding_config:
           full_context: true
 ```
+
+此设置适用于语义 embedding 信号和使用 embedding 的本地 Complexity。独立的远程 Complexity 服务保留自己的输入策略。提示词压缩仍会生效，除非该信号被配置为豁免。
 
 Deployment 的 `input.max_tokens` 仍限制可接受的输入。增加该上限不会自动开启 `full_context`。选择适合模型和时延目标的预算；长输入容量本身不代表检索准确率。
 
