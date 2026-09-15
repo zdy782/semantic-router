@@ -192,7 +192,7 @@ func (c *Classifier) evaluateContrastiveJailbreakRule(rule config.JailbreakRule,
 	}
 	analysisResult := cjc.AnalyzeMessages(contentToAnalyze)
 	if analysisResult.FailedMessages > 0 {
-		c.recordJailbreakRuleError(rule, results, mu)
+		c.recordJailbreakRuleError(rule, results, mu, jailbreakEvaluationFailedCode)
 	}
 	threshold := rule.Threshold
 	if threshold <= 0 {
@@ -246,12 +246,12 @@ func (c *Classifier) recordJailbreakRuleMatch(rule config.JailbreakRule, jailbre
 	results.SignalConfidences["jailbreak:"+rule.Name] = float64(confidence)
 }
 
-func (c *Classifier) recordJailbreakRuleError(rule config.JailbreakRule, results *SignalResults, mu *sync.Mutex) {
+func (c *Classifier) recordJailbreakRuleError(rule config.JailbreakRule, results *SignalResults, mu *sync.Mutex, code string) {
 	mu.Lock()
 	if results.SignalErrors == nil {
 		results.SignalErrors = make(map[string]string)
 	}
-	results.SignalErrors[signalConfidenceKey(config.SignalTypeJailbreak, rule.Name)] = jailbreakEvaluationFailedCode
+	results.SignalErrors[signalConfidenceKey(config.SignalTypeJailbreak, rule.Name)] = code
 	mu.Unlock()
 }
 
@@ -270,7 +270,7 @@ func (c *Classifier) evaluateBERTJailbreakRule(rule config.JailbreakRule, conten
 		mu.Unlock()
 	}
 	if observed.unresolved {
-		c.recordJailbreakRuleError(rule, results, mu)
+		c.recordJailbreakRuleError(rule, results, mu, observed.errorCode)
 	}
 	if observed.matchedType != "" {
 		c.recordJailbreakRuleMatch(rule, observed.matchedType, observed.matchedScore, start, results, mu)
@@ -289,6 +289,7 @@ const (
 // findBestJailbreakMatch's scan.
 type jailbreakCandidate struct {
 	outcome       jailbreakCandidateOutcome
+	errorCode     string
 	jailbreakType string
 	riskScore     float32
 	riskAvailable bool
@@ -304,7 +305,7 @@ func (c *Classifier) evaluateCachedJailbreakResult(rule config.JailbreakRule, ca
 	}
 	if cached.err != nil {
 		logging.Errorf("[Signal Computation] Jailbreak rule %q: inference error: %v", rule.Name, cached.err)
-		return jailbreakCandidate{outcome: jailbreakCandidateUnknown}
+		return jailbreakCandidate{outcome: jailbreakCandidateUnknown, errorCode: boundedSignalErrorCode(cached.err, jailbreakEvaluationFailedCode)}
 	}
 	class, _ := deriveArgmax(cached.result.Probabilities)
 	jailbreakType, ok := c.JailbreakMapping.GetJailbreakTypeFromIndex(class)
@@ -317,7 +318,7 @@ func (c *Classifier) evaluateCachedJailbreakResult(rule config.JailbreakRule, ca
 		// transport error, so on_error: block must close here too rather than
 		// treat it as a clean result.
 		logging.Errorf("[Signal Computation] Jailbreak rule %q: unknown class index %d", rule.Name, class)
-		return jailbreakCandidate{outcome: jailbreakCandidateUnknown}
+		return jailbreakCandidate{outcome: jailbreakCandidateUnknown, errorCode: jailbreakEvaluationFailedCode}
 	}
 	aboveThreshold, riskScore := isJailbreakRiskAboveThreshold(c.JailbreakMapping, c.Config.PromptGuard.PositiveLabels, cached.result, rule.Threshold)
 	candidate := jailbreakCandidate{jailbreakType: jailbreakType, riskScore: riskScore, riskAvailable: true}
@@ -348,6 +349,7 @@ type jailbreakRuleObservation struct {
 	riskScore     float32
 	riskAvailable bool
 	unresolved    bool
+	errorCode     string
 }
 
 func (c *Classifier) findJailbreakRuleObservation(rule config.JailbreakRule, contents []string, cache map[string][]cachedJailbreakResult) jailbreakRuleObservation {
@@ -365,6 +367,7 @@ func (c *Classifier) findJailbreakRuleObservation(rule config.JailbreakRule, con
 			switch candidate.outcome {
 			case jailbreakCandidateUnknown:
 				observed.unresolved = true
+				observed.errorCode = mergeSignalErrorCode(observed.errorCode, candidate.errorCode)
 			case jailbreakCandidateMatched:
 				if candidate.riskScore > observed.matchedScore {
 					observed.matchedScore = candidate.riskScore
@@ -384,14 +387,17 @@ func (c *Classifier) findJailbreakRuleObservation(rule config.JailbreakRule, con
 func (c *Classifier) evaluateCategoricalJailbreakRule(rule config.JailbreakRule, contents []string, cache map[string][]cachedJailbreakResult, start time.Time, results *SignalResults, mu *sync.Mutex) {
 	var matched *tasks.LabelDecision
 	unresolved := false
+	errorCode := ""
 	for _, content := range contents {
 		for _, entry := range cache[content] {
 			if entry.err != nil || entry.decision == nil {
 				unresolved = true
+				errorCode = mergeSignalErrorCode(errorCode, boundedSignalErrorCode(entry.err, jailbreakEvaluationFailedCode))
 				continue
 			}
 			if _, ok := c.JailbreakMapping.GetIndexForJailbreakType(entry.decision.Label); !ok {
 				unresolved = true
+				errorCode = mergeSignalErrorCode(errorCode, jailbreakEvaluationFailedCode)
 				continue
 			}
 			if isPositiveJailbreakLabel(c.Config.PromptGuard.PositiveLabels, entry.decision.Label) {
@@ -400,7 +406,7 @@ func (c *Classifier) evaluateCategoricalJailbreakRule(rule config.JailbreakRule,
 		}
 	}
 	if unresolved {
-		c.recordJailbreakRuleError(rule, results, mu)
+		c.recordJailbreakRuleError(rule, results, mu, errorCode)
 	}
 	if matched == nil {
 		if unresolved && c.Config.PromptGuard.IsBlock() {
