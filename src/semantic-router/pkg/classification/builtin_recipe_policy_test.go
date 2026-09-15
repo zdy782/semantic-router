@@ -1,6 +1,7 @@
 package classification
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/decision"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/llmprotocol"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/selection"
 )
 
 func builtinPolicyClassifier(t *testing.T, name string) *Classifier {
@@ -41,7 +44,7 @@ func TestBuiltinBalanceIntentAndRecovery(t *testing.T) {
 		{"uncertain task keeps middle pool", SignalResults{}, "medium"},
 		{"positive simple evidence", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}}, "simple"},
 		{"hard task", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}}, "reasoning"},
-		{"reasoning opt out", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"deliberate", "no_analysis"}}, "medium"},
+		{"concise answer to a hard task", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"deliberate", "no_analysis"}}, "reasoning"},
 		{"quoted execution vocabulary", SignalResults{MatchedKeywordRules: []string{"deliberate", "verify"}, MatchedStructureRules: []string{"quoted_request"}}, "medium"},
 		{"topic is not difficulty", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}, MatchedDomainRules: []string{"health"}, MatchedFactCheckRules: []string{"needs_fact_check"}}, "simple"},
 		{"consequential advice combines evidence", SignalResults{MatchedComplexityRules: []string{"difficulty:easy"}, MatchedDomainRules: []string{"health"}, MatchedFactCheckRules: []string{"needs_fact_check"}, SignalValues: map[string]float64{"embedding:consequential": 0.6, "embedding:informational": 0.4}}, "reasoning"},
@@ -76,11 +79,73 @@ func TestBuiltinSpeedAndCostToolIntent(t *testing.T) {
 				{"tools disabled", SignalResults{MatchedConversationRules: []string{"has_tools", "tool_disabled"}, MatchedKeywordRules: []string{"tool_intent"}}, profile.fallback},
 				{"quoted tool action", SignalResults{MatchedConversationRules: []string{"has_tools"}, MatchedKeywordRules: []string{"tool_intent"}, MatchedStructureRules: []string{"quoted_request"}}, profile.fallback},
 				{"quoted correction is not answer recovery", SignalResults{MatchedConversationRules: []string{"has_answer"}, MatchedReaskRules: []string{"repeat"}, MatchedKeywordRules: []string{"correction"}, MatchedStructureRules: []string{"quoted_request"}}, profile.fallback},
-				{"continue actual tool loop", SignalResults{MatchedConversationRules: []string{"tool_loop"}, MatchedComplexityRules: []string{"difficulty:hard"}}, "tools"},
+				{"continue ordinary tool loop", SignalResults{MatchedConversationRules: []string{"tool_loop"}}, "tools"},
+				{"hard task in a tool loop", SignalResults{MatchedConversationRules: []string{"tool_loop"}, MatchedComplexityRules: []string{"difficulty:hard"}}, "reasoning"},
 				{"unknown difficulty preserves quality", builtinComplexityUnavailable(c, SignalResults{}), "reasoning"},
-				{"explicit no analysis overrides unknown difficulty", builtinComplexityUnavailable(c, SignalResults{MatchedKeywordRules: []string{"no_analysis"}}), profile.fallback},
+				{"concise answer preserves unknown policy", builtinComplexityUnavailable(c, SignalResults{MatchedKeywordRules: []string{"no_analysis"}}), "reasoning"},
 			} {
 				t.Run(tt.name, func(t *testing.T) { assertBuiltinPolicy(t, c, &tt.in, tt.want) })
+			}
+		})
+	}
+}
+
+func TestBuiltinHardTasksPreservePresentationAndToolBoundaries(t *testing.T) {
+	for _, profile := range []struct{ name, fallback string }{
+		{"balance", "medium"}, {"speed", "fast"}, {"cost", "economy"}, {"accuracy", "simple"},
+	} {
+		t.Run(profile.name, func(t *testing.T) {
+			c := builtinPolicyClassifier(t, profile.name)
+			for _, test := range []struct {
+				name string
+				in   SignalResults
+				want string
+			}{
+				{"concise hard task", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"no_analysis"}}, "reasoning"},
+				{"hard task with named tool", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"no_analysis"}, MatchedConversationRules: []string{"has_tools", "tool_required"}}, "reasoning"},
+				{"quoted instruction alone", SignalResults{MatchedKeywordRules: []string{"deliberate", "verify"}, MatchedStructureRules: []string{"quoted_request"}}, profile.fallback},
+				{"hard analysis of quoted material", SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"deliberate", "verify"}, MatchedStructureRules: []string{"quoted_request"}}, "reasoning"},
+				{"medium retains ordinary pool", SignalResults{MatchedComplexityRules: []string{"difficulty:medium"}, MatchedKeywordRules: []string{"no_analysis"}}, profile.fallback},
+			} {
+				t.Run(test.name, func(t *testing.T) { assertBuiltinPolicy(t, c, &test.in, test.want) })
+			}
+		})
+	}
+}
+
+// Decision priority cannot substitute for the named tool's capability demand.
+// Models here are synthetic metadata, not claims about a deployed checkpoint.
+func TestBuiltinHardNamedToolRequiresCapableCandidate(t *testing.T) {
+	for _, recipe := range []string{"balance", "speed", "cost", "accuracy"} {
+		t.Run(recipe, func(t *testing.T) {
+			c := builtinPolicyClassifier(t, recipe)
+			in := &SignalResults{MatchedComplexityRules: []string{"difficulty:hard"}, MatchedKeywordRules: []string{"no_analysis"}, MatchedConversationRules: []string{"has_tools", "tool_required"}}
+			result, err := c.EvaluateDecisionWithEngine(c.applyProjections(in))
+			if err != nil || result == nil || result.Decision == nil || result.Decision.Name != "reasoning" {
+				t.Fatalf("hard named-tool decision=%+v err=%v", result, err)
+			}
+			request := &llmprotocol.Request{
+				Tools:      []llmprotocol.Tool{{Name: "read_state", InputSchema: json.RawMessage(`{"type":"object","properties":{}}`)}},
+				ToolChoice: llmprotocol.ToolChoice{Mode: llmprotocol.ToolChoiceNamed, Name: "read_state"},
+			}
+			before, _ := json.Marshal(request)
+			demand, err := selection.EffectiveCandidateDemand(request, result.Decision)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, _ := json.Marshal(request)
+			if string(before) != string(after) || !demand.ModelCapabilities.Supports(llmprotocol.CapabilityTools) {
+				t.Fatal("reasoning changed the ingress request or lost its tools requirement")
+			}
+			for _, capable := range []bool{false, true} {
+				model := config.ModelParams{Capabilities: []string{"chat", "reasoning"}, ContextWindowSize: 32768, MaxOutputTokens: 8192}
+				if capable {
+					model.Capabilities = append(model.Capabilities, "tools")
+				}
+				err := selection.ValidateCandidateRequirements(c.Config.CandidateRequirements, "synthetic", model, demand)
+				if capable && err != nil || !capable && !errors.Is(err, selection.ErrNoEligibleCandidates) {
+					t.Fatalf("tools capability=%v admission error=%v", capable, err)
+				}
 			}
 		})
 	}

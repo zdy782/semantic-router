@@ -29,6 +29,11 @@ private deployment. Each recipe can use a different set of connected models.
 
 ## Routing behavior
 
+A concise answer can still require hard reasoning. Balance, Speed, Cost and
+Accuracy retain learned hard-task routing when the requested answer is brief.
+Hard tasks with client tools use the reasoning pool, with tool capabilities
+still enforced when selecting a model.
+
 **Balance** uses an efficient pool for clearly simple work, a stronger reasoning
 pool for hard tasks or answer recovery, and a balanced pool in between. Domain
 and FactCheck signals help identify consequential advice. Direct personal action

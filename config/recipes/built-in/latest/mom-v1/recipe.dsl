@@ -184,7 +184,7 @@ RECIPE balance (description = "Everyday routing with measured tradeoffs between 
 
   ROUTE reasoning (description = "Use a stronger quality pool for hard tasks, factual stakes, or answer recovery.", on_unknown = "no_match") {
     PRIORITY 300
-    WHEN (complexity("difficulty:hard") AND NOT keyword("no_analysis") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR projection("actionable_care") AND (fact_check("needs_fact_check") OR domain("health") OR domain("law") OR domain("business") OR domain("economics")) OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR keyword("care_request") AND (domain("health") OR domain("law") OR domain("business") OR domain("economics")) AND NOT structure("quoted_request"))
+    WHEN (complexity("difficulty:hard") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR projection("actionable_care") AND (fact_check("needs_fact_check") OR domain("health") OR domain("law") OR domain("business") OR domain("economics")) OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR keyword("care_request") AND (domain("health") OR domain("law") OR domain("business") OR domain("economics")) AND NOT structure("quoted_request"))
     ALGORITHM multi_factor {
       latency_metric: "tpot"
       latency_percentile: 95
@@ -314,7 +314,7 @@ RECIPE speed (description = "Responsive single-model answers, with separate prio
   # =============================================================================
 
   ROUTE tools (description = "Prefer responsive tool-capable models for active or explicitly requested tool use.", on_unknown = "no_match") {
-    PRIORITY 300
+    PRIORITY 200
     WHEN (conversation("tool_loop") OR conversation("has_tools") AND NOT conversation("tool_disabled") AND (conversation("tool_required") OR keyword("tool_intent") AND NOT structure("quoted_request")))
     ALGORITHM multi_factor {
       latency_metric: "ttft"
@@ -330,8 +330,8 @@ RECIPE speed (description = "Responsive single-model answers, with separate prio
   }
 
   ROUTE reasoning (description = "Preserve reasoning quality while preferring fast token generation.", on_unknown = "match") {
-    PRIORITY 200
-    WHEN (complexity("difficulty:hard") AND NOT keyword("no_analysis") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request"))
+    PRIORITY 300
+    WHEN (complexity("difficulty:hard") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request"))
     ALGORITHM multi_factor {
       latency_metric: "tpot"
       latency_percentile: 95
@@ -499,7 +499,7 @@ RECIPE cost (description = "Lower serving cost with bounded quality tradeoffs an
   # =============================================================================
 
   ROUTE tools (description = "Choose a cost-efficient tool model without changing the client tool protocol.", on_unknown = "no_match") {
-    PRIORITY 300
+    PRIORITY 200
     WHEN (conversation("tool_loop") OR conversation("has_tools") AND NOT conversation("tool_disabled") AND (conversation("tool_required") OR keyword("tool_intent") AND NOT structure("quoted_request")))
     ALGORITHM multi_factor {
       latency_metric: "ttft"
@@ -515,8 +515,8 @@ RECIPE cost (description = "Lower serving cost with bounded quality tradeoffs an
   }
 
   ROUTE reasoning (description = "Spend more only for hard tasks or a repeated request for correction.", on_unknown = "match") {
-    PRIORITY 200
-    WHEN (complexity("difficulty:hard") AND NOT keyword("no_analysis") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request"))
+    PRIORITY 300
+    WHEN (complexity("difficulty:hard") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request"))
     ALGORITHM multi_factor {
       latency_metric: "tpot"
       latency_percentile: 95
@@ -853,7 +853,7 @@ RECIPE accuracy (description = "Quality-first answers with deliberate, bounded u
 
   ROUTE reasoning (description = "Use the strongest reasoning evidence for hard, factual, corrective, or ongoing tool work.", on_unknown = "match") {
     PRIORITY 200
-    WHEN (complexity("difficulty:hard") AND NOT keyword("no_analysis") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR projection("actionable_care") AND (fact_check("needs_fact_check") OR domain("health") OR domain("law") OR domain("business") OR domain("economics")) OR conversation("tool_loop") OR conversation("tool_required") OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR keyword("care_request") AND (domain("health") OR domain("law") OR domain("business") OR domain("economics")) AND NOT structure("quoted_request"))
+    WHEN (complexity("difficulty:hard") OR (keyword("deliberate") OR keyword("verify")) AND NOT keyword("no_analysis") AND NOT structure("quoted_request") OR conversation("has_answer") AND projection("retry") AND NOT structure("quoted_request") OR projection("actionable_care") AND (fact_check("needs_fact_check") OR domain("health") OR domain("law") OR domain("business") OR domain("economics")) OR conversation("tool_loop") OR conversation("tool_required") OR keyword("answer_error") AND keyword("answer_revision") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR conversation("has_answer") AND keyword("answer_repair") AND NOT keyword("no_revision") AND NOT structure("quoted_request") OR keyword("care_request") AND (domain("health") OR domain("law") OR domain("business") OR domain("economics")) AND NOT structure("quoted_request"))
     ALGORITHM multi_factor {
       latency_metric: "tpot"
       latency_percentile: 95

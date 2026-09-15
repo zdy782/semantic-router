@@ -435,14 +435,8 @@ recipes:
       rules:
         operator: OR
         conditions:
-        - operator: AND
-          conditions:
-          - type: complexity
-            name: difficulty:hard
-          - operator: NOT
-            conditions:
-            - type: keyword
-              name: no_analysis
+        - type: complexity
+          name: difficulty:hard
         - operator: AND
           conditions:
           - operator: OR
@@ -884,7 +878,7 @@ recipes:
     - name: tools
       description: Prefer responsive tool-capable models for active or explicitly
         requested tool use.
-      priority: 300
+      priority: 200
       rules:
         operator: AND
         conditions:
@@ -941,18 +935,12 @@ recipes:
           default_max_tokens: 4096
     - name: reasoning
       description: Preserve reasoning quality while preferring fast token generation.
-      priority: 200
+      priority: 300
       rules:
         operator: OR
         conditions:
-        - operator: AND
-          conditions:
-          - type: complexity
-            name: difficulty:hard
-          - operator: NOT
-            conditions:
-            - type: keyword
-              name: no_analysis
+        - type: complexity
+          name: difficulty:hard
         - operator: AND
           conditions:
           - operator: OR
@@ -1349,7 +1337,7 @@ recipes:
     - name: tools
       description: Choose a cost-efficient tool model without changing the client
         tool protocol.
-      priority: 300
+      priority: 200
       rules:
         operator: AND
         conditions:
@@ -1406,18 +1394,12 @@ recipes:
           default_max_tokens: 4096
     - name: reasoning
       description: Spend more only for hard tasks or a repeated request for correction.
-      priority: 200
+      priority: 300
       rules:
         operator: OR
         conditions:
-        - operator: AND
-          conditions:
-          - type: complexity
-            name: difficulty:hard
-          - operator: NOT
-            conditions:
-            - type: keyword
-              name: no_analysis
+        - type: complexity
+          name: difficulty:hard
         - operator: AND
           conditions:
           - operator: OR
@@ -2392,14 +2374,8 @@ recipes:
       rules:
         operator: OR
         conditions:
-        - operator: AND
-          conditions:
-          - type: complexity
-            name: difficulty:hard
-          - operator: NOT
-            conditions:
-            - type: keyword
-              name: no_analysis
+        - type: complexity
+          name: difficulty:hard
         - operator: AND
           conditions:
           - operator: OR
