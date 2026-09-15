@@ -33,6 +33,7 @@ export interface ReplaySessionPolicy {
   idle_for_seconds?: number
   idle_expired?: boolean
   missing_signals?: string[]
+  candidate_models?: string[]
   base_scores?: Record<string, number>
   final_scores?: Record<string, number>
   candidate_traces?: Record<string, ReplayCandidateTrace>
@@ -74,6 +75,7 @@ export interface ReplayRouteDiagnostics {
 }
 
 export interface InsightsTrajectoryRoute {
+  conversation_id?: string
   record_id: string
   timestamp: string
   turn_index: number

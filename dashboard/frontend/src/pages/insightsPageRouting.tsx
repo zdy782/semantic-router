@@ -37,6 +37,7 @@ function diagnosticTable(headers: string[], rows: Array<{ key: string; cells: Re
 function protectionCandidates(policy: ReplaySessionPolicy): ViewSection[] {
   const names = [
     ...new Set([
+      ...(policy.candidate_models || []),
       ...Object.keys(policy.base_scores || {}),
       ...Object.keys(policy.final_scores || {}),
       ...Object.keys(policy.candidate_traces || {}),
@@ -97,6 +98,7 @@ export function buildRoutingExplanationSections(record: InsightsRecord): ViewSec
       title: 'Session Routing',
       fields: [
         { label: 'Session', value: record.session_id || 'Not recorded' },
+        { label: 'Conversation', value: record.conversation_id || 'Not recorded' },
         { label: 'Turn', value: record.turn_index + 1 },
         {
           label: 'Previous model',
@@ -105,6 +107,7 @@ export function buildRoutingExplanationSections(record: InsightsRecord): ViewSec
         { label: 'Actual selected model', value: record.selected_model || 'No backend selected' },
         { label: 'Protection mode', value: policy?.mode || 'Not applied' },
         { label: 'Protection scope', value: policy?.scope || 'Not recorded' },
+        { label: 'Eligible models', value: policy?.candidate_models?.join(', ') || 'Not recorded' },
         {
           label: 'Session identity header',
           value: policy?.identity?.headers?.session || 'Not recorded',

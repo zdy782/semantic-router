@@ -24,12 +24,13 @@ type trajectoryToolCall struct {
 }
 
 type trajectoryMessage struct {
-	Role       string               `json:"role"`
-	Content    string               `json:"content,omitempty"`
-	ToolCalls  []trajectoryToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string               `json:"tool_call_id,omitempty"`
-	ToolName   string               `json:"tool_name,omitempty"`
-	TurnIndex  int                  `json:"turn_index"`
+	ConversationID string               `json:"conversation_id,omitempty"`
+	Role           string               `json:"role"`
+	Content        string               `json:"content,omitempty"`
+	ToolCalls      []trajectoryToolCall `json:"tool_calls,omitempty"`
+	ToolCallID     string               `json:"tool_call_id,omitempty"`
+	ToolName       string               `json:"tool_name,omitempty"`
+	TurnIndex      int                  `json:"turn_index"`
 }
 
 type routerReplayTrajectoryResponse struct {
@@ -110,28 +111,35 @@ func reverseRoutingRecords(records []routerreplay.RoutingRecord) {
 }
 
 type trajectoryTurn struct {
-	Index int
-	Steps []routerreplay.ToolTraceStep
+	ConversationID string
+	Index          int
+	Steps          []routerreplay.ToolTraceStep
 }
 
 // buildTrajectoryTurns collapses the cumulative HTTP requests made by an agent
-// loop into one complete trace per user turn. Later tool-loop requests include
-// the prior call and its result, so the richest snapshot is authoritative.
+// loop into one complete trace per conversation and user turn. Later tool-loop
+// requests include prior calls and results, so the richest snapshot is authoritative.
 func buildTrajectoryTurns(records []routerreplay.RoutingRecord) []trajectoryTurn {
 	turns := make([]trajectoryTurn, 0)
-	turnByIndex := make(map[int]int)
+	type turnKey struct {
+		conversationID string
+		index          int
+	}
+	turnByIndex := make(map[turnKey]int)
 	for _, record := range records {
 		steps := trajectoryStepsForRecord(record)
 		if len(steps) == 0 {
 			continue
 		}
 
-		turnPosition, exists := turnByIndex[record.TurnIndex]
+		key := turnKey{conversationID: record.ConversationID, index: record.TurnIndex}
+		turnPosition, exists := turnByIndex[key]
 		if !exists {
-			turnByIndex[record.TurnIndex] = len(turns)
+			turnByIndex[key] = len(turns)
 			turns = append(turns, trajectoryTurn{
-				Index: record.TurnIndex,
-				Steps: append([]routerreplay.ToolTraceStep(nil), steps...),
+				ConversationID: record.ConversationID,
+				Index:          record.TurnIndex,
+				Steps:          append([]routerreplay.ToolTraceStep(nil), steps...),
 			})
 			continue
 		}
@@ -165,15 +173,17 @@ func buildTrajectoryMessages(turns []trajectoryTurn) []trajectoryMessage {
 	messages := make([]trajectoryMessage, 0)
 	var pendingToolCalls []trajectoryToolCall
 	pendingTurnIndex := 0
+	pendingConversationID := ""
 
 	flushToolCalls := func() {
 		if len(pendingToolCalls) == 0 {
 			return
 		}
 		messages = append(messages, trajectoryMessage{
-			Role:      "assistant",
-			ToolCalls: pendingToolCalls,
-			TurnIndex: pendingTurnIndex,
+			Role:           "assistant",
+			ToolCalls:      pendingToolCalls,
+			TurnIndex:      pendingTurnIndex,
+			ConversationID: pendingConversationID,
 		})
 		pendingToolCalls = nil
 	}
@@ -181,10 +191,11 @@ func buildTrajectoryMessages(turns []trajectoryTurn) []trajectoryMessage {
 	for _, turn := range turns {
 		for _, step := range turn.Steps {
 			if step.Type == replayToolStepAssistantToolCall {
-				if len(pendingToolCalls) > 0 && pendingTurnIndex != turn.Index {
+				if len(pendingToolCalls) > 0 && (pendingTurnIndex != turn.Index || pendingConversationID != turn.ConversationID) {
 					flushToolCalls()
 				}
 				pendingTurnIndex = turn.Index
+				pendingConversationID = turn.ConversationID
 				pendingToolCalls = append(pendingToolCalls, trajectoryToolCall{
 					ID:   step.ToolCallID,
 					Type: "function",
@@ -197,6 +208,7 @@ func buildTrajectoryMessages(turns []trajectoryTurn) []trajectoryMessage {
 			}
 			flushToolCalls()
 			if msg := trajectoryMessageFromStep(step, turn.Index); msg != nil {
+				msg.ConversationID = turn.ConversationID
 				messages = append(messages, *msg)
 			}
 		}

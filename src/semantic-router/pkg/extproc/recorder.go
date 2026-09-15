@@ -113,8 +113,30 @@ func (r *OpenAIRouter) startRouterReplay(
 
 	configureReplayRecorder(recorder, ctx.RouterReplayPluginConfig)
 	record := buildReplayRoutingRecord(ctx, originalModel, selectedModel, decisionName)
+	r.populateReplayIdentity(&record, ctx)
 	if !persistReplayRecord(ctx, recorder, record) {
 		return
+	}
+}
+
+// populateReplayIdentity records the same explicit identity used by protection,
+// including custom header names, without enabling protection or changing request
+// state. Optional Responses lineage remains the fallback for older clients.
+func (r *OpenAIRouter) populateReplayIdentity(record *routerreplay.RoutingRecord, ctx *RequestContext) {
+	if r == nil || ctx == nil || record == nil {
+		return
+	}
+	cfg := config.RouterLearningProtectionConfig{}
+	if r.Config != nil {
+		cfg = r.Config.RouterLearning.Protection
+	}
+	identity, ok := r.protectionIdentity(ctx, cfg)
+	if !ok {
+		return
+	}
+	record.SessionID = identity.sessionID
+	if identity.conversationID != "" {
+		record.ConversationID = identity.conversationID
 	}
 }
 

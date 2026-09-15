@@ -9,6 +9,7 @@ import (
 // Keep every HTTP routing result, including intermediate tool hops. Conversation
 // snapshots may collapse within a turn; route decisions must not disappear with them.
 type trajectoryRoute struct {
+	ConversationID       string    `json:"conversation_id,omitempty"`
 	RecordID             string    `json:"record_id"`
 	Timestamp            time.Time `json:"timestamp"`
 	TurnIndex            int       `json:"turn_index"`
@@ -40,7 +41,8 @@ func buildTrajectoryRoutes(records []routerreplay.RoutingRecord) []trajectoryRou
 	for _, record := range records {
 		route := trajectoryRoute{
 			RecordID: record.ID, Timestamp: record.Timestamp, TurnIndex: record.TurnIndex,
-			Decision: record.Decision, SelectedModel: record.SelectedModel,
+			ConversationID: record.ConversationID,
+			Decision:       record.Decision, SelectedModel: record.SelectedModel,
 			SelectionMethod: record.SelectionMethod, LifecycleState: record.LifecycleState,
 			ResponseStatus: record.ResponseStatus, DurationMS: record.DurationMS,
 		}

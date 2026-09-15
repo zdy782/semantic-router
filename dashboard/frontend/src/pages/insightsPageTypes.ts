@@ -89,6 +89,7 @@ export interface ProjectionTrace {
 }
 
 export interface InsightsRecord {
+  conversation_id?: string
   id: string
   timestamp: string
   request_id?: string
@@ -183,6 +184,7 @@ export interface InsightsTrajectoryToolCall {
 }
 
 export interface InsightsTrajectoryMessage {
+  conversation_id?: string
   role: 'user' | 'assistant' | 'tool'
   content?: string
   tool_calls?: InsightsTrajectoryToolCall[]

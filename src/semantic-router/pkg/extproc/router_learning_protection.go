@@ -485,6 +485,17 @@ func sessionScopeProtectedResult(
 	}, true
 }
 
+func protectionCandidateModels(learningCtx *selection.SelectionContext) []string {
+	if learningCtx == nil {
+		return nil
+	}
+	models := make([]string, len(learningCtx.CandidateModels))
+	for index, candidate := range learningCtx.CandidateModels {
+		models[index] = candidate.Model
+	}
+	return models
+}
+
 func sessionScopeProtectionTrace(
 	cfg config.RouterLearningProtectionConfig,
 	baseResult *selection.SelectionResult,
@@ -523,6 +534,7 @@ func sessionScopeProtectionTrace(
 		CacheWarmth:                 session.CacheWarmth,
 		CacheWarmthOK:               session.CacheWarmthOK,
 		SwitchMargin:                learningSwitchMargin(cfg),
+		CandidateModels:             protectionCandidateModels(learningCtx),
 		BaseScores:                  cloneSelectionScores(baseResult.AllScores),
 		FinalScores:                 cloneSelectionScores(baseResult.AllScores),
 		CandidateTraces:             map[string]selection.SessionCandidateTrace{},
@@ -578,6 +590,7 @@ func rescueProtectionTrace(
 		SelectedModel:     proposal,
 		DecisionReason:    "rescue_underpowered_model",
 		SwitchMargin:      learningSwitchMargin(cfg),
+		CandidateModels:   protectionCandidateModels(learningCtx),
 		BaseScores:        baseScores,
 		FinalScores:       finalScores,
 		CandidateTraces: map[string]selection.SessionCandidateTrace{
