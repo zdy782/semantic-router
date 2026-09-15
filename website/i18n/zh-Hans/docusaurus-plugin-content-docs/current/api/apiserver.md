@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "bce357c513f391824e8320267d03977794c20f76"
+  source_commit: "e86e1ac69ece8f9921cddbbfa12a4c2d8f50b66b"
   source_file: "docs/api/apiserver.md"
   outdated: false
 ---
@@ -92,6 +92,8 @@ curl -sS http://localhost:8080/api/v1/diagnostics/classify/intent \
 `selection_status: not_required` 和 `selection_method: fast_response`，不包含
 `selected_model`。这种即时响应不需要模型分配或候选模型的能力、上下文准入检查。
 面向客户端的响应模型标识不代表选择或调用了生成后端。
+
+当输入超过配置的推理预算时，Guard 和 PII 会在 `signal_errors` 中报告 `input_limit`。重试前请检查实际生效的模型和部署限制。其他推理失败保留对应的有限错误码；路由结果由配置的未知信号策略决定。
 
 ## 检查模型与指标 {#inspect-models-and-metrics}
 

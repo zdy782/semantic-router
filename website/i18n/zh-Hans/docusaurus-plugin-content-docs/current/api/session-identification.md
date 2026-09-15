@@ -1,6 +1,6 @@
 ---
 translation:
-  source_commit: "7c874be29871f6d00b36b2e21b3e549e846b98c5"
+  source_commit: "e86e1ac69ece8f9921cddbbfa12a4c2d8f50b66b"
   source_file: "docs/api/session-identification.md"
   outdated: false
 ---
@@ -18,6 +18,8 @@ x-session-id: tenant-42:conversation-7
 ```
 
 对于路由学习保护，`x-conversation-id` 可以标识该会话内更窄的对话。保护策略在 `scope: conversation` 时使用对话身份；`scope: session` 时使用更宽的会话身份。
+
+Replay 在具有显式身份时使用相同配置的会话和对话请求头名称。记录对话 ID 不会改变保护范围，也不会在 session 范围下重置模型归属。
 
 Responses API 将显式对话成员关系与响应链路分开。请求中的 `conversation` 值标识成员关系；`previous_response_id` 读取保留历史并提供内部链路跟踪键，不会加入或创建对话。两者都不存在时，Router 生成内部跟踪身份。这些遥测身份不能替代路由学习保护所要求的配置身份请求头。
 
