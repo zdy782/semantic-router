@@ -32,6 +32,11 @@ quoted instructions, and multi-turn conversations. Add negative examples: a
 medical definition need not receive the same route as personalized treatment
 advice, and a quoted attack should not automatically be treated as an instruction.
 
+Pair some requests with identical background information but different tasks.
+Vary concise and detailed answer styles separately. This tests whether effort
+signals recognize the required work instead of the topic or response length.
+Treat related paraphrases and tool variants as one family when reporting coverage.
+
 ## Give each part a clear job
 
 | Part | Use it to |
@@ -55,6 +60,10 @@ for checking rather than verifying a claim.
 
 Review how unknown signals affect every decision, especially conditions using
 `NOT`. A failed classifier should not turn into evidence for a cheaper route.
+Compare easy and hard signal scores before changing thresholds. Strong overlap
+calls for better task examples or a better model; sending every uncertain request
+to reasoning increases usage without establishing better discrimination.
+
 Adding a keyword condition also does not guarantee less inference: used signal
 families can run concurrently before decisions are evaluated. Measure the actual
 request cost.
@@ -142,6 +151,10 @@ completion budget that fits the actual input and leaves room for the final
 answer. When the request omits a limit, a configured
 `request_params.default_max_tokens` supplies the decision default; otherwise
 the backend default applies.
+
+Assign at least two eligible, reachable models when comparing selection policies.
+With one candidate, the test verifies delivery but cannot measure a choice between
+models.
 
 Measure cold startup separately from warm median and p95 latency. Compare route
 quality, answer quality, classifier work, backend calls, token use, and cost.

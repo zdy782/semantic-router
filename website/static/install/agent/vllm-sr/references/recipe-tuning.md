@@ -124,6 +124,17 @@ multi-model workflows explicit rather than enabling a global hold indiscriminate
 
 ## Run a comparable experiment
 
+Pair requests that share the same background but require different work. Vary
+answer style separately: asking for a brief answer does not make a task easier.
+Compare easy and hard score distributions before adjusting thresholds. When
+they overlap heavily, improve the task examples or model instead of treating
+more reasoning calls as evidence of better discrimination. Count related
+paraphrases and tool variants as views of the same case family.
+
+To compare model selection, assign at least two eligible, reachable models. A
+single candidate can verify delivery but cannot demonstrate a tradeoff between
+models. Keep route correctness, answer quality, and measured resource use separate.
+
 1. Freeze the baseline config, assignments, runtime and model revisions. Save
    original probe identities. Add new counterexamples in a separately identified
    packet before seeing candidate outputs; keep routing controls out of training.

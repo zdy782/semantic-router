@@ -18,6 +18,10 @@ conversation inside that session. A protection policy with
 `scope: conversation` uses the conversation identity; `scope: session` uses
 the broader session identity.
 
+Replay uses the same configured session and conversation header names when that
+explicit identity is available. Recording a conversation ID does not change the
+protection scope or reset model ownership under session scope.
+
 The Responses API keeps explicit conversation membership separate from response
 lineage. A request's `conversation` value identifies that membership;
 `previous_response_id` retrieves retained history and provides an internal

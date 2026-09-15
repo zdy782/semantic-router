@@ -105,6 +105,11 @@ When the matched decision uses `fast_response`, Preview reports
 capability/context admission. The client-facing response model identifier does
 not imply that a generation backend was selected or called.
 
+Guard and PII report `input_limit` in `signal_errors` when input exceeds their
+configured inference budget. Check the effective model and deployment limits
+before retrying. Other inference failures retain their bounded signal error
+codes; the configured unknown-signal policy determines the route outcome.
+
 ## Inspect models and metrics
 
 | Method | Path | Use |

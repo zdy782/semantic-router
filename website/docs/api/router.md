@@ -174,10 +174,17 @@ returns `400`. An explicit empty `recipe=` selects older, unscoped records.
 The response includes each request's route, latency, and lifecycle, including
 multiple requests at the same turn index.
 
+Records, trajectory routes, and messages include `conversation_id` when an
+explicit conversation identity is available. Messages are grouped by conversation
+and turn, so separate conversations in one session can each start at turn zero.
+Insights shows their boundaries and complete IDs.
+
 Dashboard Insights shows these routes alongside recorded signals, projections,
 candidate scores, and session-switch reasons. In `observe` mode, candidate and
 hold explanations describe what protection would have done; the selected model
-and route history still describe actual dispatch. Missing identity or evidence
+and route history still describe actual dispatch. Protection's `candidate_models`
+lists eligible models independently of their scores; an unrecorded score appears
+as `—`, while a recorded zero remains zero. Missing identity or evidence
 is displayed explicitly. A recipe's `data_policy.replay: false` prevents its
 requests from appearing in Replay, including rejected requests.
 
