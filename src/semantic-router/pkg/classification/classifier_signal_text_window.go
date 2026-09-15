@@ -244,6 +244,10 @@ func (c *Classifier) hasLongContextClassifier(signalType string) bool {
 	switch signalType {
 	case config.SignalTypeEmbedding:
 		return c.Config.EmbeddingConfig.FullContext
+	case config.SignalTypeComplexity:
+		// Local Complexity uses the semantic embedding provider's input policy.
+		// An independent remote scorer retains its existing bounded input.
+		return c.Config.ComplexityModel.Backend == nil && c.Config.EmbeddingConfig.FullContext
 	case config.SignalTypeDomain:
 		variant, _ := c.Config.CategoryModel.EffectiveVariant()
 		return c.Config.CategoryModel.Backend == nil && variant == config.CategoryVariantMmBERT32K && c.Config.CategoryModel.MaxSequenceLength > 512
