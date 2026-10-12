@@ -101,27 +101,3 @@ func (h *OpenClawHandler) loadSkills() ([]SkillTemplate, error) {
 	}
 	return []SkillTemplate{}, nil
 }
-
-func (h *OpenClawHandler) fetchSkillContent(skillID, baseImage string) string {
-	containerPaths := []string{
-		"/app/skills/" + skillID + "/SKILL.md",
-		"/app/extensions/" + skillID + "/SKILL.md",
-	}
-	for _, p := range containerPaths {
-		out, err := h.containerOutput("run", "--rm", baseImage, "cat", p)
-		if err == nil && len(out) > 0 {
-			return string(out)
-		}
-	}
-	skills, err := h.loadSkills()
-	if err != nil {
-		return ""
-	}
-	for _, s := range skills {
-		if s.ID == skillID {
-			return fmt.Sprintf("---\nname: %s\ndescription: %q\nuser-invocable: true\n---\n\n# %s\n\n%s\n",
-				s.ID, s.Description, s.Name, s.Description)
-		}
-	}
-	return ""
-}

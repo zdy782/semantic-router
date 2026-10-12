@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,6 +49,17 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 			}
 		}
 
+		// Resolve the image first so the administrator image policy can reject
+		// disallowed provenance before any runtime work, workspace mutation, or
+		// async job starts.
+		req.Container.BaseImage = h.resolveBaseImage(req.Container.BaseImage)
+		if policy := loadOpenClawImagePolicy(); policy.configured() {
+			if err := validateOpenClawImage(req.Container.BaseImage, policy); err != nil {
+				writeJSONError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+
 		runtimeBin, runtimeErr := detectContainerRuntime()
 		if runtimeErr != nil {
 			writeJSONError(w, runtimeErr.Error(), http.StatusServiceUnavailable)
@@ -66,7 +78,6 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 				req.Container.AuthToken = generateToken(24)
 			}
 		}
-		req.Container.BaseImage = h.resolveBaseImage(req.Container.BaseImage)
 		if preferredNetwork := strings.TrimSpace(os.Getenv("OPENCLAW_DEFAULT_NETWORK_MODE")); preferredNetwork != "" {
 			// In vllm-sr serve deployment, dashboard often runs in a container while OpenClaw
 			// is launched via host docker.sock. Using container:<dashboard-container> keeps
@@ -183,28 +194,33 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		// In bridge mode with explicit port: no host-level conflict check needed
 		// because each container has its own network namespace
 
-		cDir := h.containerDataDir(req.Container.ContainerName)
-		wsDir := filepath.Join(cDir, "workspace")
-		for _, sub := range []string{
-			"workspace",
-			"workspace/memory",
-			"workspace/skills",
-		} {
-			err = os.MkdirAll(filepath.Join(cDir, sub), 0o755)
-			if err != nil {
-				h.mu.Unlock()
-				writeJSONError(w, fmt.Sprintf("Failed to create %s: %v", sub, err), http.StatusInternalServerError)
-				return
-			}
+		cDir, wsDir, err := validateProvisionPaths(h.dataDir, req.Container.ContainerName)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Invalid container workspace: %v", err), http.StatusBadRequest)
+			return
+		}
+		// Create the container data dir itself; it was proven to stay inside
+		// dataDir (or to not exist yet) by validateProvisionPaths.
+		if err = os.MkdirAll(cDir, 0o755); err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to create container data dir: %v", err), http.StatusInternalServerError)
+			return
+		}
+		wsEval, skillsRoot, err := prepareProvisionWorkspace(wsDir)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Invalid container workspace: %v", err), http.StatusBadRequest)
+			return
 		}
 
-		err = writeIdentityFiles(wsDir, req.Identity)
+		err = writeIdentityFiles(wsEval, req.Identity)
 		if err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to write identity files: %v", err), http.StatusInternalServerError)
 			return
 		}
-		err = os.WriteFile(filepath.Join(wsDir, "AGENTS.md"), []byte(agentsMdContent()), 0o644)
+		err = writeContainedFile(wsEval, wsEval, "AGENTS.md", []byte(agentsMdContent()), 0o644)
 		if err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to write AGENTS.md: %v", err), http.StatusInternalServerError)
@@ -212,19 +228,17 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 
 		for _, skillID := range req.Skills {
-			content := h.fetchSkillContent(skillID, req.Container.BaseImage)
-			if content == "" {
-				continue
-			}
-			skillDir := filepath.Join(wsDir, "skills", skillID)
-			err = os.MkdirAll(skillDir, 0o755)
-			if err != nil {
-				log.Printf("openclaw: failed to create skill dir %s: %v", skillID, err)
-				continue
-			}
-			err = os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0o644)
-			if err != nil {
-				log.Printf("openclaw: failed to write skill %s: %v", skillID, err)
+			// Materialize skills exclusively from the server-owned skill pack
+			// directory; never extract content from the selected image, and
+			// never substitute a description-only stub for a missing pack.
+			if copyErr := copyOpenClawSkillPack(skillID, skillsRoot); copyErr != nil {
+				h.mu.Unlock()
+				writeJSONError(
+					w,
+					fmt.Sprintf("Skill %q has no server-side skill pack; bundle it under the skill pack directory before provisioning", skillID),
+					http.StatusBadRequest,
+				)
+				return
 			}
 		}
 
@@ -233,6 +247,31 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		if err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to write config: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// The provisioned container runs as the image's unprivileged user
+		// (e.g. node/1000), while the workspace tree is owned by the
+		// Dashboard user. Make the bind-mounted workspace group-writable and
+		// mount a pre-owned state directory, then join the container to the
+		// Dashboard's own primary group via --group-add so the non-root
+		// gateway can write memory and session state while other host users
+		// keep no access.
+		if err := makeWorkspaceWritable(wsEval); err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to set workspace permissions: %v", err), http.StatusInternalServerError)
+			return
+		}
+		cDirEval, err := resolveExistingDir(cDir)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to resolve container data dir: %v", err), http.StatusInternalServerError)
+			return
+		}
+		stateDir, err := prepareProvisionStateDir(cDirEval)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to prepare container state dir: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -257,13 +296,17 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 
 		absCDir, _ := filepath.Abs(cDir)
-		volumeName := "openclaw-state-" + req.Container.ContainerName
 		args := []string{
 			"run", "-d",
 			"--name", req.Container.ContainerName,
-			"--user", "0:0",
 			"--network", networkMode,
 		}
+		// Least privilege: read-only root filesystem, no capabilities,
+		// no privilege escalation, bounded writable /tmp. The container also
+		// joins the Dashboard's primary group so it can write the
+		// group-writable workspace and state bind mounts.
+		args = append(args, openClawLeastPrivilegeArgs(req.Container.ContainerName)...)
+		args = append(args, "--group-add", strconv.Itoa(os.Getgid()))
 		// Override the image's built-in healthcheck to point at the actual gateway port.
 		healthCmd := fmt.Sprintf(
 			"node -e \"fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
@@ -279,7 +322,7 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		args = append(args,
 			"-v", absCDir+"/workspace:/workspace",
 			"-v", absCDir+"/openclaw.json:/config/openclaw.json:ro",
-			"-v", volumeName+":/state",
+			"-v", stateDir+":/state",
 			"-e", "OPENCLAW_CONFIG_PATH=/config/openclaw.json",
 			"-e", "OPENCLAW_STATE_DIR=/state",
 			req.Container.BaseImage,
@@ -435,8 +478,8 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 		h.mu.Unlock()
 
-		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir)
-		composeYAML := generateComposeYAML(req, absCDir)
+		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir, os.Getgid())
+		composeYAML := generateComposeYAML(req, absCDir, os.Getgid())
 
 		healthy := false
 		for i := 0; i < 10; i++ {

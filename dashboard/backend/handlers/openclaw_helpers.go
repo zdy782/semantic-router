@@ -213,7 +213,14 @@ func generateToken(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// writeIdentityFiles writes the identity documents inside the workspace.
+// All writes go through the contained helpers so a pre-existing symlink at
+// the destination can never redirect a write outside the workspace.
 func writeIdentityFiles(wsDir string, id IdentityConfig) error {
+	wsEval, err := resolveExistingDir(wsDir)
+	if err != nil {
+		return err
+	}
 	var soulParts []string
 	soulParts = append(soulParts, "# SOUL.md - Who You Are\n")
 	if id.Name != "" || id.Role != "" {
@@ -236,7 +243,7 @@ func writeIdentityFiles(wsDir string, id IdentityConfig) error {
 		soulParts = append(soulParts, "## Vibe\n")
 		soulParts = append(soulParts, id.Vibe+"\n")
 	}
-	if err := os.WriteFile(filepath.Join(wsDir, "SOUL.md"), []byte(strings.Join(soulParts, "\n")), 0o644); err != nil {
+	if err := writeContainedFile(wsEval, wsEval, "SOUL.md", []byte(strings.Join(soulParts, "\n")), 0o644); err != nil {
 		return err
 	}
 
@@ -254,7 +261,7 @@ func writeIdentityFiles(wsDir string, id IdentityConfig) error {
 	if id.Emoji != "" {
 		idParts = append(idParts, fmt.Sprintf("- **Emoji:** %s", id.Emoji))
 	}
-	if err := os.WriteFile(filepath.Join(wsDir, "IDENTITY.md"), []byte(strings.Join(idParts, "\n")+"\n"), 0o644); err != nil {
+	if err := writeContainedFile(wsEval, wsEval, "IDENTITY.md", []byte(strings.Join(idParts, "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
 
@@ -266,7 +273,7 @@ func writeIdentityFiles(wsDir string, id IdentityConfig) error {
 	if id.UserNotes != "" {
 		userParts = append(userParts, fmt.Sprintf("- **Notes:** %s", id.UserNotes))
 	}
-	return os.WriteFile(filepath.Join(wsDir, "USER.md"), []byte(strings.Join(userParts, "\n")+"\n"), 0o644)
+	return writeContainedFile(wsEval, wsEval, "USER.md", []byte(strings.Join(userParts, "\n")+"\n"), 0o644)
 }
 
 func buildOpenClawModelProviderConfig(req ProvisionRequest) map[string]interface{} {
@@ -288,14 +295,35 @@ func buildOpenClawModelProviderConfig(req ProvisionRequest) map[string]interface
 }
 
 func writeOpenClawConfig(path string, req ProvisionRequest) error {
+	// Writes go through an os.Root anchored at the resolved container data
+	// directory so a pre-existing symlink at the config path can never
+	// redirect the write outside it.
+	dirEval, err := resolveExistingDir(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("failed to resolve config dir: %w", err)
+	}
+	name := filepath.Base(path)
+
+	rootFS, err := os.OpenRoot(dirEval)
+	if err != nil {
+		return fmt.Errorf("failed to open config dir: %w", err)
+	}
+	defer func() { _ = rootFS.Close() }()
+
 	// Recover from stale state where a previous bad bind mount caused
 	// openclaw.json to be created as a directory on host.
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		if removeErr := os.RemoveAll(path); removeErr != nil {
-			return fmt.Errorf("failed to replace config directory %s with file: %w", path, removeErr)
+	info, statErr := rootFS.Lstat(name)
+	switch {
+	case statErr == nil && info.IsDir():
+		if err := rootFS.RemoveAll(name); err != nil {
+			return fmt.Errorf("failed to replace config directory %s with file: %w", name, err)
 		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to stat config path %s: %w", path, err)
+	case statErr == nil && info.Mode()&os.ModeSymlink != 0:
+		return fmt.Errorf("refusing to write config through symlink %s", name)
+	case statErr == nil && !info.Mode().IsRegular():
+		return fmt.Errorf("refusing to overwrite non-regular config %s", name)
+	case statErr != nil && !os.IsNotExist(statErr):
+		return fmt.Errorf("failed to stat config path %s: %w", name, statErr)
 	}
 
 	cfg := map[string]interface{}{
@@ -376,19 +404,22 @@ func writeOpenClawConfig(path string, req ProvisionRequest) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return rootFS.WriteFile(name, data, 0o644)
 }
 
-func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string) string {
-	volumeName := "openclaw-state-" + req.Container.ContainerName
+func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string, gid int) string {
 	healthCmd := fmt.Sprintf(
 		`node -e "fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
 		req.Container.GatewayPort,
 	)
 	return fmt.Sprintf(`%s run -d \
   --name %s \
-  --user 0:0 \
   --network %s \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --group-add %d \
   --health-cmd '%s' \
   --health-interval 30s \
   --health-timeout 5s \
@@ -396,17 +427,16 @@ func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string) 
   --health-retries 3 \
   -v %s/workspace:/workspace \
   -v %s/openclaw.json:/config/openclaw.json:ro \
-  -v %s:/state \
+  -v %s/state:/state \
   -e OPENCLAW_CONFIG_PATH=/config/openclaw.json \
   -e OPENCLAW_STATE_DIR=/state \
   %s \
   node openclaw.mjs gateway --allow-unconfigured --bind lan`,
-		runtime, req.Container.ContainerName, req.Container.NetworkMode, healthCmd,
-		dataDir, dataDir, volumeName, req.Container.BaseImage)
+		runtime, req.Container.ContainerName, req.Container.NetworkMode, gid, healthCmd,
+		dataDir, dataDir, dataDir, req.Container.BaseImage)
 }
 
-func generateComposeYAML(req ProvisionRequest, dataDir string) string {
-	volumeName := "openclaw-state-" + req.Container.ContainerName
+func generateComposeYAML(req ProvisionRequest, dataDir string, gid int) string {
 	networkMode := req.Container.NetworkMode
 
 	// For bridge network names (not "host" or "container:xxx"), use the networks syntax.
@@ -415,13 +445,21 @@ func generateComposeYAML(req ProvisionRequest, dataDir string) string {
   openclaw:
     image: %s
     container_name: %s
-    user: "0:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    group_add:
+      - "%d"
     networks:
       - %s
     volumes:
       - %s/workspace:/workspace
       - %s/openclaw.json:/config/openclaw.json:ro
-      - %s:/state
+      - %s/state:/state
     environment:
       OPENCLAW_CONFIG_PATH: /config/openclaw.json
       OPENCLAW_STATE_DIR: /state
@@ -437,25 +475,31 @@ func generateComposeYAML(req ProvisionRequest, dataDir string) string {
 networks:
   %s:
     external: true
-
-volumes:
-  %s:
-`, req.Container.BaseImage, req.Container.ContainerName, networkMode,
-			dataDir, dataDir, volumeName,
+`, req.Container.BaseImage, req.Container.ContainerName,
+			gid, networkMode,
+			dataDir, dataDir, dataDir,
 			req.Container.GatewayPort,
-			networkMode, volumeName)
+			networkMode)
 	}
 
 	return fmt.Sprintf(`services:
   openclaw:
     image: %s
     container_name: %s
-    user: "0:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    group_add:
+      - "%d"
     network_mode: %s
     volumes:
       - %s/workspace:/workspace
       - %s/openclaw.json:/config/openclaw.json:ro
-      - %s:/state
+      - %s/state:/state
     environment:
       OPENCLAW_CONFIG_PATH: /config/openclaw.json
       OPENCLAW_STATE_DIR: /state
@@ -467,13 +511,10 @@ volumes:
       retries: 3
     command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan"]
     restart: unless-stopped
-
-volumes:
-  %s:
-`, req.Container.BaseImage, req.Container.ContainerName, networkMode,
-		dataDir, dataDir, volumeName,
-		req.Container.GatewayPort,
-		volumeName)
+`, req.Container.BaseImage, req.Container.ContainerName,
+		gid, networkMode,
+		dataDir, dataDir, dataDir,
+		req.Container.GatewayPort)
 }
 
 func agentsMdContent() string {
