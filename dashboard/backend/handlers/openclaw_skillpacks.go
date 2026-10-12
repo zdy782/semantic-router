@@ -81,11 +81,11 @@ func prepareProvisionWorkspace(wsDir string) (wsEval, skillsRoot string, err err
 // A malformed value is an error, not a fallback: silently joining the
 // Dashboard's group would defeat the isolation the administrator asked for.
 func openClawProvisionGID() (int, error) {
-	raw := strings.TrimSpace(os.Getenv("OPENCLAW_PROVISION_GID"))
-	if raw == "" {
+	raw, configured := os.LookupEnv("OPENCLAW_PROVISION_GID")
+	if !configured {
 		return os.Getgid(), nil
 	}
-	gid, err := strconv.Atoi(raw)
+	gid, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || gid <= 0 {
 		return 0, fmt.Errorf("invalid OPENCLAW_PROVISION_GID %q: must be a positive numeric group ID", raw)
 	}

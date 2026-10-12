@@ -287,15 +287,6 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 			return
 		}
 
-		// Reprovisioning a worker that was deployed with the legacy named
-		// volume must not lose its sessions: copy that volume into the
-		// pre-owned state bind dir before the container starts.
-		if err := h.migrateLegacyStateVolume(req.Container.BaseImage, req.Container.ContainerName, stateDir, provisionGID); err != nil {
-			h.mu.Unlock()
-			writeJSONError(w, fmt.Sprintf("Failed to migrate container state: %v", err), http.StatusInternalServerError)
-			return
-		}
-
 		// For bridge network names, ensure the network exists before starting
 		// the container. This is idempotent: if the network already exists the
 		// command exits silently.
@@ -368,6 +359,19 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 			}
 
 			_ = h.containerRun("rm", "-f", req.Container.ContainerName)
+
+			if attempt == 0 {
+				// Reprovisioning a worker that was deployed with the legacy
+				// named volume must not lose its sessions: copy that volume
+				// into the pre-owned state bind dir. This runs only after the
+				// old container was removed so the volume is detached and
+				// nothing keeps writing into it during the copy.
+				if err := h.migrateLegacyStateVolume(req.Container.BaseImage, req.Container.ContainerName, cDir, stateDir, provisionGID); err != nil {
+					h.mu.Unlock()
+					writeJSONError(w, fmt.Sprintf("Failed to migrate container state: %v", err), http.StatusInternalServerError)
+					return
+				}
+			}
 
 			out, err := h.containerCombinedOutput(args...)
 			if err != nil {

@@ -70,7 +70,7 @@ func TestOpenClawProvisionGIDRespectsEnv(t *testing.T) {
 // SEC (Devin Review): a malformed OPENCLAW_PROVISION_GID must fail closed
 // instead of silently joining the Dashboard's group.
 func TestOpenClawProvisionGIDRejectsInvalid(t *testing.T) {
-	for _, bad := range []string{"not-a-number", "-1", "0", "1.5"} {
+	for _, bad := range []string{"not-a-number", "-1", "0", "1.5", "", "   "} {
 		t.Setenv("OPENCLAW_PROVISION_GID", bad)
 		if _, err := openClawProvisionGID(); err == nil {
 			t.Fatalf("expected error for %q", bad)
