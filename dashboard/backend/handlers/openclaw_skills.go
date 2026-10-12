@@ -44,8 +44,17 @@ func (h *OpenClawHandler) SkillsHandler() http.HandlerFunc {
 			_, _ = w.Write([]byte("[]"))
 			return
 		}
+		// Only offer skills that have a server-side pack: provisioning
+		// cannot materialize catalog entries without one, so listing them
+		// would let users select skills that then fail with HTTP 400.
+		provisionable := skills[:0]
+		for _, s := range skills {
+			if _, _, packErr := resolveOpenClawSkillPack(s.ID); packErr == nil {
+				provisionable = append(provisionable, s)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(skills); err != nil {
+		if err := json.NewEncoder(w).Encode(provisionable); err != nil {
 			log.Printf("openclaw: skills encode error: %v", err)
 		}
 	}

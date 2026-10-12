@@ -3,9 +3,11 @@ package handlers
 import (
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -69,20 +71,46 @@ func prepareProvisionWorkspace(wsDir string) (wsEval, skillsRoot string, err err
 	return wsEval, skillsRoot, nil
 }
 
+// openClawProvisionGID returns the numeric group ID provisioned containers
+// join via --group-add and that owns the workspace/state trees group-wise.
+// It defaults to the Dashboard's own primary group; on deployments where the
+// Dashboard group also owns Dashboard state (e.g. the host-socket topology's
+// prepare_shared_tree), administrators should set OPENCLAW_PROVISION_GID to
+// a dedicated group so workers cannot write Dashboard state through it. The
+// Dashboard process must be a member of the configured group to chgrp files.
+func openClawProvisionGID() int {
+	if raw := strings.TrimSpace(os.Getenv("OPENCLAW_PROVISION_GID")); raw != "" {
+		if gid, err := strconv.Atoi(raw); err == nil && gid > 0 {
+			return gid
+		}
+		log.Printf("openclaw: ignoring invalid OPENCLAW_PROVISION_GID %q", raw)
+	}
+	return os.Getgid()
+}
+
 // makeWorkspaceWritable grants the provisioned container's non-root image
 // user (e.g. node/1000) write access to the bind-mounted workspace. The
 // Dashboard process cannot chown the tree to the image's UID, so it is made
-// group-writable instead and the container joins the Dashboard's own
-// primary group via --group-add; other host users keep no access at all.
+// group-writable instead and the container joins gid via --group-add; other
+// host users keep no access at all. When gid differs from the Dashboard's
+// own primary group the tree is also chgrp'd, which fails if the Dashboard
+// is not a member of gid — that is intentional so provisioning cannot
+// silently produce directories the worker cannot write.
 // Symlinks are never followed, so an escaping link cannot redirect the
 // chmod outside the workspace.
-func makeWorkspaceWritable(wsDir string) error {
+func makeWorkspaceWritable(wsDir string, gid int) error {
+	chgrp := gid != os.Getgid()
 	return filepath.WalkDir(wsDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.Type()&os.ModeSymlink != 0 {
 			return nil
+		}
+		if chgrp && (d.IsDir() || d.Type().IsRegular()) {
+			if err := os.Chown(p, -1, gid); err != nil {
+				return fmt.Errorf("failed to set group %d on %s: %w", gid, p, err)
+			}
 		}
 		switch {
 		case d.IsDir():
@@ -98,15 +126,26 @@ func makeWorkspaceWritable(wsDir string) error {
 // prepareProvisionStateDir creates the container state directory inside the
 // validated container data dir and makes it group-writable for the same
 // --group-add mechanism as the workspace.
-func prepareProvisionStateDir(cDirEval string) (string, error) {
+func prepareProvisionStateDir(cDirEval string, gid int) (string, error) {
 	stateDir, err := containedMkdirAll(cDirEval, []string{"state"}, cDirEval)
 	if err != nil {
 		return "", fmt.Errorf("invalid container state dir: %w", err)
+	}
+	if gid != os.Getgid() {
+		if err := os.Chown(stateDir, -1, gid); err != nil {
+			return "", fmt.Errorf("failed to set group %d on state dir: %w", gid, err)
+		}
 	}
 	if err := os.Chmod(stateDir, 0o770); err != nil {
 		return "", fmt.Errorf("failed to set state dir permissions: %w", err)
 	}
 	return stateDir, nil
+}
+
+// dirIsEmpty reports whether dir exists and contains no entries.
+func dirIsEmpty(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) == 0
 }
 
 // validateOpenClawSkillPackID mirrors the strict catalog ID pattern so a pack

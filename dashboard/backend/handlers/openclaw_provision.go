@@ -254,10 +254,10 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		// (e.g. node/1000), while the workspace tree is owned by the
 		// Dashboard user. Make the bind-mounted workspace group-writable and
 		// mount a pre-owned state directory, then join the container to the
-		// Dashboard's own primary group via --group-add so the non-root
-		// gateway can write memory and session state while other host users
-		// keep no access.
-		if err := makeWorkspaceWritable(wsEval); err != nil {
+		// provision group via --group-add so the non-root gateway can write
+		// memory and session state while other host users keep no access.
+		provisionGID := openClawProvisionGID()
+		if err := makeWorkspaceWritable(wsEval, provisionGID); err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to set workspace permissions: %v", err), http.StatusInternalServerError)
 			return
@@ -268,7 +268,7 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 			writeJSONError(w, fmt.Sprintf("Failed to resolve container data dir: %v", err), http.StatusInternalServerError)
 			return
 		}
-		stateDir, err := prepareProvisionStateDir(cDirEval)
+		stateDir, err := prepareProvisionStateDir(cDirEval, provisionGID)
 		if err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to prepare container state dir: %v", err), http.StatusInternalServerError)
@@ -279,6 +279,15 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		if err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Reprovisioning a worker that was deployed with the legacy named
+		// volume must not lose its sessions: copy that volume into the
+		// pre-owned state bind dir before the container starts.
+		if err := h.migrateLegacyStateVolume(req.Container.BaseImage, req.Container.ContainerName, stateDir, provisionGID); err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to migrate container state: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -303,10 +312,10 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 		// Least privilege: read-only root filesystem, no capabilities,
 		// no privilege escalation, bounded writable /tmp. The container also
-		// joins the Dashboard's primary group so it can write the
-		// group-writable workspace and state bind mounts.
+		// joins the provision group so it can write the group-writable
+		// workspace and state bind mounts.
 		args = append(args, openClawLeastPrivilegeArgs(req.Container.ContainerName)...)
-		args = append(args, "--group-add", strconv.Itoa(os.Getgid()))
+		args = append(args, "--group-add", strconv.Itoa(provisionGID))
 		// Override the image's built-in healthcheck to point at the actual gateway port.
 		healthCmd := fmt.Sprintf(
 			"node -e \"fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
@@ -478,8 +487,8 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 		h.mu.Unlock()
 
-		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir, os.Getgid())
-		composeYAML := generateComposeYAML(req, absCDir, os.Getgid())
+		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir, provisionGID)
+		composeYAML := generateComposeYAML(req, absCDir, provisionGID)
 
 		healthy := false
 		for i := 0; i < 10; i++ {

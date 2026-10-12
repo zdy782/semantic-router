@@ -407,6 +407,39 @@ func writeOpenClawConfig(path string, req ProvisionRequest) error {
 	return rootFS.WriteFile(name, data, 0o644)
 }
 
+// migrateLegacyStateVolume copies content from the legacy named volume
+// "openclaw-state-<name>" (used by provisioning versions before /state
+// became a bind mount) into stateDir. It runs only when the volume exists
+// and the state dir is still empty, so a reprovisioned worker keeps its
+// sessions. The copy runs in a one-shot root helper container because
+// volume content is owned by the privileged user those older versions ran
+// as; the copied files are then group-relabelled for the non-root gateway.
+func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, stateDir string, gid int) error {
+	volume := "openclaw-state-" + containerName
+	if out, err := h.containerCombinedOutput("volume", "inspect", volume); err != nil || len(out) == 0 {
+		return nil // no legacy volume to migrate
+	}
+	if !dirIsEmpty(stateDir) {
+		log.Printf("openclaw: state dir %s already populated; leaving legacy volume %s untouched", stateDir, volume)
+		return nil
+	}
+	script := fmt.Sprintf("cp -a /from/. /to/ && chgrp -R %d /to && chmod -R g+rwX,o-rwx /to", gid)
+	if out, err := h.containerCombinedOutput(
+		"run", "--rm", "--user", "0:0",
+		"-v", volume+":/from:ro",
+		"-v", stateDir+":/to",
+		image, "sh", "-c", script,
+	); err != nil {
+		return fmt.Errorf("copying state from legacy volume %s: %w: %s", volume, err, strings.TrimSpace(string(out)))
+	}
+	// Migrated successfully: drop the legacy volume so future reprovisions
+	// use only the bind mount.
+	if err := h.containerRun("volume", "rm", volume); err != nil {
+		log.Printf("openclaw: warning: could not remove legacy state volume %s: %v", volume, err)
+	}
+	return nil
+}
+
 func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string, gid int) string {
 	healthCmd := fmt.Sprintf(
 		`node -e "fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,

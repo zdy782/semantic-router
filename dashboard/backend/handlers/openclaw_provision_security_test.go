@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +23,64 @@ func writeSkillPackRoot(t *testing.T) string {
 	}
 	t.Setenv("OPENCLAW_SKILL_PACKS_PATH", root)
 	return root
+}
+
+// Bug (Devin Review): the skills catalog endpoint must not offer skills
+// that provisioning cannot materialize — selecting a pack-less entry would
+// otherwise surface as an unexplained HTTP 400 during provisioning.
+func TestSkillsHandlerListsOnlyPackBackedSkills(t *testing.T) {
+	writeSkillPackRoot(t) // only "github" has a bundled pack
+
+	dataDir := t.TempDir()
+	catalog := `[{"id":"github","name":"GitHub","description":"d","builtin":true},{"id":"packless","name":"Packless","description":"d","builtin":true}]`
+	if err := os.WriteFile(filepath.Join(dataDir, "skills.json"), []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &OpenClawHandler{dataDir: dataDir}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/openclaw/skills", nil)
+	rr := httptest.NewRecorder()
+	h.SkillsHandler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rr.Code, rr.Body.String())
+	}
+	var out []SkillTemplate
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].ID != "github" {
+		t.Fatalf("expected only the pack-backed skill listed, got %v", out)
+	}
+}
+
+// SEC (Devin Review): the provision group is configurable so deployments
+// where the Dashboard group also owns Dashboard state can give workers a
+// dedicated group instead.
+func TestOpenClawProvisionGIDRespectsEnv(t *testing.T) {
+	t.Setenv("OPENCLAW_PROVISION_GID", "7777")
+	if got := openClawProvisionGID(); got != 7777 {
+		t.Fatalf("expected configured gid 7777, got %d", got)
+	}
+}
+
+func TestOpenClawProvisionGIDFallsBackOnInvalid(t *testing.T) {
+	t.Setenv("OPENCLAW_PROVISION_GID", "not-a-number")
+	if got := openClawProvisionGID(); got != os.Getgid() {
+		t.Fatalf("expected fallback to process gid %d, got %d", os.Getgid(), got)
+	}
+}
+
+func TestDirIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if !dirIsEmpty(dir) {
+		t.Fatal("expected empty temp dir to report true")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirIsEmpty(dir) {
+		t.Fatal("expected non-empty dir to report false")
+	}
 }
 
 func TestResolveOpenClawSkillPackRejectsTraversal(t *testing.T) {
@@ -669,7 +730,7 @@ func TestMakeWorkspaceWritableGrantsGroupAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := makeWorkspaceWritable(wsDir); err != nil {
+	if err := makeWorkspaceWritable(wsDir, os.Getgid()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for p, want := range map[string]os.FileMode{wsDir: 0o770, sub: 0o770, file: 0o660} {
