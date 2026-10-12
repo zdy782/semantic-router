@@ -407,6 +407,56 @@ func writeOpenClawConfig(path string, req ProvisionRequest) error {
 	return rootFS.WriteFile(name, data, 0o644)
 }
 
+// legacyStateMigrationMarker is written into the state dir once a legacy
+// named volume has been fully migrated. Its absence means migration has not
+// completed — a partially copied tree is retried instead of skipped.
+const legacyStateMigrationMarker = ".openclaw-state-migrated"
+
+// migrateLegacyStateVolume copies content from the legacy named volume
+// "openclaw-state-<name>" (used by provisioning versions before /state
+// became a bind mount) into stateDir, then removes the volume. It runs
+// only when the volume exists and no completion marker is present, so an
+// interrupted copy is retried on the next provision instead of stranding
+// sessions. The copy runs in a one-shot root helper container because
+// volume content is owned by the privileged user those older versions ran
+// as. Anything that is not a directory or regular file (symlinks, device
+// nodes, fifos) is deleted after the copy so worker-controlled special
+// entries cannot be relabelled into something the gateway would follow
+// or open, and the copied files are group-relabelled for the non-root
+// gateway.
+func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, stateDir string, gid int) error {
+	volume := "openclaw-state-" + containerName
+	if out, err := h.containerCombinedOutput("volume", "inspect", volume); err != nil || len(out) == 0 {
+		return nil // no legacy volume to migrate
+	}
+	if _, err := os.Lstat(filepath.Join(stateDir, legacyStateMigrationMarker)); err == nil {
+		// Already migrated — drop the leftover volume and move on.
+		if err := h.containerRun("volume", "rm", volume); err != nil {
+			log.Printf("openclaw: warning: could not remove legacy state volume %s: %v", volume, err)
+		}
+		return nil
+	}
+	script := fmt.Sprintf(
+		"cp -a /from/. /to/ && find /to -mindepth 1 ! -type d ! -type f -delete && "+
+			"chgrp -R %d /to && chmod -R g+rwX,o-rwx /to && touch /to/%s",
+		gid, legacyStateMigrationMarker,
+	)
+	if out, err := h.containerCombinedOutput(
+		"run", "--rm", "--user", "0:0",
+		"-v", volume+":/from:ro",
+		"-v", stateDir+":/to",
+		image, "sh", "-c", script,
+	); err != nil {
+		return fmt.Errorf("copying state from legacy volume %s: %w: %s", volume, err, strings.TrimSpace(string(out)))
+	}
+	// Migrated successfully: drop the legacy volume so future reprovisions
+	// use only the bind mount.
+	if err := h.containerRun("volume", "rm", volume); err != nil {
+		log.Printf("openclaw: warning: could not remove legacy state volume %s: %v", volume, err)
+	}
+	return nil
+}
+
 func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string, gid int) string {
 	healthCmd := fmt.Sprintf(
 		`node -e "fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
