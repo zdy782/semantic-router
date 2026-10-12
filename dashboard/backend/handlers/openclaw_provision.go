@@ -256,7 +256,12 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		// mount a pre-owned state directory, then join the container to the
 		// provision group via --group-add so the non-root gateway can write
 		// memory and session state while other host users keep no access.
-		provisionGID := openClawProvisionGID()
+		provisionGID, err := openClawProvisionGID()
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if err := makeWorkspaceWritable(wsEval, provisionGID); err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to set workspace permissions: %v", err), http.StatusInternalServerError)
