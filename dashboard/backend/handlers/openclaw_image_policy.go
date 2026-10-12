@@ -12,8 +12,11 @@ import (
 // an allowlist entry (exact reference or registry/repository prefix) and, if
 // requested with a digest, only pinned digests.
 type openClawImagePolicy struct {
-	// Allowlist entries are lowercase image references or prefixes ending
-	// with "/". An empty list rejects every image (deny by default).
+	// Allowlist entries are image references or prefixes ending with "/",
+	// stored verbatim: the repository portion is compared case-insensitively
+	// while tags and digests keep their administrator-provided case, so
+	// "repo:RELEASE" cannot authorize the distinct "repo:release" image.
+	// An empty list rejects every image (deny by default).
 	Allowed []string
 	// AllowedTags, when non-empty, is the set of tag values that may be used
 	// for allowlisted repositories. An empty set allows any tag (including
@@ -53,7 +56,7 @@ func loadOpenClawImagePolicy() openClawImagePolicy {
 	}
 
 	policy := openClawImagePolicy{
-		Allowed:     splitList(os.Getenv("OPENCLAW_IMAGE_ALLOWLIST"), true),
+		Allowed:     splitList(os.Getenv("OPENCLAW_IMAGE_ALLOWLIST"), false),
 		AllowedTags: splitList(os.Getenv("OPENCLAW_IMAGE_ALLOWED_TAGS"), false),
 	}
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("OPENCLAW_IMAGE_DIGESTS_ONLY"))) {
@@ -131,7 +134,7 @@ func validateOpenClawImage(image string, policy openClawImagePolicy) error {
 	for _, allowed := range policy.Allowed {
 		// Prefix match: "ghcr.io/openclaw/" allows every repository under it.
 		if strings.HasSuffix(allowed, "/") {
-			if strings.HasPrefix(strings.ToLower(ref), allowed) {
+			if strings.HasPrefix(strings.ToLower(ref), strings.ToLower(allowed)) {
 				return nil
 			}
 			continue

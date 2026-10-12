@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -228,25 +229,16 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 
 		for _, skillID := range req.Skills {
 			// Materialize skills exclusively from the server-owned skill pack
-			// directory; never extract content from the selected image.
-			if copyErr := copyOpenClawSkillPack(skillID, skillsRoot); copyErr == nil {
-				continue
-			} else if !os.IsNotExist(copyErr) && !strings.Contains(copyErr.Error(), "unknown skill ID") {
-				log.Printf("openclaw: failed to copy skill pack %s: %v", skillID, copyErr)
-			}
-			// Fallback stub for catalog entries without a server-side pack,
-			// using the same symlink-safe contained creation as the packs.
-			content := h.fetchSkillContent(skillID)
-			if content == "" {
-				continue
-			}
-			skillDir, dirErr := containedMkdirAll(skillsRoot, []string{skillID}, skillsRoot)
-			if dirErr != nil {
-				log.Printf("openclaw: failed to create skill dir %s: %v", skillID, dirErr)
-				continue
-			}
-			if writeErr := writeContainedFile(skillDir, skillsRoot, "SKILL.md", []byte(content), 0o644); writeErr != nil {
-				log.Printf("openclaw: failed to write skill %s: %v", skillID, writeErr)
+			// directory; never extract content from the selected image, and
+			// never substitute a description-only stub for a missing pack.
+			if copyErr := copyOpenClawSkillPack(skillID, skillsRoot); copyErr != nil {
+				h.mu.Unlock()
+				writeJSONError(
+					w,
+					fmt.Sprintf("Skill %q has no server-side skill pack; bundle it under the skill pack directory before provisioning", skillID),
+					http.StatusBadRequest,
+				)
+				return
 			}
 		}
 
@@ -260,12 +252,26 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 
 		// The provisioned container runs as the image's unprivileged user
 		// (e.g. node/1000), while the workspace tree is owned by the
-		// Dashboard user (65532). Make the bind-mounted workspace writable
-		// before launch so the non-root gateway can write memory and
-		// session state.
+		// Dashboard user. Make the bind-mounted workspace group-writable and
+		// mount a pre-owned state directory, then join the container to the
+		// Dashboard's own primary group via --group-add so the non-root
+		// gateway can write memory and session state while other host users
+		// keep no access.
 		if err := makeWorkspaceWritable(wsEval); err != nil {
 			h.mu.Unlock()
 			writeJSONError(w, fmt.Sprintf("Failed to set workspace permissions: %v", err), http.StatusInternalServerError)
+			return
+		}
+		cDirEval, err := resolveExistingDir(cDir)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to resolve container data dir: %v", err), http.StatusInternalServerError)
+			return
+		}
+		stateDir, err := prepareProvisionStateDir(cDirEval)
+		if err != nil {
+			h.mu.Unlock()
+			writeJSONError(w, fmt.Sprintf("Failed to prepare container state dir: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -290,15 +296,17 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 
 		absCDir, _ := filepath.Abs(cDir)
-		volumeName := "openclaw-state-" + req.Container.ContainerName
 		args := []string{
 			"run", "-d",
 			"--name", req.Container.ContainerName,
 			"--network", networkMode,
 		}
 		// Least privilege: read-only root filesystem, no capabilities,
-		// no privilege escalation, bounded writable /tmp.
+		// no privilege escalation, bounded writable /tmp. The container also
+		// joins the Dashboard's primary group so it can write the
+		// group-writable workspace and state bind mounts.
 		args = append(args, openClawLeastPrivilegeArgs(req.Container.ContainerName)...)
+		args = append(args, "--group-add", strconv.Itoa(os.Getgid()))
 		// Override the image's built-in healthcheck to point at the actual gateway port.
 		healthCmd := fmt.Sprintf(
 			"node -e \"fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
@@ -314,7 +322,7 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		args = append(args,
 			"-v", absCDir+"/workspace:/workspace",
 			"-v", absCDir+"/openclaw.json:/config/openclaw.json:ro",
-			"-v", volumeName+":/state",
+			"-v", stateDir+":/state",
 			"-e", "OPENCLAW_CONFIG_PATH=/config/openclaw.json",
 			"-e", "OPENCLAW_STATE_DIR=/state",
 			req.Container.BaseImage,
@@ -470,8 +478,8 @@ func (h *OpenClawHandler) ProvisionHandler() http.HandlerFunc {
 		}
 		h.mu.Unlock()
 
-		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir)
-		composeYAML := generateComposeYAML(req, absCDir)
+		dockerCmd := generateDockerRunCmd(runtimeName, req, absCDir, os.Getgid())
+		composeYAML := generateComposeYAML(req, absCDir, os.Getgid())
 
 		healthy := false
 		for i := 0; i < 10; i++ {

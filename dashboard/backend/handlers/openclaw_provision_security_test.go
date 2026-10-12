@@ -278,14 +278,17 @@ func TestGenerateDockerRunCmdIncludesLeastPrivilege(t *testing.T) {
 	req.Container.BaseImage = "ghcr.io/openclaw/openclaw:latest"
 	req.Container.GatewayPort = 18790
 
-	cmd := generateDockerRunCmd("docker", req, "/data/dir")
-	for _, want := range []string{"--read-only", "--cap-drop ALL", "--security-opt no-new-privileges", "--tmpfs /tmp:rw,noexec,nosuid,size=64m"} {
+	cmd := generateDockerRunCmd("docker", req, "/data/dir", 1000)
+	for _, want := range []string{"--read-only", "--cap-drop ALL", "--security-opt no-new-privileges", "--tmpfs /tmp:rw,noexec,nosuid,size=64m", "--group-add 1000", "/data/dir/state:/state"} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("expected %q in docker run cmd:\n%s", want, cmd)
 		}
 	}
 	if strings.Contains(cmd, "--user 0:0") {
 		t.Fatalf("docker run cmd must not force root user:\n%s", cmd)
+	}
+	if strings.Contains(cmd, "openclaw-state-") {
+		t.Fatalf("docker run cmd must not mount a root-owned named volume:\n%s", cmd)
 	}
 }
 
@@ -296,14 +299,17 @@ func TestGenerateComposeYAMLIncludesLeastPrivilege(t *testing.T) {
 	req.Container.BaseImage = "ghcr.io/openclaw/openclaw:latest"
 	req.Container.GatewayPort = 18790
 
-	yamlOut := generateComposeYAML(req, "/data/dir")
-	for _, want := range []string{"read_only: true", "cap_drop:", "- ALL", "no-new-privileges:true", "noexec,nosuid,size=64m"} {
+	yamlOut := generateComposeYAML(req, "/data/dir", 1000)
+	for _, want := range []string{"read_only: true", "cap_drop:", "- ALL", "no-new-privileges:true", "noexec,nosuid,size=64m", "group_add:", "/data/dir/state:/state"} {
 		if !strings.Contains(yamlOut, want) {
 			t.Fatalf("expected %q in compose yaml:\n%s", want, yamlOut)
 		}
 	}
 	if strings.Contains(yamlOut, `user: "0:0"`) {
 		t.Fatalf("compose yaml must not force root user:\n%s", yamlOut)
+	}
+	if strings.Contains(yamlOut, "openclaw-state-") {
+		t.Fatalf("compose yaml must not declare a root-owned named volume:\n%s", yamlOut)
 	}
 }
 
@@ -644,7 +650,7 @@ func TestOpenClawSkillPackDirInFallsBackToSourceLayout(t *testing.T) {
 
 // P1: the non-root image user must be able to write the bind-mounted
 // workspace; chmod must never follow an escaping symlink.
-func TestMakeWorkspaceWritableGrantsWorldAccess(t *testing.T) {
+func TestMakeWorkspaceWritableGrantsGroupAccess(t *testing.T) {
 	wsDir := t.TempDir()
 	sub := filepath.Join(wsDir, "memory")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -666,7 +672,7 @@ func TestMakeWorkspaceWritableGrantsWorldAccess(t *testing.T) {
 	if err := makeWorkspaceWritable(wsDir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for p, want := range map[string]os.FileMode{wsDir: 0o777, sub: 0o777, file: 0o666} {
+	for p, want := range map[string]os.FileMode{wsDir: 0o770, sub: 0o770, file: 0o660} {
 		info, err := os.Stat(p)
 		if err != nil {
 			t.Fatal(err)
@@ -713,5 +719,23 @@ func TestValidateOpenClawImageAllowlistEntryPreservesTagCase(t *testing.T) {
 	}
 	if err := validateOpenClawImage("ghcr.io/openclaw/openclaw@sha256:def", digestEntry); err == nil {
 		t.Fatal("expected mismatched digest to be rejected")
+	}
+}
+
+// P1 (Devin Review): the allowlist must preserve administrator-provided tag
+// case. Lowercasing the entry at parse time let "repo:release" through when
+// the policy only authorized the distinct "repo:RELEASE" image.
+func TestLoadOpenClawImagePolicyPreservesEntryTagCase(t *testing.T) {
+	t.Setenv("OPENCLAW_IMAGE_ALLOWLIST", "ghcr.io/openclaw/openclaw:RELEASE")
+
+	policy := loadOpenClawImagePolicy()
+	if len(policy.Allowed) != 1 || policy.Allowed[0] != "ghcr.io/openclaw/openclaw:RELEASE" {
+		t.Fatalf("configured entry case was not preserved: %v", policy.Allowed)
+	}
+	if err := validateOpenClawImage("ghcr.io/openclaw/openclaw:RELEASE", policy); err != nil {
+		t.Fatalf("expected exact-case RELEASE allowed, got %v", err)
+	}
+	if err := validateOpenClawImage("ghcr.io/openclaw/openclaw:release", policy); err == nil {
+		t.Fatal("expected lowercase release to be rejected against :RELEASE allowlist entry")
 	}
 }

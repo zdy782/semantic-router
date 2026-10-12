@@ -72,8 +72,10 @@ func prepareProvisionWorkspace(wsDir string) (wsEval, skillsRoot string, err err
 // makeWorkspaceWritable grants the provisioned container's non-root image
 // user (e.g. node/1000) write access to the bind-mounted workspace. The
 // Dashboard process cannot chown the tree to the image's UID, so it is made
-// world-writable instead. Symlinks are never followed, so an escaping link
-// cannot redirect the chmod outside the workspace.
+// group-writable instead and the container joins the Dashboard's own
+// primary group via --group-add; other host users keep no access at all.
+// Symlinks are never followed, so an escaping link cannot redirect the
+// chmod outside the workspace.
 func makeWorkspaceWritable(wsDir string) error {
 	return filepath.WalkDir(wsDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -84,13 +86,27 @@ func makeWorkspaceWritable(wsDir string) error {
 		}
 		switch {
 		case d.IsDir():
-			return os.Chmod(p, 0o777)
+			return os.Chmod(p, 0o770)
 		case d.Type().IsRegular():
-			return os.Chmod(p, 0o666)
+			return os.Chmod(p, 0o660)
 		default:
 			return nil
 		}
 	})
+}
+
+// prepareProvisionStateDir creates the container state directory inside the
+// validated container data dir and makes it group-writable for the same
+// --group-add mechanism as the workspace.
+func prepareProvisionStateDir(cDirEval string) (string, error) {
+	stateDir, err := containedMkdirAll(cDirEval, []string{"state"}, cDirEval)
+	if err != nil {
+		return "", fmt.Errorf("invalid container state dir: %w", err)
+	}
+	if err := os.Chmod(stateDir, 0o770); err != nil {
+		return "", fmt.Errorf("failed to set state dir permissions: %w", err)
+	}
+	return stateDir, nil
 }
 
 // validateOpenClawSkillPackID mirrors the strict catalog ID pattern so a pack

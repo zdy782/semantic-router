@@ -407,8 +407,7 @@ func writeOpenClawConfig(path string, req ProvisionRequest) error {
 	return rootFS.WriteFile(name, data, 0o644)
 }
 
-func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string) string {
-	volumeName := "openclaw-state-" + req.Container.ContainerName
+func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string, gid int) string {
 	healthCmd := fmt.Sprintf(
 		`node -e "fetch('http://127.0.0.1:%d/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
 		req.Container.GatewayPort,
@@ -420,6 +419,7 @@ func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string) 
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+  --group-add %d \
   --health-cmd '%s' \
   --health-interval 30s \
   --health-timeout 5s \
@@ -427,17 +427,16 @@ func generateDockerRunCmd(runtime string, req ProvisionRequest, dataDir string) 
   --health-retries 3 \
   -v %s/workspace:/workspace \
   -v %s/openclaw.json:/config/openclaw.json:ro \
-  -v %s:/state \
+  -v %s/state:/state \
   -e OPENCLAW_CONFIG_PATH=/config/openclaw.json \
   -e OPENCLAW_STATE_DIR=/state \
   %s \
   node openclaw.mjs gateway --allow-unconfigured --bind lan`,
-		runtime, req.Container.ContainerName, req.Container.NetworkMode, healthCmd,
-		dataDir, dataDir, volumeName, req.Container.BaseImage)
+		runtime, req.Container.ContainerName, req.Container.NetworkMode, gid, healthCmd,
+		dataDir, dataDir, dataDir, req.Container.BaseImage)
 }
 
-func generateComposeYAML(req ProvisionRequest, dataDir string) string {
-	volumeName := "openclaw-state-" + req.Container.ContainerName
+func generateComposeYAML(req ProvisionRequest, dataDir string, gid int) string {
 	networkMode := req.Container.NetworkMode
 
 	// For bridge network names (not "host" or "container:xxx"), use the networks syntax.
@@ -453,12 +452,14 @@ func generateComposeYAML(req ProvisionRequest, dataDir string) string {
       - no-new-privileges:true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+    group_add:
+      - "%d"
     networks:
       - %s
     volumes:
       - %s/workspace:/workspace
       - %s/openclaw.json:/config/openclaw.json:ro
-      - %s:/state
+      - %s/state:/state
     environment:
       OPENCLAW_CONFIG_PATH: /config/openclaw.json
       OPENCLAW_STATE_DIR: /state
@@ -474,13 +475,11 @@ func generateComposeYAML(req ProvisionRequest, dataDir string) string {
 networks:
   %s:
     external: true
-
-volumes:
-  %s:
-`, req.Container.BaseImage, req.Container.ContainerName, networkMode,
-			dataDir, dataDir, volumeName,
+`, req.Container.BaseImage, req.Container.ContainerName,
+			gid, networkMode,
+			dataDir, dataDir, dataDir,
 			req.Container.GatewayPort,
-			networkMode, volumeName)
+			networkMode)
 	}
 
 	return fmt.Sprintf(`services:
@@ -494,11 +493,13 @@ volumes:
       - no-new-privileges:true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+    group_add:
+      - "%d"
     network_mode: %s
     volumes:
       - %s/workspace:/workspace
       - %s/openclaw.json:/config/openclaw.json:ro
-      - %s:/state
+      - %s/state:/state
     environment:
       OPENCLAW_CONFIG_PATH: /config/openclaw.json
       OPENCLAW_STATE_DIR: /state
@@ -510,13 +511,10 @@ volumes:
       retries: 3
     command: ["node", "openclaw.mjs", "gateway", "--allow-unconfigured", "--bind", "lan"]
     restart: unless-stopped
-
-volumes:
-  %s:
-`, req.Container.BaseImage, req.Container.ContainerName, networkMode,
-		dataDir, dataDir, volumeName,
-		req.Container.GatewayPort,
-		volumeName)
+`, req.Container.BaseImage, req.Container.ContainerName,
+		gid, networkMode,
+		dataDir, dataDir, dataDir,
+		req.Container.GatewayPort)
 }
 
 func agentsMdContent() string {
