@@ -407,29 +407,37 @@ func writeOpenClawConfig(path string, req ProvisionRequest) error {
 	return rootFS.WriteFile(name, data, 0o644)
 }
 
-// legacyStateMigrationMarker is written into the state dir once a legacy
-// named volume has been fully migrated. Its absence means migration has not
-// completed — a partially copied tree is retried instead of skipped.
+// legacyStateMigrationMarker is written into the container data dir once a
+// legacy named volume has been fully migrated. Its absence means migration
+// has not completed — a partially copied tree is retried instead of
+// skipped. It lives outside the worker's mounts on purpose.
 const legacyStateMigrationMarker = ".openclaw-state-migrated"
 
 // migrateLegacyStateVolume copies content from the legacy named volume
 // "openclaw-state-<name>" (used by provisioning versions before /state
-// became a bind mount) into stateDir, then removes the volume. It runs
-// only when the volume exists and no completion marker is present, so an
-// interrupted copy is retried on the next provision instead of stranding
-// sessions. The copy runs in a one-shot root helper container because
-// volume content is owned by the privileged user those older versions ran
-// as. Anything that is not a directory or regular file (symlinks, device
-// nodes, fifos) is deleted after the copy so worker-controlled special
-// entries cannot be relabelled into something the gateway would follow
-// or open, and the copied files are group-relabelled for the non-root
-// gateway.
-func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, stateDir string, gid int) error {
+// became a bind mount) into stateDir, then removes the volume. It must run
+// after the old container has been removed so the volume is detached.
+//
+// The completion marker lives in cDir — outside the worker's mounts — so a
+// worker can never delete it and trigger a re-copy of stale volume data
+// over newer bind-mounted state. When the marker is absent the copy runs
+// (again, if a previous attempt was interrupted); when it is present the
+// function only retries removing any leftover volume.
+//
+// The copy runs in a one-shot root helper container because volume content
+// is owned by the privileged user those older versions ran as. Pre-existing
+// symlinks in the destination are removed first and --remove-destination
+// prevents cp from writing through them; anything copied that is not a
+// directory or regular file (symlinks, device nodes, fifos) is then
+// deleted so worker-controlled special entries cannot be relabelled into
+// something the gateway would follow or open.
+func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, cDir, stateDir string, gid int) error {
 	volume := "openclaw-state-" + containerName
 	if out, err := h.containerCombinedOutput("volume", "inspect", volume); err != nil || len(out) == 0 {
 		return nil // no legacy volume to migrate
 	}
-	if _, err := os.Lstat(filepath.Join(stateDir, legacyStateMigrationMarker)); err == nil {
+	markerPath := filepath.Join(cDir, legacyStateMigrationMarker)
+	if _, err := os.Lstat(markerPath); err == nil {
 		// Already migrated — drop the leftover volume and move on.
 		if err := h.containerRun("volume", "rm", volume); err != nil {
 			log.Printf("openclaw: warning: could not remove legacy state volume %s: %v", volume, err)
@@ -437,9 +445,11 @@ func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, stateDi
 		return nil
 	}
 	script := fmt.Sprintf(
-		"cp -a /from/. /to/ && find /to -mindepth 1 ! -type d ! -type f -delete && "+
-			"chgrp -R %d /to && chmod -R g+rwX,o-rwx /to && touch /to/%s",
-		gid, legacyStateMigrationMarker,
+		"find /to -mindepth 1 -type l -delete; "+
+			"cp -a --remove-destination /from/. /to/ && "+
+			"find /to -mindepth 1 ! -type d ! -type f -delete && "+
+			"chgrp -R %d /to && chmod -R g+rwX,o-rwx /to",
+		gid,
 	)
 	if out, err := h.containerCombinedOutput(
 		"run", "--rm", "--user", "0:0",
@@ -448,6 +458,11 @@ func (h *OpenClawHandler) migrateLegacyStateVolume(image, containerName, stateDi
 		image, "sh", "-c", script,
 	); err != nil {
 		return fmt.Errorf("copying state from legacy volume %s: %w: %s", volume, err, strings.TrimSpace(string(out)))
+	}
+	// The marker is written from the Dashboard side into cDir so the worker
+	// cannot remove it through its /state mount.
+	if err := os.WriteFile(markerPath, []byte(volume+"\n"), 0o640); err != nil {
+		return fmt.Errorf("recording state migration marker: %w", err)
 	}
 	// Migrated successfully: drop the legacy volume so future reprovisions
 	// use only the bind mount.
