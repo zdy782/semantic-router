@@ -1,0 +1,194 @@
+{
+  "issue": "vllm-project/semantic-router#3225",
+  "profile": "linux-x86_64-avx512_vnni-zen4-epyc9654",
+  "host": {
+    "platform": "Linux-6.6.0-132.0.0.111.oe2403sp3.x86_64-x86_64-with-glibc2.38",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "cpu_flags": "avx512_vnni avx512f avx2 vnni (verified present; full flag list pending regen)",
+    "cpu_feature_tags": "linux-x86_64-avx512_vnni_avx512f_avx2_vnni"
+  },
+  "ort_version": "1.31.0",
+  "model_repo": "vllm-sr/mmbert32k-jailbreak-detector-merged",
+  "model_file_sha256": "675260ac759fed21874874bdd439a5631b9897555bfec365179bfeb1c6ab950f",
+  "dataset": "vllm-sr/jailbreak-detection-dataset:test",
+  "eval_rows": 827,
+  "calib_rows": 128,
+  "threshold": 0.7,
+  "positive_class": 1,
+  "budget": {
+    "acc_drop_pts": 1.5,
+    "macroF1_drop_pts": 1.5,
+    "fpr_delta_pts": 1.0,
+    "agreement_min": 0.95
+  },
+  "baseline_fp32": {
+    "quality": {
+      "acc": 0.7267,
+      "macroF1": 0.7092,
+      "ece": 0.2327,
+      "agreement_with_fp32": 1.0,
+      "det@0.7": 0.4334,
+      "fpr@0.7": 0.0242
+    },
+    "latency_ms_p50": {
+      "len32": 37.763,
+      "len128": 100.188,
+      "len512": 372.529
+    },
+    "size_mb": 1230.7
+  },
+  "variants": {
+    "dynamic": {
+      "file": "model_int8_dynamic.onnx",
+      "size_mb": 309.2,
+      "quality": {
+        "acc": 0.6965,
+        "macroF1": 0.6756,
+        "ece": 0.2665,
+        "agreement_with_fp32": 0.9021,
+        "det@0.7": 0.4092,
+        "fpr@0.7": 0.0386
+      },
+      "latency_ms_p50": {
+        "len32": 30.063,
+        "len128": 91.014,
+        "len512": 369.722
+      },
+      "checks": {
+        "acc_drop_pts": 3.02,
+        "macroF1_drop_pts": 3.36,
+        "agreement": 0.9021,
+        "fpr_delta_pts": 1.44,
+        "pass": false
+      },
+      "quant": {
+        "method": "dynamic",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "activation_type": "dynamic",
+        "calibrated": false
+      }
+    },
+    "static_minmax_all": {
+      "file": "model_int8_minmax_all.onnx",
+      "size_mb": 309.8,
+      "quality": {
+        "acc": 0.5224,
+        "macroF1": 0.5066,
+        "ece": 0.3319,
+        "agreement_with_fp32": 0.4305,
+        "det@0.7": 0.4697,
+        "fpr@0.7": 0.5362
+      },
+      "latency_ms_p50": {
+        "len32": 36.954,
+        "len128": 105.227,
+        "len512": 385.747
+      },
+      "checks": {
+        "acc_drop_pts": 20.43,
+        "macroF1_drop_pts": 20.26,
+        "agreement": 0.4305,
+        "fpr_delta_pts": 51.2,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 0
+      }
+    },
+    "static_no_mlp": {
+      "file": "model_int8_no_mlp.onnx",
+      "size_mb": 484.6,
+      "quality": {
+        "acc": 0.503,
+        "macroF1": 0.4866,
+        "ece": 0.3319,
+        "agreement_with_fp32": 0.4184,
+        "det@0.7": 0.4576,
+        "fpr@0.7": 0.5314
+      },
+      "latency_ms_p50": {
+        "len32": 30.958,
+        "len128": 90.87,
+        "len512": 325.058
+      },
+      "checks": {
+        "acc_drop_pts": 22.37,
+        "macroF1_drop_pts": 22.26,
+        "agreement": 0.4184,
+        "fpr_delta_pts": 50.72,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 44
+      }
+    },
+    "static_no_attn": {
+      "file": "model_int8_no_attn.onnx",
+      "size_mb": 465.1,
+      "quality": {
+        "acc": 0.5212,
+        "macroF1": 0.5068,
+        "ece": 0.2846,
+        "agreement_with_fp32": 0.4583,
+        "det@0.7": 0.4504,
+        "fpr@0.7": 0.4589
+      },
+      "latency_ms_p50": {
+        "len32": 33.811,
+        "len128": 96.425,
+        "len512": 427.609
+      },
+      "checks": {
+        "acc_drop_pts": 20.55,
+        "macroF1_drop_pts": 20.24,
+        "agreement": 0.4583,
+        "fpr_delta_pts": 43.47,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 89
+      }
+    }
+  },
+  "model_revision": "6a661694b9f46ca2f51b92f5874f9e0aad2915c4",
+  "dataset_revision": "7271d4e514a49aa6e89a77d31d81a586e94582c2",
+  "calibration": {
+    "split": "validation",
+    "samples": 128,
+    "selection": "pandas sample(random_state=0)",
+    "max_len": 512,
+    "padding": "fixed_length"
+  },
+  "run": {
+    "intra_op_threads": 16,
+    "eval_batch_size": 8,
+    "eval_max_len": 0,
+    "bench_lengths": [
+      32,
+      128,
+      512
+    ],
+    "bench_iters": 50,
+    "bench_warmup": 20
+  }
+}
