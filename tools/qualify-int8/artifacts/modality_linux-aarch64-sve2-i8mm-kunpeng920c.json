@@ -1,0 +1,180 @@
+{
+  "issue": "vllm-project/semantic-router#3225",
+  "profile": "linux-aarch64-sve2-i8mm-kunpeng920c",
+  "host": {
+    "platform": "Linux-6.6.0-145.0.3.144.oe2403sp2.aarch64-aarch64-with-glibc2.38",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "cpu_flags": "fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve asimdfhm dit uscat ilrcpc flagm ssbs sb dcpodp sve2 sveaes svepmull svebitperm svesha3 svesm4 flagm2 frint svei8mm svebf16 i8mm",
+    "cpu_feature_tags": "linux-aarch64-asimddp_i8mm_sve_sve2"
+  },
+  "ort_version": "1.31.0",
+  "model_repo": "vllm-sr/mmbert32k-modality-router-merged",
+  "model_file_sha256": "8fa60a45b6d3baf67d58a21bae3c01fb67898d7ede9c911478e6301823c926c3",
+  "dataset": "vllm-sr/modality-routing-dataset:test",
+  "eval_rows": 756,
+  "calib_rows": 128,
+  "threshold": 0.7,
+  "positive_class": null,
+  "budget": {
+    "acc_drop_pts": 1.5,
+    "macroF1_drop_pts": 1.5,
+    "fpr_delta_pts": 1.0,
+    "agreement_min": 0.95
+  },
+  "baseline_fp32": {
+    "quality": {
+      "acc": 0.959,
+      "macroF1": 0.9616,
+      "ece": 0.0325,
+      "agreement_with_fp32": 1.0
+    },
+    "latency_ms_p50": {
+      "len32": 37.474,
+      "len128": 84.237,
+      "len512": 310.461
+    },
+    "size_mb": 1230.7
+  },
+  "variants": {
+    "dynamic": {
+      "file": "model_int8_dynamic.onnx",
+      "size_mb": 309.2,
+      "quality": {
+        "acc": 0.8876,
+        "macroF1": 0.875,
+        "ece": 0.0375,
+        "agreement_with_fp32": 0.9048
+      },
+      "latency_ms_p50": {
+        "len32": 23.6,
+        "len128": 56.168,
+        "len512": 210.064
+      },
+      "checks": {
+        "acc_drop_pts": 7.14,
+        "macroF1_drop_pts": 8.66,
+        "agreement": 0.9048,
+        "pass": false
+      },
+      "quant": {
+        "method": "dynamic",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "activation_type": "dynamic",
+        "calibrated": false
+      }
+    },
+    "static_minmax_all": {
+      "file": "model_int8_minmax_all.onnx",
+      "size_mb": 309.9,
+      "quality": {
+        "acc": 0.4233,
+        "macroF1": 0.3227,
+        "ece": 0.2876,
+        "agreement_with_fp32": 0.4444
+      },
+      "latency_ms_p50": {
+        "len32": 38.619,
+        "len128": 75.479,
+        "len512": 250.126
+      },
+      "checks": {
+        "acc_drop_pts": 53.57,
+        "macroF1_drop_pts": 63.89,
+        "agreement": 0.4444,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 0
+      }
+    },
+    "static_no_mlp": {
+      "file": "model_int8_no_mlp.onnx",
+      "size_mb": 484.7,
+      "quality": {
+        "acc": 0.4153,
+        "macroF1": 0.3248,
+        "ece": 0.2931,
+        "agreement_with_fp32": 0.4312
+      },
+      "latency_ms_p50": {
+        "len32": 42.997,
+        "len128": 90.906,
+        "len512": 325.304
+      },
+      "checks": {
+        "acc_drop_pts": 54.37,
+        "macroF1_drop_pts": 63.68,
+        "agreement": 0.4312,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 44
+      }
+    },
+    "static_no_attn": {
+      "file": "model_int8_no_attn.onnx",
+      "size_mb": 465.2,
+      "quality": {
+        "acc": 0.4233,
+        "macroF1": 0.3309,
+        "ece": 0.2872,
+        "agreement_with_fp32": 0.4418
+      },
+      "latency_ms_p50": {
+        "len32": 45.04,
+        "len128": 91.493,
+        "len512": 313.996
+      },
+      "checks": {
+        "acc_drop_pts": 53.57,
+        "macroF1_drop_pts": 63.07,
+        "agreement": 0.4418,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 89
+      }
+    }
+  },
+  "model_revision": "d1876038582fe13cd05c825a56ebee80337adb39",
+  "dataset_revision": "b9ac00a02fbcb7c95e9de65b5414092370c6c829",
+  "calibration": {
+    "split": "validation",
+    "samples": 128,
+    "selection": "pandas sample(random_state=0)",
+    "max_len": 512,
+    "padding": "fixed_length"
+  },
+  "run": {
+    "intra_op_threads": 16,
+    "eval_batch_size": 8,
+    "eval_max_len": 0,
+    "bench_lengths": [
+      32,
+      128,
+      512
+    ],
+    "bench_iters": 50,
+    "bench_warmup": 20
+  }
+}
