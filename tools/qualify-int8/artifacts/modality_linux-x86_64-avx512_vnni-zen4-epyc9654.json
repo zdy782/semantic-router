@@ -1,0 +1,180 @@
+{
+  "issue": "vllm-project/semantic-router#3225",
+  "profile": "linux-x86_64-avx512_vnni-zen4-epyc9654",
+  "host": {
+    "platform": "Linux-6.6.0-132.0.0.111.oe2403sp3.x86_64-x86_64-with-glibc2.38",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "cpu_flags": "avx512_vnni avx512f avx2 vnni (verified present; full flag list pending regen)",
+    "cpu_feature_tags": "linux-x86_64-avx512_vnni_avx512f_avx2_vnni"
+  },
+  "ort_version": "1.31.0",
+  "model_repo": "vllm-sr/mmbert32k-modality-router-merged",
+  "model_file_sha256": "8fa60a45b6d3baf67d58a21bae3c01fb67898d7ede9c911478e6301823c926c3",
+  "dataset": "vllm-sr/modality-routing-dataset:test",
+  "eval_rows": 756,
+  "calib_rows": 128,
+  "threshold": 0.7,
+  "positive_class": null,
+  "budget": {
+    "acc_drop_pts": 1.5,
+    "macroF1_drop_pts": 1.5,
+    "fpr_delta_pts": 1.0,
+    "agreement_min": 0.95
+  },
+  "baseline_fp32": {
+    "quality": {
+      "acc": 0.959,
+      "macroF1": 0.9616,
+      "ece": 0.0325,
+      "agreement_with_fp32": 1.0
+    },
+    "latency_ms_p50": {
+      "len32": 31.343,
+      "len128": 79.271,
+      "len512": 318.028
+    },
+    "size_mb": 1230.7
+  },
+  "variants": {
+    "dynamic": {
+      "file": "model_int8_dynamic.onnx",
+      "size_mb": 309.2,
+      "quality": {
+        "acc": 0.8823,
+        "macroF1": 0.8652,
+        "ece": 0.0262,
+        "agreement_with_fp32": 0.8942
+      },
+      "latency_ms_p50": {
+        "len32": 24.26,
+        "len128": 100.519,
+        "len512": 343.221
+      },
+      "checks": {
+        "acc_drop_pts": 7.67,
+        "macroF1_drop_pts": 9.64,
+        "agreement": 0.8942,
+        "pass": false
+      },
+      "quant": {
+        "method": "dynamic",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "activation_type": "dynamic",
+        "calibrated": false
+      }
+    },
+    "static_minmax_all": {
+      "file": "model_int8_minmax_all.onnx",
+      "size_mb": 309.9,
+      "quality": {
+        "acc": 0.4127,
+        "macroF1": 0.3219,
+        "ece": 0.2998,
+        "agreement_with_fp32": 0.4325
+      },
+      "latency_ms_p50": {
+        "len32": 33.666,
+        "len128": 99.603,
+        "len512": 395.375
+      },
+      "checks": {
+        "acc_drop_pts": 54.63,
+        "macroF1_drop_pts": 63.97,
+        "agreement": 0.4325,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 0
+      }
+    },
+    "static_no_mlp": {
+      "file": "model_int8_no_mlp.onnx",
+      "size_mb": 484.7,
+      "quality": {
+        "acc": 0.4153,
+        "macroF1": 0.3293,
+        "ece": 0.2944,
+        "agreement_with_fp32": 0.4378
+      },
+      "latency_ms_p50": {
+        "len32": 36.138,
+        "len128": 126.998,
+        "len512": 503.4
+      },
+      "checks": {
+        "acc_drop_pts": 54.37,
+        "macroF1_drop_pts": 63.23,
+        "agreement": 0.4378,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 44
+      }
+    },
+    "static_no_attn": {
+      "file": "model_int8_no_attn.onnx",
+      "size_mb": 465.2,
+      "quality": {
+        "acc": 0.418,
+        "macroF1": 0.3247,
+        "ece": 0.3013,
+        "agreement_with_fp32": 0.4352
+      },
+      "latency_ms_p50": {
+        "len32": 35.145,
+        "len128": 103.976,
+        "len512": 467.714
+      },
+      "checks": {
+        "acc_drop_pts": 54.1,
+        "macroF1_drop_pts": 63.69,
+        "agreement": 0.4352,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 89
+      }
+    }
+  },
+  "model_revision": "d1876038582fe13cd05c825a56ebee80337adb39",
+  "dataset_revision": "b9ac00a02fbcb7c95e9de65b5414092370c6c829",
+  "calibration": {
+    "split": "validation",
+    "samples": 128,
+    "selection": "pandas sample(random_state=0)",
+    "max_len": 512,
+    "padding": "fixed_length"
+  },
+  "run": {
+    "intra_op_threads": 16,
+    "eval_batch_size": 8,
+    "eval_max_len": 0,
+    "bench_lengths": [
+      32,
+      128,
+      512
+    ],
+    "bench_iters": 50,
+    "bench_warmup": 20
+  }
+}
