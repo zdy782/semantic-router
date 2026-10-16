@@ -1,0 +1,194 @@
+{
+  "issue": "vllm-project/semantic-router#3225",
+  "profile": "linux-aarch64-sve2-i8mm-kunpeng920c",
+  "host": {
+    "platform": "Linux-6.6.0-145.0.3.144.oe2403sp2.aarch64-aarch64-with-glibc2.38",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "cpu_flags": "fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm jscvt fcma lrcpc dcpop sha3 sm3 sm4 asimddp sha512 sve asimdfhm dit uscat ilrcpc flagm ssbs sb dcpodp sve2 sveaes svepmull svebitperm svesha3 svesm4 flagm2 frint svei8mm svebf16 i8mm",
+    "cpu_feature_tags": "linux-aarch64-asimddp_i8mm_sve_sve2"
+  },
+  "ort_version": "1.31.0",
+  "model_repo": "vllm-sr/mmbert32k-jailbreak-detector-merged",
+  "model_file_sha256": "675260ac759fed21874874bdd439a5631b9897555bfec365179bfeb1c6ab950f",
+  "dataset": "vllm-sr/jailbreak-detection-dataset:test",
+  "eval_rows": 827,
+  "calib_rows": 128,
+  "threshold": 0.7,
+  "positive_class": 1,
+  "budget": {
+    "acc_drop_pts": 1.5,
+    "macroF1_drop_pts": 1.5,
+    "fpr_delta_pts": 1.0,
+    "agreement_min": 0.95
+  },
+  "baseline_fp32": {
+    "quality": {
+      "acc": 0.7267,
+      "macroF1": 0.7092,
+      "ece": 0.2327,
+      "agreement_with_fp32": 1.0,
+      "det@0.7": 0.4334,
+      "fpr@0.7": 0.0242
+    },
+    "latency_ms_p50": {
+      "len32": 32.711,
+      "len128": 85.246,
+      "len512": 307.858
+    },
+    "size_mb": 1230.7
+  },
+  "variants": {
+    "dynamic": {
+      "file": "model_int8_dynamic.onnx",
+      "size_mb": 309.2,
+      "quality": {
+        "acc": 0.7001,
+        "macroF1": 0.6797,
+        "ece": 0.2629,
+        "agreement_with_fp32": 0.9057,
+        "det@0.7": 0.4165,
+        "fpr@0.7": 0.0362
+      },
+      "latency_ms_p50": {
+        "len32": 37.998,
+        "len128": 79.409,
+        "len512": 256.111
+      },
+      "checks": {
+        "acc_drop_pts": 2.66,
+        "macroF1_drop_pts": 2.95,
+        "agreement": 0.9057,
+        "fpr_delta_pts": 1.2,
+        "pass": false
+      },
+      "quant": {
+        "method": "dynamic",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "activation_type": "dynamic",
+        "calibrated": false
+      }
+    },
+    "static_minmax_all": {
+      "file": "model_int8_minmax_all.onnx",
+      "size_mb": 309.8,
+      "quality": {
+        "acc": 0.48,
+        "macroF1": 0.4698,
+        "ece": 0.3362,
+        "agreement_with_fp32": 0.4341,
+        "det@0.7": 0.4092,
+        "fpr@0.7": 0.4903
+      },
+      "latency_ms_p50": {
+        "len32": 36.698,
+        "len128": 77.122,
+        "len512": 272.227
+      },
+      "checks": {
+        "acc_drop_pts": 24.67,
+        "macroF1_drop_pts": 23.94,
+        "agreement": 0.4341,
+        "fpr_delta_pts": 46.61,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 0
+      }
+    },
+    "static_no_mlp": {
+      "file": "model_int8_no_mlp.onnx",
+      "size_mb": 484.6,
+      "quality": {
+        "acc": 0.4994,
+        "macroF1": 0.4915,
+        "ece": 0.343,
+        "agreement_with_fp32": 0.4172,
+        "det@0.7": 0.3923,
+        "fpr@0.7": 0.4783
+      },
+      "latency_ms_p50": {
+        "len32": 69.359,
+        "len128": 187.085,
+        "len512": 361.151
+      },
+      "checks": {
+        "acc_drop_pts": 22.73,
+        "macroF1_drop_pts": 21.77,
+        "agreement": 0.4172,
+        "fpr_delta_pts": 45.41,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 44
+      }
+    },
+    "static_no_attn": {
+      "file": "model_int8_no_attn.onnx",
+      "size_mb": 465.1,
+      "quality": {
+        "acc": 0.5079,
+        "macroF1": 0.4916,
+        "ece": 0.3493,
+        "agreement_with_fp32": 0.445,
+        "det@0.7": 0.414,
+        "fpr@0.7": 0.5193
+      },
+      "latency_ms_p50": {
+        "len32": 41.882,
+        "len128": 92.905,
+        "len512": 322.069
+      },
+      "checks": {
+        "acc_drop_pts": 21.88,
+        "macroF1_drop_pts": 21.76,
+        "agreement": 0.445,
+        "fpr_delta_pts": 49.51,
+        "pass": false
+      },
+      "quant": {
+        "method": "static_qdq",
+        "calibrate_method": "minmax",
+        "activation_type": "QUInt8",
+        "weight_type": "QInt8",
+        "per_channel": true,
+        "calibrated": true,
+        "nodes_excluded": 89
+      }
+    }
+  },
+  "model_revision": "6a661694b9f46ca2f51b92f5874f9e0aad2915c4",
+  "dataset_revision": "7271d4e514a49aa6e89a77d31d81a586e94582c2",
+  "calibration": {
+    "split": "validation",
+    "samples": 128,
+    "selection": "pandas sample(random_state=0)",
+    "max_len": 512,
+    "padding": "fixed_length"
+  },
+  "run": {
+    "intra_op_threads": 16,
+    "eval_batch_size": 8,
+    "eval_max_len": 0,
+    "bench_lengths": [
+      32,
+      128,
+      512
+    ],
+    "bench_iters": 50,
+    "bench_warmup": 20
+  }
+}
